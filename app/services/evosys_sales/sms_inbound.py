@@ -150,6 +150,16 @@ def _auto_answer(db: Session, s, opp: Opportunity, message_sid: str) -> Optional
     camp = db.get(EvoSysCampaign, st.campaign_id) if st is not None and st.campaign_id else None
     if not s.text_auto_reply:
         return None                       # off: a person drafts it from the lead
+    from app.services.evosys_sales import inbox as IB
+    from app.services.evosys_sales import booking_page as BP
+    if (db.query(EvoSysOutreachMessage).filter(EvoSysOutreachMessage.opportunity_id == opp.id,
+                                               EvoSysOutreachMessage.direction == "in",
+                                               EvoSysOutreachMessage.created_at > reply.created_at).first()) is not None:
+        return None                       # they sent more since: answer the newest one, once
+    if IB.recent_out(db, opp.id) is not None:
+        return None                       # something just went to them: never fire a second text on top
+    if BP.current(db, opp) is not None:
+        return None                       # already booked: Mike answers these himself
     background = True
     t = AI.text_reply(db, s, camp, opp, reply, conversation(db, opp.id), opp.owner_user_id or "system",
                       background=background)
@@ -169,6 +179,8 @@ def _auto_answer(db: Session, s, opp: Opportunity, message_sid: str) -> Optional
         return None
     to = O.e164(opp.phone)
     body = out["draft"]
+    if IB.duplicate_of(db, opp.id, body) is not None:
+        return None                       # they already got these exact words
     r = O._send_text(to, body, s)
     ok = bool(r.get("success"))
     db.add(EvoSysOutreachMessage(brand_sales_org_id=s.brand_sales_org_id, opportunity_id=opp.id, direction="out",

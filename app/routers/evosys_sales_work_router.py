@@ -505,6 +505,11 @@ def _send_text_reply(db: Session, c: Ctx, s, o, st, body: ReplyIn):
         raise HTTPException(422, "Write a message.")
     if len(text) > 640:
         raise HTTPException(422, "That is too long for a text (keep it under 640 characters).")
+    from app.services.evosys_sales import inbox as IB
+    dup = IB.duplicate_of(db, o.id, text)
+    if dup is not None:
+        raise HTTPException(409, "They already got this exact text (%s). Nothing was sent - change the wording "
+                                 "if you want to send something new." % IB.ct(dup.created_at))
     try:
         r = O._send_text(to, text, s)
     except Exception as e:  # noqa: BLE001

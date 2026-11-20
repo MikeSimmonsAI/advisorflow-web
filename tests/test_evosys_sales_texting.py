@@ -292,9 +292,17 @@ def test_with_ai_answers_off_nothing_is_sent_or_asked(db_session, brand, manager
 def test_ai_stops_after_three_answers_per_lead(db_session, brand, manager, monkeypatch):
     ans = {"category": "interested", "summary": "", "simple": True, "draft": "Great, let's talk: https://x.test"}
     o, fake, sent = _auto_world(db_session, brand, manager, monkeypatch, ans)
-    fake.answers = [dict(ans) for _ in range(4)]
+    fake.answers = [dict(ans, draft=d) for d in (
+        "Great! When is a good time for a short call? https://x.test",
+        "Yes, it costs you nothing at all for the first 30 days.",
+        "We line up businesses in your own service area for a walkthrough.",
+        "Happy to help - which cities do you cover most often?")]
+    from datetime import timedelta as _tdx
     for i in range(4):
         IN.handle(db_session, from_number="+12145550120", to_number=TEAM_NO, body="yes %d" % i, message_sid="SMz%d" % i)
+        for m in db_session.query(EvoSysOutreachMessage).filter_by(opportunity_id=o.id).all():
+            m.created_at = m.created_at - _tdx(minutes=30)          # spread them out like real replies
+        db_session.commit()
     assert len(sent) == 3
 
 

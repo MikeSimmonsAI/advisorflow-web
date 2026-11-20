@@ -246,7 +246,11 @@ OFFER_FACTS = (
     "which cities they cover and what services they want, so the appointments fit them. "
     "NEXT STEP: a short call with Mike so he learns where they like to work, what services they offer and what "
     "kind of customers they want. It is NOT free cleaning, and we do NOT hand out job addresses yet - first the call, "
-    "then we book the walkthroughs.")
+    "then we book the walkthroughs. "
+    "NEVER SAY (not approved): that the businesses are verified, pre-qualified, already requested cleaning, are "
+    "'actively looking', or are leads/contracts waiting for them; how many businesses we have; anything about our "
+    "address, references or how we make money. Say instead that we reach out to businesses in their area and work to "
+    "schedule a walkthrough for them.")
 
 TEXT_REPLY_SYSTEM = (
     "A cleaning business answered EvoSys Pro's text. " + OFFER_FACTS + " "
@@ -255,14 +259,57 @@ TEXT_REPLY_SYSTEM = (
     "Using ONLY those facts and the JSON given, return JSON {\"category\": one of " + ", ".join(REPLY_CATEGORIES) + ", "
     "\"summary\": \"what they said, one sentence IN ENGLISH\", \"draft\": \"the text to send back\", "
     "\"draft_english\": \"the same draft in English (only when the draft is in Spanish)\", \"simple\": true|false}. "
+    "READ facts.conversation FIRST (oldest to newest; from 'us' or 'them'). Never ask for anything they already "
+    "told us (cities, areas, services, property types, language) - if they told us, name it back briefly instead. "
+    "Never repeat a pitch or sentence we already sent them; if they already heard the offer, don't explain it "
+    "again - only answer what is new. "
     "The draft: plain and friendly, from Mike, written ONLY in facts.reply_language, answers each thing they asked "
-    "directly, and ends by asking which areas they serve / what properties they want and offering the short call "
-    "with facts.booking_link. facts.style_examples are answers Mike wrote himself - follow their tone, structure "
+    "directly. Only if facts.booked is empty and we don't know their areas yet: end by asking which areas they serve "
+    "/ what properties they want; offer the short call with facts.booking_link only if facts.booked is empty. If "
+    "facts.booked is set, they already have a call at that time - never offer another one. facts.style_examples are answers Mike wrote himself - follow their tone, structure "
     "and length closely. Keep the words (not counting the link) under 600 characters. Never invent prices, numbers of contracts, results, guarantees, dates or anything not in "
     "the facts; say 'our goal is' rather than promising. simple=true ONLY when they said yes / are interested, or "
     "asked whether it is free / what the catch is / how it works / what this is / whether it is real - things the "
     "facts fully answer. simple=false for anything else: angry, not interested, wrong number, asks for a price after "
-    "the 30 days, asks something the facts don't answer, or you are unsure.")
+    "the 30 days, asks something the facts don't answer, asks how we find or verify the businesses, asks for a "
+    "website, written details, an email, our address or legal name, references or how we make money, or you are unsure.")
+
+_PREF_RE = re.compile(r"\b(prefer|preferred|prefiero|speak|hablo|habla|language|idioma|my english|mi ingl)", re.I)
+# Things only Mike can answer: never auto-sent, always waits for him.
+PERSON_ONLY_RE = re.compile(
+    r"\b(website|web site|sitio web|p[aá]gina web|in writing|written|email|correo|address|direcci[oó]n|legal name|"
+    r"references?|referencias|verif|how do you (find|get|generate|choose)|where do you (find|get)|"
+    r"how do you make money|what's in it for you|catch|contract|contrato|insurance|seguro)\b", re.I)
+# Claims we may not make.
+CLAIM_RE = re.compile(r"\b(verified|pre-?qualified|actively looking|already (requested|asked for)|guarantee[ds]?|"
+                      r"verificad[oa]s|garantiza\w*)\b", re.I)
+
+
+def preferred_language(conversation: list, latest_text: str) -> str:
+    """The language to answer in: one they asked for in this conversation,
+    otherwise the language of their newest text."""
+    for m in reversed(conversation or []):
+        if m.get("from") != "them":
+            continue
+        t = (m.get("text") or "").lower()
+        if _PREF_RE.search(t):
+            if re.search(r"spanish|español|espanol", t):
+                return "Spanish"
+            if re.search(r"english|inglés|ingles", t) and not re.search(r"english is not|my english|mi ingl", t):
+                return "English"
+    return "Spanish" if looks_spanish(latest_text) else "English"
+
+
+def _too_close(draft: str, conversation: list) -> bool:
+    """True when the draft is nearly a text we already sent them."""
+    import difflib
+    d = re.sub(r"https?://\S+", "", draft or "").lower()
+    for m in conversation or []:
+        if m.get("from") == "us":
+            o = re.sub(r"https?://\S+", "", m.get("text") or "").lower()
+            if o and difflib.SequenceMatcher(None, d, o).ratio() >= 0.8:
+                return True
+    return False
 
 AUTO_CATEGORIES = ("interested", "question")
 _ES_WORDS = {"hola", "gracias", "que", "qué", "por", "para", "como", "cómo", "cuánto", "cuanto", "sí", "si", "pues",
@@ -361,10 +408,17 @@ def text_reply(db: Session, settings, campaign, opp, reply_msg, conversation: li
                force: bool = False, background: bool = False) -> EvoSysAITask:
     """Summarise a text reply and draft the answer. `output.auto_ok` says the
     rules allow it to go out by itself; the caller decides."""
-    lang = "Spanish" if looks_spanish(reply_msg.body) else "English"
-    facts = {"their_text": (reply_msg.body or "")[:1500], "reply_language": lang,
+    lang = preferred_language(conversation, reply_msg.body)
+    booked = None
+    try:
+        from app.services.evosys_sales import booking_page as BP
+        a = BP.current(db, opp)
+        booked = BP._ct(a.starts_at) if a is not None else None
+    except Exception:                                                # noqa: BLE001
+        booked = None
+    facts = {"their_text": (reply_msg.body or "")[:1500], "reply_language": lang, "booked": booked or "",
              "their_company": text_name(opp.company_name),
-             "their_name": first_names(opp.contact_name), "conversation": conversation[-8:],
+             "their_name": first_names(opp.contact_name), "conversation": conversation[-12:],
              "examples": approved_examples(db, opp.brand_sales_org_id, lang),
              "style_examples": [str(x)[:1200] for x in (settings.reply_examples or []) if str(x).strip()][:6],
              "booking_link": _lead_booking_link(settings, campaign, opp),
@@ -377,8 +431,14 @@ def text_reply(db: Session, settings, campaign, opp, reply_msg, conversation: li
         if MONEY_RE.search(draft):
             needs.append("The draft names a price - Mike answers pricing.")
             draft = ""
-        if re.search(r"\bguarantee", draft, re.I):
-            needs.append("The draft promises a guarantee - check it.")
+        if CLAIM_RE.search(draft):
+            needs.append("The draft makes a claim we haven't approved (verified / actively looking / guarantee) - check it.")
+        if PERSON_ONLY_RE.search(reply_msg.body or ""):
+            needs.append("They asked something only you can answer (website, details in writing, how we find businesses...).")
+        if draft and _too_close(draft, conversation):
+            needs.append("The draft repeats a text they already got - write something new.")
+        if booked and cat not in ("unsubscribe", "not_interested"):
+            needs.append("They're already booked (%s) - answer this one yourself." % booked)
         if cat in ("unsubscribe", "not_interested"):
             needs.append("They don't want this - no answer drafted.")
             draft = ""
