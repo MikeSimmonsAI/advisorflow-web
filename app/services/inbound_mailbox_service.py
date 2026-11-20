@@ -586,13 +586,13 @@ def record_bounce(db: Session, org_ids: List[str], addresses: List[str], receive
     msg.bounced_at = received
     msg.error = ("%s%s" % (_b.LABELS[kind], (": %s" % verdict["reason"]) if verdict.get("reason") else ""))[:1000]
     flag = kind in _b.FLAG_ADDRESS
-    if kind == _b.EXPIRED:
+    if kind in _b.REPEAT_FLAG_AFTER:
         prior = (db.query(func.count(EmailMessage.id))
                  .filter(EmailMessage.lead_id == lead.id, EmailMessage.id != msg.id,
-                         EmailMessage.bounce_type == _b.EXPIRED,
+                         EmailMessage.bounce_type == kind,
                          func.lower(func.coalesce(EmailMessage.to_email, lead.email)) == (lead.email or "").lower())
                  .scalar() or 0)
-        flag = prior + 1 >= _b.EXPIRED_FLAG_AFTER
+        flag = prior + 1 >= _b.REPEAT_FLAG_AFTER[kind]
     if flag and reclassify:
         # Re-reading an old notice must not undo a person's correction.
         from app.models.models import AuditLogEntry

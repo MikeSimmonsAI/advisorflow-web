@@ -217,12 +217,12 @@ def notify_owner(s, line: str, subject: str, html_body: str) -> None:
             log.exception("[evosys-sales] owner alert text failed")
     if emails:
         try:
-            from app.services.email_service import send_email_via_provider
+            from app.services import staff_alert_email
             from app.services.evosys_sales.outreach import _Sender
             for em in emails:
                 try:
-                    send_email_via_provider(em, subject, html_body,
-                                            org=_Sender(s), message_type="notification", sensitivity="none")
+                    staff_alert_email.send(em, subject, html_body,
+                                           org=_Sender(s), message_type="notification", sensitivity="none")
                 except Exception:                           # noqa: BLE001
                     log.exception("[evosys-sales] alert email to one recipient failed")
         except Exception:                                   # noqa: BLE001

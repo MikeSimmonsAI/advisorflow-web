@@ -90,6 +90,24 @@ def test_soft_bounce_does_not_flag_and_unknown_ids_are_acknowledged(client, monk
     assert client.post("/email/events/resend", content=raw, headers=h).json()["ignored"] == "unknown email"
 
 
+def test_a_second_transient_bounce_flags_the_address(client, monkeypatch, db_session, sent, sample_advisor):
+    """2026-11-20: an @icloud.coom address bounced "transient" twice and kept
+    being mailed. The first transient bounce never flags; the second does."""
+    lead, msg = sent
+    monkeypatch.setenv("RESEND_WEBHOOK_SECRET", "whsec_" + SECRET)
+    raw, h = _signed({"type": "email.bounced", "data": {"email_id": "re_123", "bounce": {"type": "Transient"}}})
+    client.post("/email/events/resend", content=raw, headers=h)
+    db_session.refresh(lead)
+    assert lead.manual_flag is None
+    db_session.add(EmailMessage(lead_id=lead.id, sender_id=sample_advisor.id, subject="s2", body_html="b",
+                                provider_message_id="re_456", status="sent"))
+    db_session.commit()
+    raw, h = _signed({"type": "email.bounced", "data": {"email_id": "re_456", "bounce": {"type": "Transient"}}})
+    r = client.post("/email/events/resend", content=raw, headers=h).json()
+    db_session.refresh(lead)
+    assert lead.manual_flag == "bad_email" and "flagged" in r["action"]
+
+
 def test_unsubscribe_link_is_signed_and_a_get_changes_nothing(client, db_session, sent):
     from app.services.programs.unsubscribe import make_token, read_token
     lead, _ = sent

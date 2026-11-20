@@ -37,6 +37,16 @@ FLAG_ADDRESS = (PERMANENT, REJECTED)
 # SECOND notice for the same address: Wilbert's mail expired four times
 # (Oct 25 - Oct 31) and kept being sent.
 EXPIRED_FLAG_AFTER = 2
+# The same goes for a filter that refuses us EVERY time (2026-11-20): one
+# address on a mistyped domain was "blocked" six times in two weeks and kept
+# being sent. One block is the receiving side's mood; three in a row for one
+# address is the address. Texts are untouched.
+BLOCKED_FLAG_AFTER = 3
+REPEAT_FLAG_AFTER = {EXPIRED: EXPIRED_FLAG_AFTER, BLOCKED: BLOCKED_FLAG_AFTER}
+# Email-service (Resend) bounces it calls "transient": a second one for the
+# same family's address flags it (an @icloud.coom address bounced "transient"
+# twice and stayed live).
+PROVIDER_TRANSIENT_FLAG_AFTER = 2
 
 LABELS = {
     PERMANENT: "Address does not exist",
