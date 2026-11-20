@@ -145,7 +145,7 @@ class ClientGrowthProposal(Base):
     __tablename__ = "client_growth_proposals"
 
     id = Column(String, primary_key=True, default=gen_uuid)
-    opportunity_id = Column(String, ForeignKey("opportunities.id"), nullable=False, index=True)
+    opportunity_id = Column(String, ForeignKey("opportunities.id", ondelete="CASCADE"), nullable=False, index=True)
     token_hash = Column(String(64), nullable=False, unique=True)
     html = Column(Text, nullable=False)
     expires_at = Column(DateTime, nullable=False)
