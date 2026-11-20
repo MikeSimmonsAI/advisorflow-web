@@ -173,19 +173,10 @@ def overview(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     booked = _booked_ids(db, c.bso)
     now = datetime.utcnow()
     week = now - timedelta(days=7)
-    replies = (db.query(EvoSysOutreachMessage).filter(EvoSysOutreachMessage.opportunity_id.in_(ids),
-                                                     EvoSysOutreachMessage.direction == "in",
-                                                     EvoSysOutreachMessage.created_at >= week)
-               .order_by(EvoSysOutreachMessage.created_at.desc()).limit(20).all()) if ids else []
-    # Only replies nobody has answered yet: no email from us to that lead after it.
-    answered_after = {}
-    if ids:
-        for oid, at in (db.query(EvoSysOutreachMessage.opportunity_id, func.max(EvoSysOutreachMessage.created_at))
-                        .filter(EvoSysOutreachMessage.opportunity_id.in_(ids), EvoSysOutreachMessage.direction == "out",
-                                EvoSysOutreachMessage.actor_user_id.isnot(None))
-                        .group_by(EvoSysOutreachMessage.opportunity_id).all()):
-            answered_after[oid] = at
-    replies = [m for m in replies if not (answered_after.get(m.opportunity_id) and answered_after[m.opportunity_id] > m.created_at)]
+    from app.services.evosys_sales import inbox as IB
+    opted = {oid for oid, x in states.items() if x.opted_out_at}
+    groups = IB.group(db, ids, opted, week)
+    replies = [m for m, _ in groups["needs_you"]]
     by_id = {o.id: o for o in leads}
     working = [o for o in leads if o.stage in O.WORKING_STAGES]
     to_call = [o for o in working if not O._has_email(o) and o.id not in booked
@@ -201,9 +192,18 @@ def overview(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
                    "with_email": sum(1 for o in working if O._has_email(o)),
                    "replied": sum(1 for x in states.values() if x.replied_at),
                    "booked": sum(1 for o in leads if o.id in booked),
-                   "sent_today": sent_today, "to_call": len(to_call)},
+                   "sent_today": sent_today, "to_call": len(to_call),
+                   "needs_you": len(groups["needs_you"]), "handled": len(groups["handled"]),
+                   "opted_out": len(groups["opted_out"]),
+                   "upcoming_calls": sum(1 for a in upcoming if a.status == "scheduled" and a.starts_at >= now)},
+        # one row per business; STOPs and already-answered texts never land here
         "replies": [dict(_msg(m), lead=_row(by_id[m.opportunity_id], states.get(m.opportunity_id)))
                     for m in replies if m.opportunity_id in by_id],
+        "handled": [dict(_msg(m), lead=_row(by_id[m.opportunity_id], states.get(m.opportunity_id)),
+                         answer=dict(_msg(a), sent_by=IB.who_sent(a)))
+                    for m, a in groups["handled"][:30] if m.opportunity_id in by_id],
+        "opted_out": [dict(_msg(m), lead=_row(by_id[m.opportunity_id], states.get(m.opportunity_id)))
+                      for m, _ in groups["opted_out"][:30] if m.opportunity_id in by_id],
         "to_call": [_row(o, states.get(o.id)) for o in to_call[:15]],
         "appointments": [_appt(a, by_id) for a in upcoming],
         "outreach": {"sending_on": bool(s.sending_on), "approved": s.approved_at is not None,
