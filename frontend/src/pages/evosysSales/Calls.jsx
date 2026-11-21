@@ -6,6 +6,9 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../../api/client'
 import { ctDay, ctTime, errText, initials, Toast } from './Inbox'
 
+// Times from the server may or may not end in Z; only add it when no zone is given.
+const utc = v => (!v || /([zZ]|[+-]\d\d:?\d\d)$/.test(v)) ? v : v + 'Z'
+
 const API = '/sales/evosys'
 const BASE = '/program/evosys-sales'
 const TZS = [['America/Chicago', 'Central Time'], ['America/New_York', 'Eastern Time'], ['America/Denver', 'Mountain Time'],
@@ -67,9 +70,9 @@ export function CallsList() {
       <div className="v2-cards">
         {(d?.calls || []).map(c => (
           <article key={c.id} className={'v2-card v2-callcard' + (c.status === 'cancelled' ? ' muted' : '')}>
-            <div className="v2-eyebrow">{ctDay(c.starts_at + 'Z')} · {ctTime(c.starts_at + 'Z')}–{ctTime(c.ends_at + 'Z')} CT{c.status === 'cancelled' ? ' · Cancelled' : ''}</div>
+            <div className="v2-eyebrow">{ctDay(utc(c.starts_at))} · {ctTime(utc(c.starts_at))}–{ctTime(utc(c.ends_at))} CT{c.status === 'cancelled' ? ' · Cancelled' : ''}</div>
             <h3 className="v2-serif">{c.opportunity_company || c.prospect?.company || c.prospect?.name || c.title}</h3>
-            <div className="v2-sub">{c.title}{c.video?.label ? ' · Zoom ' + c.video.label.toLowerCase() : ''}</div>
+            <div className="v2-sub">{c.title}{c.video?.label ? ' · ' + c.video.label : ''}</div>
             <div className="v2-row">
               {view !== 'past' && joinUrl(c) && <a className="v2-btn v2-primary" href={joinUrl(c)} target="_blank" rel="noopener noreferrer">Join Zoom</a>}
               {view === 'past' && c.status !== 'cancelled' && <Link className="v2-btn v2-primary" to={`${BASE}/appointments/${c.id}?tab=outcome`}>{c.outcome_state?.outcome ? 'Outcome: ' + c.outcome_state.outcome : 'Record outcome'}</Link>}
@@ -251,7 +254,7 @@ export function NewCall() {
 
 // ── detail ───────────────────────────────────────────────────────────────────
 function Reschedule({ call, onDone }) {
-  const startLocal = new Date(call.starts_at + 'Z')
+  const startLocal = new Date(utc(call.starts_at))
   const g = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(startLocal).map(p => [p.type, p.value]))
   const [date, setDate] = useState(`${g.year}-${g.month}-${g.day}`)
   const [time, setTime] = useState(`${g.hour}:${g.minute}`)
@@ -324,7 +327,7 @@ export function CallDetail() {
   if (!d) return <div className="v2-page"><div className="v2-skel card" /><div className="v2-skel card" /></div>
   const c = d.call
   const join = joinUrl(c)
-  const past = new Date(c.ends_at + 'Z') < new Date()
+  const past = new Date(utc(c.ends_at)) < new Date()
   const cancelled = c.status === 'cancelled'
   const done = t => { setMode(null); if (t) setToast(t); load() }
   const act = async (fn, ok) => { try { await fn(); setToast(ok); load() } catch (e) { setErr(errText(e)) } }
@@ -357,11 +360,11 @@ export function CallDetail() {
       {tab === 'overview' && (
         <article className="v2-card">
           <h2 className="v2-serif">{c.opportunity_company || c.prospect?.company || c.prospect?.name || c.title}</h2>
-          <div className="v2-eyebrow">{cancelled ? 'Cancelled' : past ? 'Done' : 'Booked'} · {ctDay(c.starts_at + 'Z')} · {ctTime(c.starts_at + 'Z')}–{ctTime(c.ends_at + 'Z')} CT</div>
+          <div className="v2-eyebrow">{cancelled ? 'Cancelled' : past ? 'Done' : 'Booked'} · {ctDay(utc(c.starts_at))} · {ctTime(utc(c.starts_at))}–{ctTime(utc(c.ends_at))} CT</div>
           <dl className="v2-dl">
             <dt>Calendar and host</dt><dd>{host} · {(c.participants || []).some(p => p.calendar_synced) ? 'on the connected calendar' : (c.participants || [])[0]?.sync_label || 'calendar not synced'}</dd>
             <dt>Zoom</dt><dd>{join ? 'Participant link ready' : (v.label || 'No Zoom meeting yet')}{v.needs_attention ? ' · needs attention' : ''}{!join && !past && !cancelled ? <> · <button className="v2-linkbtn" onClick={() => act(() => api.post(`/sales/appointments/${c.id}/video/retry`, {}), 'Zoom link requested again.')}>Try again</button></> : null}</dd>
-            <dt>Invitation</dt><dd>{c.prospect_invite_sent_at ? 'Sent ' + ctDay(c.prospect_invite_sent_at + 'Z') + ' ' + ctTime(c.prospect_invite_sent_at + 'Z') + (c.prospect?.email ? ' to ' + c.prospect.email : '') : c.prospect_invite_error ? 'Not delivered: ' + c.prospect_invite_error : c.prospect?.email ? 'Not sent' : 'No email on file'}</dd>
+            <dt>Invitation</dt><dd>{c.prospect_invite_sent_at ? 'Sent ' + ctDay(utc(c.prospect_invite_sent_at)) + ' ' + ctTime(utc(c.prospect_invite_sent_at)) + (c.prospect?.email ? ' to ' + c.prospect.email : '') : c.prospect_invite_error ? 'Not delivered: ' + c.prospect_invite_error : c.prospect?.email ? 'Not sent' : 'No email on file'}</dd>
             {c.outcome_state?.outcome && <><dt>Outcome</dt><dd>{c.outcome_state.outcome_label || c.outcome_state.outcome}</dd></>}
           </dl>
           <label className="v2-field"><span>Internal notes</span><textarea className="v2-input" rows={3} placeholder="Add notes and next steps for this call." value={notes} onChange={e => setNotes(e.target.value)} /></label>
