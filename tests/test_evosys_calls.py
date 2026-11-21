@@ -162,3 +162,41 @@ def test_past_list_filters_counts_search_and_pages(db_session, brand, manager, w
     s = R.calls_list(view="past", q="talked", c=c, db=db_session)
     assert s["total"] == 1 and s["counts"]["all"] == 1
     assert R.calls_list(view="past", q="214-555-0005", c=c, db=db_session)["total"] == 1  # phone digits
+
+
+def test_owner_can_delete_a_test_lead_and_calls_others_cannot(db_session, brand, manager, world):
+    from app.models.evosys_sales_models import EvoSysOutreachMessage
+    from app.models.sales_models import Opportunity, OpportunityEvent
+    c, _ = world
+    o = _lead(db_session, brand, manager, "ZZ test", phone="2145550901")
+    db_session.add(EvoSysOutreachMessage(brand_sales_org_id=brand.id, opportunity_id=o.id, direction="out",
+                                         channel="sms", to_address="+12145550901", body="hi", status="delivered"))
+    db_session.add(OpportunityEvent(opportunity_id=o.id, event_type="note", summary="x", occurred_at=datetime.utcnow()))
+    up = R.calls_book(R.CallBookIn(lead_id=o.id, starts_at=_soon(5), host_id=manager.id, send=False), c, db_session)
+    with pytest.raises(HTTPException) as e:                      # not the owner
+        R.leads_delete(o.id, c, db_session)
+    assert e.value.status_code == 403
+    manager.role = "god_admin"; db_session.commit()
+    with pytest.raises(HTTPException) as e:                      # upcoming call must be cancelled first
+        R.leads_delete(o.id, c, db_session)
+    assert e.value.status_code == 409
+    with pytest.raises(HTTPException) as e:
+        R.calls_delete(up["id"], c, db_session)
+    assert e.value.status_code == 409
+    db_session.get(SalesAppointment, up["id"]).status = "cancelled"; db_session.commit()
+    out = R.leads_delete(o.id, c, db_session)
+    assert out["deleted"]["calls"] == 1
+    db_session.expire_all()
+    assert db_session.get(Opportunity, o.id) is None and db_session.get(SalesAppointment, up["id"]) is None
+    assert db_session.query(EvoSysOutreachMessage).filter_by(opportunity_id=o.id).count() == 0
+    assert db_session.query(OpportunityEvent).filter_by(opportunity_id=o.id).count() == 0
+
+
+def test_owner_can_delete_a_past_call_only(db_session, brand, manager, world):
+    c, _ = world
+    manager.role = "god_admin"
+    a = SalesAppointment(brand_sales_org_id=brand.id, title="Old test", starts_at=datetime.utcnow() - timedelta(days=60),
+                         ends_at=datetime.utcnow() - timedelta(days=60, minutes=-30))
+    db_session.add(a); db_session.commit()
+    assert R.calls_delete(a.id, c, db_session)["ok"]
+    assert db_session.get(SalesAppointment, a.id) is None
