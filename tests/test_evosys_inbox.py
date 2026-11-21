@@ -157,3 +157,11 @@ def test_a_business_on_do_not_contact_is_never_in_needs_you(db_session, brand, m
     out = R.overview(R.Ctx(manager, brand.id, True), db_session)
     assert not [m for m in out["replies"] if m["lead"]["id"] == o.id]
     assert [m for m in out["opted_out"] if m["lead"]["id"] == o.id]
+
+
+def test_a_spanish_draft_always_comes_with_english(db_session, brand, manager, monkeypatch):
+    monkeypatch.setattr(AI, "translate", lambda texts, *a, **k: ["Hi! Yes, we can keep talking by text."])
+    out = _draft(db_session, brand, manager, monkeypatch, "Prefiero español, por favor. ¿Cuáles son los pasos?",
+                 {"category": "question", "summary": "", "simple": True,
+                  "draft": "¡Hola! Sí, podemos seguir por texto. ¿Qué zonas atiende?"})
+    assert out["draft"].startswith("¡Hola!") and out["draft_english"] == "Hi! Yes, we can keep talking by text."

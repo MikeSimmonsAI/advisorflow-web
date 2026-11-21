@@ -247,6 +247,7 @@ OFFER_FACTS = (
     "NEXT STEP: a short call with Mike so he learns where they like to work, what services they offer and what "
     "kind of customers they want. It is NOT free cleaning, and we do NOT hand out job addresses yet - first the call, "
     "then we book the walkthroughs. "
+    "OUR WEBSITE is https://evosyspro.live (EvoSys Pro). Never say we have no website. "
     "NEVER SAY (not approved): that the businesses are verified, pre-qualified, already requested cleaning, are "
     "'actively looking', or are leads/contracts waiting for them; how many businesses we have; anything about our "
     "address, references or how we make money. Say instead that we reach out to businesses in their area and work to "
@@ -453,6 +454,9 @@ def text_reply(db: Session, settings, campaign, opp, reply_msg, conversation: li
         out = {"category": cat, "summary": str(raw.get("summary") or "")[:400], "draft": draft,
                "needs_person": needs, "auto_ok": auto_ok, "used_offer": True,
                "draft_english": (str(raw.get("draft_english") or "")[:600] or None) if lang == "Spanish" and draft else None}
+        if lang == "Spanish" and draft and not out["draft_english"]:
+            # Mike doesn't read Spanish: every Spanish draft comes with English
+            out["draft_english"] = (translate([draft], opp.brand_sales_org_id, user_id, background) or [None])[0]
         return {"output": out, "status": "needs_person" if needs else "done"}
     return run(db, kind="text_reply", target_id=reply_msg.id, bso_id=opp.brand_sales_org_id, user_id=user_id,
                facts=facts, system=TEXT_REPLY_SYSTEM, check=check, force=force, background=background)
