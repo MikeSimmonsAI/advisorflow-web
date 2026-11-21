@@ -307,3 +307,29 @@
   .evs.v2 .v2-hours-day { grid-template-columns: 1fr; gap: 4px; }
   .evs.v2 .v2-hours-day > b { padding-top: 0; }
 }
+
+/* Calls list: search, past calls as short rows grouped by month */
+.evs.v2 .v2-listbar { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.evs.v2 .v2-listbar .v2-filters { margin: 0; }
+.evs.v2 .v2-search { max-width: 340px; flex: 1 1 240px; }
+.evs.v2 .v2-count { margin-left: 7px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.evs.v2 .v2-chip.on .v2-count { color: #6d531b; }
+.evs.v2 .v2-pastgroup { padding: 4px 16px 6px; margin-top: 12px; max-width: 900px; }
+.evs.v2 .v2-pastmonth { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 10px 0 2px; font-weight: 700; }
+.evs.v2 .v2-pastrow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); }
+.evs.v2 .v2-pastrow.muted { opacity: .65; }
+.evs.v2 .v2-pastmain { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; align-items: center; color: inherit; text-decoration: none; min-width: 0; }
+.evs.v2 .v2-pastmain:hover b { text-decoration: underline; }
+.evs.v2 .v2-pastwhen, .evs.v2 .v2-pastwho { display: grid; gap: 1px; min-width: 0; }
+.evs.v2 .v2-pastwhen b { font-size: 13px; }
+.evs.v2 .v2-pastwho b { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.evs.v2 .v2-pastwhen small, .evs.v2 .v2-pastwho small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.evs.v2 .v2-btn.v2-sm { padding: 6px 12px; min-height: 32px; font-size: 13px; }
+.evs.v2 .v2-pager { display: flex; gap: 12px; align-items: center; margin: 14px 0 24px; color: var(--muted); font-size: 13px; max-width: 900px; }
+@media (max-width: 640px) {
+  .evs.v2 .v2-search { max-width: none; }
+  .evs.v2 .v2-pastgroup { padding: 2px 12px 4px; }
+  .evs.v2 .v2-pastrow { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; }
+  .evs.v2 .v2-pastmain { grid-column: 1 / -1; grid-template-columns: 84px minmax(0, 1fr); gap: 8px; }
+  .evs.v2 .v2-pastrow .v2-tag { justify-self: start; }
+}

@@ -673,21 +673,60 @@ def _call_row(db: Session, a, c: Ctx) -> dict:
 
 # Not "/calls": evosys_bd_router already owns GET /sales/evosys/calls and is registered first.
 @router.get("/calls-list")
-def calls_list(view: str = "upcoming", c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
-    from app.models.scheduling_models import SalesAppointment
+def calls_list(view: str = "upcoming", c: Ctx = Depends(ctx), db: Session = Depends(get_db),
+               q: Optional[str] = None, show: str = "all", limit: int = 25, offset: int = 0):
+    """One page of calls. Past calls can be narrowed by what happened
+    (needs an outcome / happened / no-show / cancelled) and searched, with a
+    count for each, so a long history never has to be scrolled."""
+    from sqlalchemy import or_, and_, func
+    from app.models.scheduling_models import SalesAppointment as A
     from app.services import availability as av
     now = datetime.utcnow()
-    q = db.query(SalesAppointment).filter(SalesAppointment.brand_sales_org_id == c.bso)
+    limit = max(1, min(int(limit or 25), 100))
+    offset = max(0, int(offset or 0))
+    base = db.query(A).filter(A.brand_sales_org_id == c.bso)
     if view == "today":
         d = av.utc_to_local(now, "America/Chicago").date()
-        q = q.filter(SalesAppointment.starts_at >= av.local_to_utc(d, 0, "America/Chicago"),
-                     SalesAppointment.starts_at < av.local_to_utc(d + timedelta(days=1), 0, "America/Chicago"),
-                     SalesAppointment.status != "cancelled").order_by(SalesAppointment.starts_at)
+        base = base.filter(A.starts_at >= av.local_to_utc(d, 0, "America/Chicago"),
+                           A.starts_at < av.local_to_utc(d + timedelta(days=1), 0, "America/Chicago"),
+                           A.status != "cancelled")
+        order = A.starts_at.asc()
     elif view == "past":
-        q = q.filter(SalesAppointment.ends_at < now).order_by(SalesAppointment.starts_at.desc())
+        base = base.filter(A.ends_at < now)
+        order = A.starts_at.desc()
     else:
-        q = q.filter(SalesAppointment.ends_at >= now, SalesAppointment.status != "cancelled").order_by(SalesAppointment.starts_at)
-    return {"view": view, "calls": [_call_row(db, a, c) for a in q.limit(60).all()]}
+        base = base.filter(A.ends_at >= now, A.status != "cancelled")
+        order = A.starts_at.asc()
+    term = (q or "").strip()
+    if term:
+        like = "%" + term.replace("%", "").replace("_", "") + "%"
+        digits = "".join(ch for ch in term if ch.isdigit())
+        conds = [A.title.ilike(like), A.prospect_company.ilike(like), A.prospect_name.ilike(like),
+                 A.prospect_email.ilike(like)]
+        if len(digits) >= 3:
+            ph = func.coalesce(A.prospect_phone, "")
+            for ch in ("(", ")", "-", " ", ".", "+"):
+                ph = func.replace(ph, ch, "")
+            conds.append(ph.like("%" + digits[-10:] + "%"))
+        base = base.filter(or_(*conds))
+    shows = {
+        "needs": and_(A.status != "cancelled", A.outcome.is_(None)),
+        "happened": A.occurred.is_(True),
+        "no_show": A.outcome == "no_show",
+        "cancelled": or_(A.status == "cancelled", A.outcome.in_(("cancelled", "rescheduled"))),
+    }
+    counts = None
+    if view == "past":
+        counts = {"all": base.count()}
+        for k, cond in shows.items():
+            counts[k] = base.filter(cond).count()
+        if show in shows:
+            base = base.filter(shows[show])
+    total = base.count()
+    rows = base.order_by(order).offset(offset).limit(limit).all()
+    return {"view": view, "show": show if view == "past" else "all", "q": term, "total": total,
+            "offset": offset, "limit": limit, "counts": counts,
+            "calls": [_call_row(db, a, c) for a in rows]}
 
 
 @router.get("/calls/meta")

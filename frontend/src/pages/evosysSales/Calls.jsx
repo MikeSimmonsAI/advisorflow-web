@@ -49,39 +49,117 @@ function CallsNav({ here }) {
 const joinUrl = c => c?.video?.join_url || c?.meeting_url
 
 // ── list ─────────────────────────────────────────────────────────────────────
+const PAGE = 25
+const SHOWS = [['needs', 'Needs outcome'], ['happened', 'Happened'], ['no_show', 'No-show'], ['cancelled', 'Cancelled'], ['all', 'All']]
+const company = c => c.opportunity_company || c.prospect?.company || c.prospect?.name || c.title
+function pastState(c) {
+  if (c.status === 'cancelled') return ['Cancelled', 'grey']
+  const o = c.outcome_state || {}
+  if (o.outcome) return [o.outcome_label || o.outcome, o.outcome === 'no_show' ? 'evs-bad' : o.occurred ? 'evs-good' : 'grey']
+  return ['Needs outcome', '']
+}
+const monthOf = c => new Date(utc(c.starts_at)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'America/Chicago' })
+
 export function CallsList() {
   const [sp, setSp] = useSearchParams()
   const view = sp.get('view') || 'upcoming'
+  const show = view === 'past' ? (sp.get('show') || 'all') : 'all'
+  const q = sp.get('q') || ''
+  const [text, setText] = useState(q)
   const [d, setD] = useState(null)
+  const [more, setMore] = useState(false)
   const [err, setErr] = useState(null)
-  useEffect(() => { setD(null); api.get(`${API}/calls-list?view=${view}`).then(setD).catch(e => setErr(errText(e))) }, [view])
+  const setParam = (k, v) => { const n = new URLSearchParams(sp); if (v) n.set(k, v); else n.delete(k); setSp(n, { replace: true }) }
+  useEffect(() => { setText(q) }, [q])
+  useEffect(() => {                                              // search as you type, without a request per key
+    if (text === q) return undefined
+    const t = setTimeout(() => setParam('q', text.trim()), 300)
+    return () => clearTimeout(t)
+  }, [text]) // eslint-disable-line react-hooks/exhaustive-deps
+  const url = off => `${API}/calls-list?view=${view}&show=${show}&limit=${PAGE}&offset=${off}` + (q ? '&q=' + encodeURIComponent(q) : '')
+  useEffect(() => { setD(null); setErr(null); api.get(url(0)).then(setD).catch(e => setErr(errText(e))) }, [view, show, q]) // eslint-disable-line react-hooks/exhaustive-deps
+  const loadMore = async () => {
+    setMore(true)
+    try { const r = await api.get(url(d.calls.length)); setD({ ...r, calls: [...d.calls, ...r.calls] }) }
+    catch (e) { setErr(errText(e)) } finally { setMore(false) }
+  }
+  const groups = useMemo(() => {
+    const out = []
+    for (const c of d?.calls || []) {
+      const m = monthOf(c)
+      if (!out.length || out[out.length - 1][0] !== m) out.push([m, []])
+      out[out.length - 1][1].push(c)
+    }
+    return out
+  }, [d])
+  const empty = view === 'past' ? (q ? 'No past calls match "' + q + '"' : show === 'needs' ? 'Every past call has an outcome' : 'No past calls here')
+    : q ? 'No calls match "' + q + '"' : view === 'today' ? 'No calls today' : 'No calls coming up'
   return (
     <div className="v2-page">
       <Head title="Appointments" sub="Book, send, and manage Business Growth Calls." />
       <CallsNav here="list" />
-      <div className="v2-filters" role="tablist">
-        {[['today', 'Today'], ['upcoming', 'Upcoming'], ['past', 'Past']].map(([k, l]) => (
-          <button key={k} role="tab" aria-selected={view === k} className={'v2-filter' + (view === k ? ' on' : '')} onClick={() => setSp({ view: k })}>{l}</button>
-        ))}
+      <div className="v2-listbar">
+        <div className="v2-filters" role="tablist">
+          {[['today', 'Today'], ['upcoming', 'Upcoming'], ['past', 'Past']].map(([k, l]) => (
+            <button key={k} role="tab" aria-selected={view === k} className={'v2-filter' + (view === k ? ' on' : '')} onClick={() => setSp(q ? { view: k, q } : { view: k })}>{l}</button>
+          ))}
+        </div>
+        <input className="v2-input v2-search" type="search" value={text} onChange={e => setText(e.target.value)}
+               placeholder="Search business, name, phone or email" aria-label="Search calls" />
       </div>
+      {view === 'past' && (
+        <div className="v2-chips" role="tablist" aria-label="What happened">
+          {SHOWS.map(([k, l]) => (
+            <button key={k} role="tab" aria-selected={show === k} className={'v2-chip' + (show === k ? ' on' : '')} onClick={() => setParam('show', k === 'all' ? '' : k)}>
+              {l}{d?.counts ? <span className="v2-count">{d.counts[k]}</span> : null}
+            </button>
+          ))}
+        </div>
+      )}
       {err && <p className="v2-err">{err}</p>}
       {!d && !err && [0, 1].map(i => <div key={i} className="v2-skel card" />)}
-      {d && !d.calls.length && <div className="v2-card v2-empty"><b>{view === 'past' ? 'No past calls yet' : view === 'today' ? 'No calls today' : 'No calls coming up'}</b><span>Book one with “New appointment”.</span></div>}
-      <div className="v2-cards">
-        {(d?.calls || []).map(c => (
-          <article key={c.id} className={'v2-card v2-callcard' + (c.status === 'cancelled' ? ' muted' : '')}>
-            <div className="v2-eyebrow">{ctDay(utc(c.starts_at))} · {ctTime(utc(c.starts_at))}–{ctTime(utc(c.ends_at))} CT{c.status === 'cancelled' ? ' · Cancelled' : ''}</div>
-            <h3 className="v2-serif">{c.opportunity_company || c.prospect?.company || c.prospect?.name || c.title}</h3>
-            <div className="v2-sub">{c.title}{c.video?.label ? ' · ' + c.video.label : ''}</div>
-            <div className="v2-row">
-              {view !== 'past' && joinUrl(c) && <a className="v2-btn v2-primary" href={joinUrl(c)} target="_blank" rel="noopener noreferrer">Join Zoom</a>}
-              {view === 'past' && c.status !== 'cancelled' && <Link className="v2-btn v2-primary" to={`${BASE}/appointments/${c.id}?tab=outcome`}>{c.outcome_state?.outcome ? 'Outcome: ' + c.outcome_state.outcome : 'Record outcome'}</Link>}
-              <Link className="v2-btn" to={`${BASE}/appointments/${c.id}`}>Open appointment</Link>
-              {view === 'past' && <Link className="v2-btn" to={`${BASE}/appointments/${c.id}?tab=replays`}>View replays</Link>}
-            </div>
-          </article>
-        ))}
-      </div>
+      {d && !d.calls.length && <div className="v2-card v2-empty"><b>{empty}</b>{!q && view !== 'past' && <span>Book one with “New appointment”.</span>}</div>}
+      {d && view === 'past' && groups.map(([m, rows]) => (
+        <section key={m} className="v2-card v2-pastgroup">
+          <div className="v2-pastmonth" role="heading" aria-level="3">{m} · {rows.length} {rows.length === 1 ? 'call' : 'calls'}</div>
+          {rows.map(c => {
+            const [label, tone] = pastState(c)
+            const needs = label === 'Needs outcome'
+            return (
+              <div key={c.id} className={'v2-pastrow' + (c.status === 'cancelled' ? ' muted' : '')}>
+                <Link className="v2-pastmain" to={`${BASE}/appointments/${c.id}`}>
+                  <span className="v2-pastwhen"><b>{ctDay(utc(c.starts_at))}</b><small>{ctTime(utc(c.starts_at))}</small></span>
+                  <span className="v2-pastwho"><b>{company(c)}</b><small>{[c.prospect?.name, c.title?.split(/ [-·–] /)[0]].filter(Boolean).join(' · ')}</small></span>
+                </Link>
+                <span className={'v2-tag ' + tone}>{label}</span>
+                {needs ? <Link className="v2-btn v2-primary v2-sm" to={`${BASE}/appointments/${c.id}?tab=outcome`}>Record outcome</Link>
+                       : <Link className="v2-btn v2-sm" to={`${BASE}/appointments/${c.id}`}>Open</Link>}
+              </div>
+            )
+          })}
+        </section>
+      ))}
+      {d && view !== 'past' && (
+        <div className="v2-cards">
+          {d.calls.map(c => (
+            <article key={c.id} className="v2-card v2-callcard">
+              <div className="v2-eyebrow">{ctDay(utc(c.starts_at))} · {ctTime(utc(c.starts_at))}–{ctTime(utc(c.ends_at))} CT</div>
+              <h3 className="v2-serif">{company(c)}</h3>
+              <div className="v2-sub">{c.title}{c.video?.label ? ' · ' + c.video.label : ''}</div>
+              <div className="v2-row">
+                {joinUrl(c) && <a className="v2-btn v2-primary" href={joinUrl(c)} target="_blank" rel="noopener noreferrer">Join Zoom</a>}
+                <Link className="v2-btn" to={`${BASE}/appointments/${c.id}`}>Open appointment</Link>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+      {d && d.total > 0 && (
+        <div className="v2-pager">
+          <span>Showing {d.calls.length} of {d.total}</span>
+          {d.calls.length < d.total && <button className="v2-btn" disabled={more} onClick={loadMore}>{more ? 'Loading…' : `Show ${Math.min(PAGE, d.total - d.calls.length)} more`}</button>}
+        </div>
+      )}
     </div>
   )
 }

@@ -132,3 +132,33 @@ def test_default_host_is_the_signed_in_owner_not_the_newest_lead(db_session, bra
     assert CL.default_host_id(db_session, brand.id, manager) == manager.id
     outsider = _make_sales_user(db_session)                          # owns none: most leads wins
     assert CL.default_host_id(db_session, brand.id, outsider) == manager.id
+
+
+def test_past_list_filters_counts_search_and_pages(db_session, brand, manager, world):
+    c, _ = world
+    base = datetime.utcnow() - timedelta(days=40)
+
+    def past(i, company, **kw):
+        a = SalesAppointment(brand_sales_org_id=brand.id, title="Business Growth Call - " + company,
+                             prospect_company=company, prospect_phone="(214) 555-%04d" % i,
+                             starts_at=base + timedelta(hours=i), ends_at=base + timedelta(hours=i, minutes=30), **kw)
+        db_session.add(a)
+        return a
+    for i in range(30):
+        past(i, "Needs %02d" % i)
+    past(31, "Talked Co", outcome="completed", occurred=True, status="completed")
+    past(32, "Ghost Co", outcome="no_show", occurred=False)
+    past(33, "Called Off", status="cancelled")
+    db_session.commit()
+
+    r = R.calls_list(view="past", c=c, db=db_session)
+    assert r["counts"] == {"all": 33, "needs": 30, "happened": 1, "no_show": 1, "cancelled": 1}
+    assert r["total"] == 33 and len(r["calls"]) == 25                 # first page only
+    assert r["calls"][0]["prospect"]["company"] == "Called Off"        # newest first
+    more = R.calls_list(view="past", offset=25, c=c, db=db_session)
+    assert len(more["calls"]) == 8
+    assert [x["prospect"]["company"] for x in R.calls_list(view="past", show="no_show", c=c, db=db_session)["calls"]] == ["Ghost Co"]
+    assert R.calls_list(view="past", show="needs", c=c, db=db_session)["total"] == 30
+    s = R.calls_list(view="past", q="talked", c=c, db=db_session)
+    assert s["total"] == 1 and s["counts"]["all"] == 1
+    assert R.calls_list(view="past", q="214-555-0005", c=c, db=db_session)["total"] == 1  # phone digits
