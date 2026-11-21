@@ -2,7 +2,7 @@
 // conversation, the AI draft, and Call / Text / Book a call in one place.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { api, getCurrentUser } from '../../api/client'
+import { api } from '../../api/client'
 import CallPanel from './CallPanel'
 
 const API = '/sales/evosys'
@@ -19,11 +19,6 @@ export function ctWhen(iso) {
   const same = d.toLocaleDateString('en-US', CT) === now.toLocaleDateString('en-US', CT)
   return same ? ctTime(iso) : ctDay(iso)
 }
-function greeting() {
-  const h = Number(new Date().toLocaleString('en-US', { ...CT, hour: 'numeric', hour12: false }))
-  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
-}
-
 const SENT_BY = { ai: 'Sent by AI', person: 'Sent by Mike', booking: 'Booking confirmation', outside: 'Marked done', system: 'Sent' }
 const TAG = {
   pricing: 'Pricing question', question: 'Question', interested: 'Interested', not_interested: 'Not interested',
@@ -67,14 +62,14 @@ function Bubble({ m }) {
 function Draft({ lead, lastIn, saved, onSent, onDone }) {
   const [t, setT] = useState(saved && !saved.outcome ? saved : null)
   const [body, setBody] = useState(saved && !saved.outcome ? (saved.output?.draft || '') : '')
-  const [editing, setEditing] = useState(false)
+  const [tone, setTone] = useState('warm')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
-  useEffect(() => { setT(saved && !saved.outcome ? saved : null); setBody(saved && !saved.outcome ? (saved.output?.draft || '') : ''); setEditing(false); setErr(null) }, [saved, lastIn?.id])
-  const ask = async again => {
+  useEffect(() => { setT(saved && !saved.outcome ? saved : null); setBody(saved && !saved.outcome ? (saved.output?.draft || '') : ''); setErr(null) }, [saved, lastIn?.id])
+  const ask = async () => {
     if (!lastIn) return
     setBusy(true); setErr(null)
-    try { const r = await api.post(`${API}/messages/${lastIn.id}/assist${again ? '?again=true' : ''}`, {}); setT(r); setBody(r.output?.draft || '') }
+    try { const r = await api.post(`${API}/messages/${lastIn.id}/assist?again=true&tone=${tone}`, {}); if (r.status === 'failed' || !r.output?.draft) throw new Error('No new draft was available. You can edit your reply or try again.'); setT(r); setBody(r.output.draft) }
     catch (e) { setErr(errText(e)) } finally { setBusy(false) }
   }
   const send = async () => {
@@ -87,23 +82,26 @@ function Draft({ lead, lastIn, saved, onSent, onDone }) {
   return (
     <div className="v2-draft">
       <div className="v2-draft-head"><b>{t ? 'AI draft' : 'Your reply'}</b>{lang && <span className="v2-tag">{lang}</span>}</div>
-      {!t && lastIn && !body && <button className="v2-btn" disabled={busy} onClick={() => ask(false)}>{busy ? 'Drafting…' : 'Draft a reply'}</button>}
-      {(t || body || !lastIn) && (
-        <>
-          {editing || !t || !out.draft
-            ? <textarea className="v2-input" rows={3} value={body} onChange={e => setBody(e.target.value)} placeholder="Write a text…" aria-label="Your reply" />
-            : <div className="v2-draft-text">{body}</div>}
-          {out.draft_english && body === out.draft && <div className="v2-english">English · {out.draft_english}</div>}
-          <div className="v2-row">
-            <button className="v2-btn v2-primary" disabled={busy || !body.trim()} onClick={send}>{busy ? 'Sending…' : 'Send'}</button>
-            {t && out.draft && <button className="v2-btn" onClick={() => setEditing(!editing)}>{editing ? 'Done editing' : 'Edit'}</button>}
-            {lastIn && <button className="v2-btn" disabled={busy} onClick={() => ask(true)}>Rewrite</button>}
-            {lastIn && <button className="v2-btn" disabled={busy} onClick={onDone}>Mark done</button>}
-          </div>
-          {(out.needs_person || []).length > 0 && <div className="v2-why">AI paused for Mike · {out.needs_person[0]}</div>}
-          <div className="v2-hint">{body.length} characters · sends from the EvoSys Sales number</div>
-        </>
+      {lastIn && (
+        <div className="v2-tone">
+          <label htmlFor="inbox-reply-tone">Reply tone</label>
+          <select id="inbox-reply-tone" className="v2-input" value={tone} disabled={busy} onChange={e => setTone(e.target.value)}>
+            <option value="cold">Cold</option>
+            <option value="warm">Warm</option>
+            <option value="hot">Hot</option>
+            <option value="extremely_hot">Extremely hot</option>
+          </select>
+        </div>
       )}
+      <textarea className="v2-input" rows={3} value={body} disabled={busy} onChange={e => setBody(e.target.value)} placeholder="Write a text…" aria-label="Your reply" />
+      {out.draft_english && body === out.draft && <div className="v2-english">English · {out.draft_english}</div>}
+      <div className="v2-row">
+        <button className="v2-btn v2-primary" disabled={busy || !body.trim()} onClick={send}>{busy ? 'Sending…' : 'Send'}</button>
+        {lastIn && <button className="v2-btn" disabled={busy} onClick={ask}>{busy ? "Working…" : body ? "Rewrite draft" : "Draft a reply"}</button>}
+        {lastIn && <button className="v2-btn" disabled={busy} onClick={onDone}>Mark done</button>}
+      </div>
+      {(out.needs_person || []).length > 0 && <div className="v2-why">AI paused for Mike · {out.needs_person[0]}</div>}
+      <div className="v2-hint">{body.length} characters · sends from the EvoSys Sales number</div>
       {err && <p className="v2-err" role="alert">{err}</p>}
     </div>
   )
@@ -178,9 +176,9 @@ export default function Inbox() {
   }, [])
   useEffect(() => { load() }, [load])
   const lists = useMemo(() => ({ needs: data?.replies || [], handled: data?.handled || [], opted: data?.opted_out || [] }), [data])
-  const rows = lists[tab] || []
-  const user = getCurrentUser() || {}
-  const first = (user.full_name || 'there').split(' ')[0]
+  const [query, setQuery] = useState('')
+  const search = query.trim().toLowerCase()
+  const rows = (lists[tab] || []).filter(m => !search || [m.lead.company, m.lead.contact, m.lead.phone, m.body, m.translation, m.answer?.body].some(value => String(value ?? '').toLowerCase().includes(search)))
   const next = (data?.appointments || []).find(a => a.status === 'scheduled' && new Date(a.starts_at) > new Date())
   const pick = id => { const p = new URLSearchParams(sp); id ? p.set('c', id) : p.delete('c'); setSp(p) }
   const setTab = t => { const p = new URLSearchParams(sp); p.set('tab', t); p.delete('c'); setSp(p) }
@@ -189,22 +187,24 @@ export default function Inbox() {
   return (
     <div className="v2-page v2-inbox-page">
       <header className="v2-pagehead">
-        <h1>{greeting()}, {first}</h1>
+        <h1>Inbox</h1>
         <p>{data ? `${lists.needs.length} ${lists.needs.length === 1 ? 'person needs' : 'people need'} you` : 'Loading…'}{next ? ` · next call ${ctDay(next.starts_at)} ${ctTime(next.starts_at)} CT` : ''}</p>
       </header>
       <div className={'v2-inbox' + (open ? ' has-open' : '')}>
         <section className="v2-list" aria-label="Conversations">
+          <input type="search" className="v2-input v2-inbox-search" aria-label="Search conversations" placeholder="Search conversations" value={query} onChange={e => setQuery(e.target.value)} />
           <div className="v2-filters" role="tablist">
             {[['needs', 'Needs you'], ['handled', 'Handled'], ['opted', 'Opted out']].map(([k, l]) => (
               <button key={k} role="tab" aria-selected={tab === k} className={'v2-filter' + (tab === k ? ' on' : '')} onClick={() => setTab(k)}>{l} <b>{lists[k].length}</b></button>
             ))}
           </div>
+          <div className="v2-conversation-scroll">
           {!data && [0, 1, 2, 3].map(i => <div key={i} className="v2-skel row" />)}
           {data && !rows.length && (
             <div className="v2-empty">
               <div className="v2-empty-mark">✓</div>
-              <b>{tab === 'needs' ? "You're all caught up" : tab === 'handled' ? 'Nothing handled this week yet' : 'Nobody has opted out'}</b>
-              <span>{tab === 'needs' ? 'New replies that need you land here.' : ''}</span>
+              <b>{search ? "No matching conversations" : tab === 'needs' ? "You're all caught up" : tab === 'handled' ? 'Nothing handled this week yet' : 'Nobody has opted out'}</b>
+              <span>{!search && tab === 'needs' ? 'New replies that need you land here.' : ''}</span>
             </div>
           )}
           {rows.map(m => (
@@ -219,9 +219,10 @@ export default function Inbox() {
               {tab === 'needs' && <span className="v2-dot" aria-label="Needs you" />}
             </button>
           ))}
+          </div>
         </section>
         {open
-          ? <Thread id={open} onBack={() => pick(null)} onChanged={load} toast={setToastText} />
+          ? <Thread key={open} id={open} onBack={() => pick(null)} onChanged={load} toast={setToastText} />
           : <div className="v2-pane v2-pane-empty"><p>Pick a conversation.</p></div>}
       </div>
       <Toast text={toastText} onDone={() => setToastText(null)} />
