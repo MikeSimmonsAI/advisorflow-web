@@ -114,7 +114,7 @@
 .evs.v2 .v2-conv:hover { background: #fffdf8; }
 .evs.v2 .v2-conv.on { background: var(--gold-soft); border-left-color: var(--gold); }
 .evs.v2 .v2-conv.muted { opacity: .7; }
-.evs.v2 .v2-conv-main { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.evs.v2 .v2-conv-main { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; }
 .evs.v2 .v2-conv-top { display: flex; justify-content: space-between; gap: 8px; }
 .evs.v2 .v2-conv-top b { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 .evs.v2 .v2-conv-top small { flex: none; }
