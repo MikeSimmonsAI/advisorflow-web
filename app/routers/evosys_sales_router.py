@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import logging
 import re
 from datetime import date, datetime, timedelta
 from typing import Optional
@@ -26,6 +27,8 @@ from app.models.sales_models import STAGE_LABELS, Opportunity, OpportunityEvent
 from app.services import sales_access
 from app.services.evosys_sales import outreach as O
 from app.services.evosys_sales import logos as _logos
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sales/evosys", tags=["evosys-sales"])
 public_router = APIRouter(prefix="/evosys-sales-public", tags=["evosys-sales-public"])
@@ -798,6 +801,62 @@ def _brand_appt(db: Session, c: Ctx, appt_id: str):
     if a is None or a.brand_sales_org_id != c.bso:
         raise HTTPException(404, "Call not found.")
     return a
+
+
+# ── owner: permanently delete a lead or a call ───────────────────────────────
+# There was no way to remove test records. Owner only, and only when nothing
+# live hangs off the record: a booked call that hasn't happened has to be
+# cancelled first (that is what removes its Zoom room and calendar event).
+
+def _owner_only(c: Ctx):
+    from app.services.support_authority import is_god
+    if not is_god(c.user):
+        raise HTTPException(403, "Only the platform owner can permanently delete.")
+
+
+def _live_call(a) -> bool:
+    return a.status != "cancelled" and a.ends_at >= datetime.utcnow()
+
+
+@router.delete("/calls/{appt_id}")
+def calls_delete(appt_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    _owner_only(c)
+    a = _brand_appt(db, c, appt_id)
+    if _live_call(a):
+        raise HTTPException(409, "This call hasn't happened yet. Cancel it first so its Zoom and calendar event are removed.")
+    title = a.title
+    db.delete(a)
+    db.commit()
+    log.warning("[evosys sales] owner %s deleted call %s (%s)", c.user.id, appt_id, title)
+    return {"ok": True, "deleted": {"call": appt_id}}
+
+
+@router.delete("/leads/{opp_id}")
+def leads_delete(opp_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """The lead, its texts, calls, timeline and outreach, and its past or
+    cancelled calls. Refused while it has a booked upcoming call or a customer
+    launch on file."""
+    from app.models.scheduling_models import SalesAppointment
+    from app.models.implementation_models import Implementation
+    _owner_only(c)
+    o = _opp(db, c, opp_id)
+    if db.query(Implementation.id).filter(Implementation.opportunity_id == o.id).first() is not None:
+        raise HTTPException(409, "This lead has a customer launch on file, so it can't be deleted.")
+    appts = db.query(SalesAppointment).filter(SalesAppointment.opportunity_id == o.id).all()
+    if any(_live_call(a) for a in appts):
+        raise HTTPException(409, "This lead has an upcoming call. Cancel it first.")
+    name = o.company_name
+    for a in appts:
+        db.delete(a)
+    # The database removes everything else tied to the lead on its own; these are
+    # removed here too so the result doesn't depend on that setting.
+    from app.models.evosys_sales_models import EvoSysLead
+    for model in (EvoSysOutreachMessage, EvoSysOutreachState, OpportunityEvent, EvoSysLead):
+        db.query(model).filter(model.opportunity_id == o.id).delete(synchronize_session=False)
+    db.delete(o)
+    db.commit()
+    log.warning("[evosys sales] owner %s deleted lead %s (%s) and %d calls", c.user.id, opp_id, name, len(appts))
+    return {"ok": True, "deleted": {"lead": opp_id, "calls": len(appts)}}
 
 
 @router.get("/calls/{appt_id}")
