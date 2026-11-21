@@ -9,6 +9,16 @@ const OUTCOMES = [['talked', 'Talked'], ['voicemail', 'Left voicemail'], ['no_an
                   ['booked', 'Booked a call'], ['not_interested', 'Not interested'], ['wrong_number', 'Wrong number']]
 const LABEL = { connecting: 'Connecting…', ringing: 'Ringing…', open: 'Connected', ended: 'Call ended', failed: 'Call failed' }
 
+// Twilio's wording is for developers; say what the person can do instead.
+function plain(e) {
+  const code = e?.code, name = e?.name || '', msg = e?.message || ''
+  if (code === 31401 || code === 31208 || name === 'NotAllowedError' || /permission/i.test(name + msg))
+    return 'Your browser blocked the microphone. Allow microphone access for app.evosyspro.live, then press Call again.'
+  if (code === 31000 || code === 31005 || /network|connection/i.test(msg)) return 'The connection dropped. Check your internet and try again.'
+  if (code === 31486 || /busy/i.test(msg)) return 'Their line is busy.'
+  return 'The call could not go through. Try again in a moment.'
+}
+
 function fmtNum(n) {
   const d = String(n || '').replace(/\D/g, '').slice(-10)
   return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : n || ''
@@ -43,9 +53,9 @@ export default function CallPanel({ lead, onClose, onLogged }) {
         c.on('disconnect', () => { setState(s => (s === 'failed' ? s : 'ended')); clearInterval(tick.current); findRow() })
         c.on('cancel', () => { setState('ended'); clearInterval(tick.current); findRow() })
         c.on('reject', () => { setState('ended'); clearInterval(tick.current); findRow() })
-        c.on('error', e => { setErr(e?.message || 'The call failed.'); setState('failed'); clearInterval(tick.current) })
+        c.on('error', e => { setErr(plain(e)); setState('failed'); clearInterval(tick.current) })
       } catch (e) {
-        setErr(e?.name === 'NotAllowedError' ? 'Allow microphone access to call from here.' : (e?.message || 'The call could not start.'))
+        setErr(plain(e))
         setState('failed')
       }
     })()
