@@ -386,7 +386,7 @@ def _reply_msg(db: Session, c: Ctx, mid: str) -> EvoSysOutreachMessage:
 
 
 @router.post("/messages/{mid}/assist")
-def assist(mid: str, again: bool = False, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+def assist(mid: str, again: bool = False, tone: str | None = None, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     """Summarise a reply and draft an answer. Only for a reply that already
     stopped the follow-up (deterministic rules); nothing is sent."""
     s = _settings(db, c)
@@ -396,9 +396,11 @@ def assist(mid: str, again: bool = False, c: Ctx = Depends(ctx), db: Session = D
     if st is None or st.status == "active":
         raise HTTPException(409, "This lead's follow-up is still running; AI help is for replies that stopped it.")
     camp = db.get(EvoSysCampaign, st.campaign_id) if st.campaign_id else None
+    if tone is not None and (tone not in AI.REPLY_TONES or m.channel != "text"):
+        raise HTTPException(422, "Invalid text reply tone.")
     if m.channel == "text":
         from app.services.evosys_sales import sms_inbound as SI
-        t = AI.text_reply(db, s, camp, opp, m, SI.conversation(db, opp.id), c.user.id, force=again)
+        t = AI.text_reply(db, s, camp, opp, m, SI.conversation(db, opp.id), c.user.id, force=again or tone is not None, tone=tone)
         if t.status != "failed" and (t.output or {}).get("category"):
             m.label = m.label or (t.output or {}).get("category")
         db.commit()
