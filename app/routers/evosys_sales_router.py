@@ -622,6 +622,17 @@ def texting_check(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     return sms_setup.check(O.get_settings(db, c.bso))
 
 
+@router.get("/texting/audit")
+def texting_audit(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """What Twilio itself says about the EvoSys Sales number (read-only).
+    Owner (god) only: it reads provider logs across the platform account."""
+    from app.services.evosys_sales import number_audit
+    from app.services.support_authority import is_god
+    if not is_god(c.user):
+        raise HTTPException(403, "Only the platform owner can run the number audit.")
+    return number_audit.run(db, O.get_settings(db, c.bso))
+
+
 @router.post("/texting/connect-replies")
 def texting_connect(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     """Point the team number's incoming texts at this system's inbound webhook,
