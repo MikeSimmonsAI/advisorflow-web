@@ -38,11 +38,21 @@ def hosts(db: Session, bso: str) -> List[Dict]:
 
 
 def default_host_id(db: Session, bso: str, user: User) -> str:
-    """The person whose calendar the booking page books (lead owner), else the
-    signed-in person."""
-    o = (db.query(Opportunity).filter(Opportunity.brand_sales_org_id == bso, Opportunity.owner_user_id.isnot(None))
-         .order_by(Opportunity.created_at.desc()).first())
-    return o.owner_user_id if o is not None else user.id
+    """Whose calendar and hours the Calls screens use.
+
+    The signed-in person when they own any EvoSys Sales leads (the booking page
+    books each lead with its owner), else whoever owns the most leads. It used
+    to be "the owner of the newest lead", so one test lead owned by another
+    login made Settings show that login's hours instead of Mike's."""
+    from sqlalchemy import func
+    mine = db.query(Opportunity.id).filter(Opportunity.brand_sales_org_id == bso,
+                                           Opportunity.owner_user_id == user.id).first()
+    if mine is not None:
+        return user.id
+    row = (db.query(Opportunity.owner_user_id, func.count(Opportunity.id))
+           .filter(Opportunity.brand_sales_org_id == bso, Opportunity.owner_user_id.isnot(None))
+           .group_by(Opportunity.owner_user_id).order_by(func.count(Opportunity.id).desc()).first())
+    return row[0] if row is not None else user.id
 
 
 def check(db: Session, host: User, starts_at: datetime, minutes: int,

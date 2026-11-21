@@ -544,3 +544,24 @@ def test_issue_state_refuses_an_unknown_flow(db_session, sample_advisor):
     with pytest.raises(OAuthStateError):
         oauth_state_service.issue_state(db_session, provider=PROVIDER_GOOGLE,
                                         subject=sample_advisor, flow="whatever")
+
+
+# ══ RETURN PAGE ═════════════════════════════════════════════════════════════
+
+def test_evosys_sales_connect_returns_to_calls_settings(
+        client, sample_advisor, attacker_headers, google_exchange):
+    r = client.get("/calendar/connect", params={"back": "evosys-sales"}, headers=attacker_headers)
+    assert r.status_code == 200, r.text
+    state = _state_from(r.json()["authorization_url"])
+    done = client.get(GOOGLE_CALLBACK, params={"state": state, "code": "c"}, follow_redirects=False)
+    loc = done.headers["location"]
+    assert "/program/evosys-sales/appointments/settings?calendar_connected=true" in loc
+    assert google_exchange.calls == [sample_advisor.id]
+
+
+def test_an_unknown_back_value_falls_back_to_settings(
+        client, attacker_headers, google_exchange):
+    r = client.get("/calendar/connect", params={"back": "https://evil.example"}, headers=attacker_headers)
+    state = _state_from(r.json()["authorization_url"])
+    loc = client.get(GOOGLE_CALLBACK, params={"state": state, "code": "c"}, follow_redirects=False).headers["location"]
+    assert loc.endswith("/settings?calendar_connected=true") and "evil" not in loc

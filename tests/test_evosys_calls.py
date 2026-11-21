@@ -121,3 +121,14 @@ def test_moving_a_call_ignores_its_own_calendar_event(db_session, brand, manager
     assert moved["available"] is True
     other = R.calls_check(R.CallCheckIn(starts_at=t + timedelta(minutes=15), host_id=manager.id), c, db_session)
     assert other["available"] is False                       # a different booking still sees the clash
+
+
+def test_default_host_is_the_signed_in_owner_not_the_newest_lead(db_session, brand, manager, world):
+    """One test lead owned by another login must not swap whose hours Settings shows."""
+    other = _make_sales_user(db_session)
+    for i in range(3):
+        _lead(db_session, brand, manager, "Mine %d" % i, phone="21455507%02d" % i)
+    _lead(db_session, brand, other, "Newest, someone else's", phone="2145550799")
+    assert CL.default_host_id(db_session, brand.id, manager) == manager.id
+    outsider = _make_sales_user(db_session)                          # owns none: most leads wins
+    assert CL.default_host_id(db_session, brand.id, outsider) == manager.id
