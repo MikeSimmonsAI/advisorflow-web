@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { Suspense, useEffect, useState } from 'react'
 import { lazyPage } from './utils/lazyPage'
-import { isVoltHost } from './utils/voltDomain'
+import { isVoltHost, isCoverageHost } from './utils/voltDomain'
 import PageBoundary from './components/PageBoundary'
 import Layout from './components/Layout'
 import DemoBanner from './components/DemoBanner'
@@ -698,6 +698,7 @@ function ExecutiveRoute({ children }) {
  */
 function DomainHome() {
   const location = useLocation()
+  if (isCoverageHost()) return <ConsumerSite />
   if (isVoltHost()) return <Navigate to={{ pathname: '/volt', search: location.search, hash: location.hash }} replace />
   return <HomeRedirect />
 }
