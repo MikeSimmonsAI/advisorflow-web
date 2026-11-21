@@ -134,3 +134,13 @@ def test_a_draft_that_repeats_an_earlier_text_is_not_sent(db_session, brand, man
                  {"category": "interested", "summary": "", "simple": True, "draft": pitch + " https://x.test/2"},
                  convo=[("us", pitch + " https://x.test/1")])
     assert out["auto_ok"] is False and any("repeats" in n for n in out["needs_person"])
+
+
+def test_a_text_that_starts_with_stop_is_an_opt_out():
+    # Stacey, Nov 19: "STOP I DONT NEED ANYMORE SCAMS..." was not treated as STOP
+    from app.services.optout_parser import contains_hard_stop_language as f
+    for t in ("STOP I DONT NEED ANYMORE SCAMS", "Stop. Not interested", "stop please", "STOP", "Stopall"):
+        assert f(t), t
+    for t in ("can I stop by Friday?", "Stop by Friday at 3", "stop in tomorrow?", "Yes", "I will stop working at 5",
+              "stopping by later", "Stop over after lunch"):
+        assert not f(t), t
