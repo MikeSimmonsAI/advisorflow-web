@@ -178,3 +178,32 @@ def test_the_restarted_family_gets_text_1_in_the_re_engagement_wording(world, mo
         cs.run_due_cadences(db, now=FRI_9 + timedelta(minutes=35))       # never twice
     mine = [t for lid, t in sent if lid == L["never_reached"].id]
     assert len(mine) == 1 and "Still glad to help" in mine[0]
+
+
+def test_a_family_waits_for_14_quiet_days_and_a_finished_run(world):
+    """Owner, Nov 21: only a family that finished and has been quiet 14 days
+    starts over; anyone still in a run finishes first."""
+    db, prog = world["db"], world["prog"]
+    sci_rerun.ensure_staged(db, prog, now=BEFORE_FRI)
+    lid = world["leads"]["no_reply"].id
+    recent = datetime(2026, 11, 15, 16, 0)                              # 5 days before Friday
+    db.add(Message(lead_id=lid, sender_id=world["admin"].id, body="t4", sent_at=recent,
+                   send_source="cadence", delivery_status="delivered"))
+    db.commit()
+    with patch.object(sci_rerun, "_mode", lambda p, l: "text_email"):
+        out = sci_rerun.start_next(db, prog, world["admin"], 10, FRI_9, 10, now=FRI_9)
+    assert lid not in {o["lead_id"] for o in out}
+    m = db.query(ProgramRerunMember).filter_by(lead_id=lid).one()
+    assert m.status == "queued" and m.not_before == recent + timedelta(days=14)
+
+
+def test_families_who_finish_later_are_added_to_wait_their_turn(world):
+    db, prog = world["db"], world["prog"]
+    sci_rerun.ensure_staged(db, prog, now=BEFORE_FRI)
+    lid = world["leads"]["no_reply"].id
+    db.query(ProgramRerunMember).filter_by(lead_id=lid).delete()        # as if it joined the journey later
+    db.commit()
+    assert sci_rerun.top_up(db, prog, now=FRI_9)["added"] == 1
+    m = db.query(ProgramRerunMember).filter_by(lead_id=lid).one()
+    assert m.status == "queued" and m.priority > 100000
+    assert sci_rerun.top_up(db, prog, now=FRI_9)["added"] == 0          # once

@@ -40,6 +40,11 @@ CAMPAIGN = "re_engagement"
 ARCHIVE = 900
 # Friday Nov 20 2026, 9:00 AM Central (CST = UTC-6)
 NOT_BEFORE = datetime(2026, 11, 20, 15, 0)
+# Owner, Nov 21 2026: a family starts over only once its current run is
+# FINISHED and it has been quiet (nothing sent, no reply) for 14 days. Anyone
+# still partway through finishes first; anyone who finishes later is added to
+# the queue automatically (top_up) and starts when its 14 days are up.
+QUIET_DAYS = 14
 
 
 def _chunks(ids, n=500):
@@ -53,7 +58,7 @@ def _facts(db: Session, org_id: str, ids: List[str]) -> Dict:
     from app.models.program_models import ProgramConversation, ProgramResponse, ProgramSourceRecord
     from app.models.sms_recovery_models import SmsRecoveryItem
     f = {"leads": {}, "states": {}, "recs": {}, "texts": {}, "delivered": set(), "emailed": set(),
-         "replied": set(), "booked": set(), "human": set(), "held": set()}
+         "replied": set(), "booked": set(), "human": set(), "held": set(), "last_out": {}}
     for ch in _chunks(ids):
         f["leads"].update({l.id: l for l in db.query(Lead).filter(Lead.organization_id == org_id,
                                                                   Lead.id.in_(ch)).all()})
@@ -61,12 +66,19 @@ def _facts(db: Session, org_id: str, ids: List[str]) -> Dict:
         for r in db.query(ProgramSourceRecord).filter(ProgramSourceRecord.organization_id == org_id,
                                                       ProgramSourceRecord.lead_id.in_(ch)).all():
             f["recs"].setdefault(r.lead_id, []).append(r)
-        for lid, ds in db.query(Message.lead_id, Message.delivery_status).filter(Message.lead_id.in_(ch)):
+        for lid, ds, at in db.query(Message.lead_id, Message.delivery_status, Message.sent_at).filter(
+                Message.lead_id.in_(ch)):
             f["texts"][lid] = f["texts"].get(lid, 0) + 1
             if (ds or "").lower() == "delivered":
                 f["delivered"].add(lid)
-        f["emailed"].update(x for (x,) in db.query(EmailMessage.lead_id).filter(
-            EmailMessage.lead_id.in_(ch), EmailMessage.status == "sent"))
+            if at and (f["last_out"].get(lid) is None or at > f["last_out"][lid]):
+                f["last_out"][lid] = at
+        for lid, st_, at in db.query(EmailMessage.lead_id, EmailMessage.status, EmailMessage.sent_at).filter(
+                EmailMessage.lead_id.in_(ch)):
+            if st_ == "sent":
+                f["emailed"].add(lid)
+            if at and (f["last_out"].get(lid) is None or at > f["last_out"][lid]):
+                f["last_out"][lid] = at
         f["replied"].update(x for (x,) in db.query(ProgramResponse.lead_id).filter(
             ProgramResponse.organization_id == org_id, ProgramResponse.lead_id.in_(ch)))
         f["booked"].update(x for (x,) in db.query(BookingLink.lead_id).filter(
@@ -123,6 +135,53 @@ def group_of(f: Dict, lid: str) -> str:
             (f["texts"].get(lid) and lid not in f["delivered"]):
         return NEVER_REACHED
     return NO_REPLY
+
+
+def ready_at(f: Dict, lid: str, now: datetime) -> datetime:
+    """When this family may start over (owner, Nov 21): its run is finished
+    (no text journey still going) and QUIET_DAYS have passed since the last
+    thing we sent. A run still going is looked at again tomorrow."""
+    st = f["states"].get(lid)
+    if st is not None and (st.status or "") == "active" and (st.current_touch_number or 0) >= 1:
+        return now + timedelta(days=1)
+    last = f["last_out"].get(lid)
+    return max(NOT_BEFORE, (last + timedelta(days=QUIET_DAYS)) if last else NOT_BEFORE)
+
+
+def top_up(db: Session, prog, *, now: Optional[datetime] = None) -> Dict:
+    """Owner, Nov 21: every SCI family who did not reply gets the restart, not
+    only the ones queued on Nov 17. Adds each family that may start over and
+    is not queued yet, to wait for its own 14 quiet days. Sends nothing;
+    idempotent (one row per family per rerun)."""
+    from app.models.program_models import ProgramSourceRecord
+    from app.services import sms_programs
+    org = prog.organization_id
+    if not sms_programs.is_sci_org(db, org):
+        return {"skipped": "not SCI"}
+    now = now or datetime.utcnow()
+    have = {x for (x,) in db.query(ProgramRerunMember.lead_id).filter(
+        ProgramRerunMember.organization_id == org, ProgramRerunMember.rerun_key == RERUN_KEY)}
+    if not have:
+        return {"skipped": "not staged yet"}
+    ids = [x for (x,) in db.query(ProgramSourceRecord.lead_id).filter(
+        ProgramSourceRecord.organization_id == org, ProgramSourceRecord.lead_id.isnot(None),
+        ProgramSourceRecord.approved_to_send_at.isnot(None)).distinct() if x not in have]
+    if not ids:
+        return {"added": 0}
+    f = _facts(db, org, ids)
+    last_pri = db.query(ProgramRerunMember.priority).filter(
+        ProgramRerunMember.organization_id == org, ProgramRerunMember.rerun_key == RERUN_KEY).order_by(
+        ProgramRerunMember.priority.desc()).first()
+    pri = (last_pri[0] if last_pri else 0) + 1
+    added = 0
+    for lid in sorted(ids, key=lambda x: (f["last_out"].get(x) or datetime.max, x)):
+        if why_not(prog, f, lid):
+            continue
+        db.add(ProgramRerunMember(organization_id=org, rerun_key=RERUN_KEY, lead_id=lid, group=group_of(f, lid),
+                                  priority=200000 + pri + added, status=QUEUED, not_before=ready_at(f, lid, now)))
+        added += 1
+    db.commit()
+    return {"added": added}
 
 
 def ensure_staged(db: Session, prog, *, now: Optional[datetime] = None) -> Dict:
@@ -201,13 +260,18 @@ def start_next(db: Session, prog, user, n: int, first_at: datetime, spacing_minu
                                              ProgramRerunMember.status == QUEUED,
                                              ProgramRerunMember.not_before <= now)
          .order_by(ProgramRerunMember.priority))
-    for m in q.limit(n * 3 + 20).all():
+    for m in q.all():                          # a family deferred below never uses a place
         if len(out) >= n:
             break
         f = _facts(db, prog.organization_id, [m.lead_id])
         why = why_not(prog, f, m.lead_id)
         if why:
             m.status, m.reason = SKIPPED, why
+            db.commit()
+            continue
+        ready = ready_at(f, m.lead_id, now)
+        if ready > now:                  # still in its run, or not 14 days quiet yet: waits its turn
+            m.not_before = ready
             db.commit()
             continue
         lead = f["leads"][m.lead_id]

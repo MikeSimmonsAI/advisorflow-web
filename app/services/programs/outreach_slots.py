@@ -37,7 +37,12 @@ log = logging.getLogger(__name__)
 TZ = "America/Chicago"
 GRACE = timedelta(minutes=3)
 SEARCH_DAYS = 120
-DEFAULTS = {"open": "08:30", "close": "18:00", "new_every_minutes": 8, "followup_offset_minutes": 2}
+DEFAULTS = {"open": "08:30", "close": "18:00", "new_every_minutes": 8, "followup_offset_minutes": 2,
+            "followup_fill": False}
+# followup_fill (owner, Nov 21 - "full blast, no slow drip"): follow-up texts
+# may use EVERY minute between the new-family slots (not just one slot per
+# gap), so follow-ups keep up when new families go every few minutes. Still
+# one text per minute in total, never two at once.
 
 
 def _zone():
@@ -63,6 +68,7 @@ def config_from_policy(raw) -> Optional[Dict]:
     out.update({k: o[k] for k in DEFAULTS if k in o})
     out["new_every_minutes"] = max(1, int(out["new_every_minutes"]))
     out["followup_offset_minutes"] = max(1, min(out["new_every_minutes"] - 1, int(out["followup_offset_minutes"])))
+    out["followup_fill"] = bool(out.get("followup_fill"))
     return out
 
 
@@ -133,6 +139,8 @@ def _local(utc_naive: datetime) -> datetime:
 def day_slots(day, cfg: Dict, kind: str) -> List[datetime]:
     """Naive-UTC slot times of one kind on one local date (DST-safe)."""
     open_t, close_t = _t(cfg["open"]), _t(cfg["close"])
+    if kind == "followup" and cfg.get("followup_fill"):
+        return _fill_slots(day, cfg)
     step = timedelta(minutes=cfg["new_every_minutes"])
     off = timedelta(minutes=cfg["followup_offset_minutes"] if kind == "followup" else 0)
     z = _zone()
@@ -142,6 +150,20 @@ def day_slots(day, cfg: Dict, kind: str) -> List[datetime]:
     while at < close:
         out.append(_utc(at))
         at = at + step
+    return out
+
+
+def _fill_slots(day, cfg: Dict) -> List[datetime]:
+    """Every minute of the window that is not a new-family slot."""
+    z = _zone()
+    every = max(1, int(cfg["new_every_minutes"]))
+    at = datetime.combine(day, _t(cfg["open"])).replace(tzinfo=z)
+    close = datetime.combine(day, _t(cfg["close"])).replace(tzinfo=z)
+    out, i = [], 0
+    while at < close:
+        if i % every:
+            out.append(_utc(at))
+        at, i = at + timedelta(minutes=1), i + 1
     return out
 
 
