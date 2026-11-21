@@ -253,3 +253,44 @@
 .evs.v2 .v2-seqrules { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 18px; margin-top: 14px; }
 .evs.v2 .v2-seqrules div { display: grid; gap: 2px; border-top: 1px solid var(--line); padding-top: 8px; }
 .evs.v2 .v2-seqrules small { color: var(--muted); }
+
+/* Sales lead directory */
+.evs.v2 .evs-main:has(.evs-leads-directory) { max-width: none; }
+.evs-leads-directory { color: #162741; }
+.evs-leads-tabs, .evs-leads-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.evs-leads-toolbar .evs-search { flex: 1 1 280px; min-width: 0; }
+.evs-leads-toolbar .evs-groupsel { flex: 0 1 290px; min-width: 0; }
+.evs-leads-table { background: #fff; border: 1px solid #dce4ef; border-radius: 13px; }
+.evs-leads-columns, .evs-leads-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1.2fr) minmax(0, .95fr) minmax(0, 1fr) 146px;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 16px;
+}
+.evs-leads-columns { background: #edf2f8; border-radius: 12px 12px 0 0; color: #40536d; font-weight: 650; font-size: 13px; }
+.evs-leads-columns > :last-child { text-align: right; }
+.evs-leads-entry { border-top: 1px solid #e4eaf2; min-height: 72px; font-size: 14px; }
+.evs-leads-entry:nth-child(odd) { background: #f8fafd; }
+.evs-leads-entry:last-child { border-radius: 0 0 12px 12px; }
+.evs-leads-entry:hover, .evs-leads-entry:focus-within { background: #edf4ff; }
+.evs-leads-entry > div { min-width: 0; overflow-wrap: anywhere; }
+.evs-leads-entry small { display: block; font-size: 12px; color: #485e77; }
+.evs-leads-company { display: flex; align-items: center; gap: 10px; }
+.evs-leads-company > div { min-width: 0; }
+.evs-leads-company a { color: #173963; font-weight: 700; text-decoration: none; }
+.evs-leads-company a:hover { text-decoration: underline; }
+.evs-leads-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.evs-leads-status > * { white-space: normal; }
+.evs-leads-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.evs-leads-actions > :last-child { grid-column: 2; justify-content: center; }
+.evs-leads-actions .evs-act { min-height: 36px; }
+@media (max-width: 1120px) {
+  .evs-leads-table { display: grid; gap: 8px; background: transparent; border: 0; }
+  .evs-leads-columns { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); }
+  .evs-leads-entry, .evs-leads-entry:last-child { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 9px 12px; border: 1px solid #dce4ef; border-radius: 10px; background: #fff; padding: 11px 12px; }
+  .evs-leads-company, .evs-leads-status, .evs-leads-actions { grid-column: 1 / -1; }
+  .evs-leads-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .evs-leads-actions > :only-child { grid-column: 1 / -1; }
+  .evs-leads-actions .evs-act { min-height: 44px; justify-content: center; }
+}
