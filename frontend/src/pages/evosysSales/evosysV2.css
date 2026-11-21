@@ -294,3 +294,24 @@
   .evs-leads-actions > :only-child { grid-column: 1 / -1; }
   .evs-leads-actions .evs-act { min-height: 44px; justify-content: center; }
 }
+
+.evs.v2 .v2-inbox { gap: 12px; }
+.evs.v2 .v2-inbox-page .v2-list { display: flex; flex-direction: column; min-height: 0; }
+.evs.v2 .v2-inbox-search { margin-bottom: 8px; }
+.evs.v2 .v2-conversation-scroll { overflow-y: auto; min-height: 0; }
+.evs.v2 .v2-inbox-page .v2-conv { padding-block: 9px; }
+.evs.v2 .v2-inbox-page .v2-conv.on { background: #e9f1fc; border-left-color: #4775ac; }
+.evs.v2 .v2-inbox-page .v2-thread { min-height: 0; }
+.evs.v2 .v2-inbox-page .v2-msgs { min-height: 0; }
+.evs.v2 .v2-tone { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.evs.v2 .v2-tone select { width: auto; }
+.evs.v2 .v2-inbox-page .v2-draft { background: #f8fafc; max-height: 55%; overflow-y: auto; }
+@media (min-width: 901px) {
+  .evs.v2 .evs-main:has(.v2-inbox-page) { max-width: none; }
+  .evs.v2 .v2-inbox { grid-template-columns: minmax(250px, 340px) minmax(0, 1fr); align-items: stretch; height: max(490px, calc(100dvh - 130px)); }
+  .evs.v2 .v2-inbox-page .v2-msgs { max-height: none; }
+}
+@media (max-width: 900px) {
+  .evs.v2 .v2-inbox { height: max(350px, calc(100dvh - 235px)); align-items: stretch; }
+  .evs.v2 .v2-inbox-page .v2-inbox.has-open .v2-list { display: none; }
+}
