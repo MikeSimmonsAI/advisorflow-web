@@ -102,3 +102,22 @@ def test_settings_read_out(db_session, brand, manager, world):
     assert out["timezone"] and out["gap_between_calls_minutes"] == 15
     assert out["alerts"][0]["who"].startswith("Mike") and out["alerts"][1]["who"] == "Michael Schlueter"
     assert "ready" in out["zoom"] and "ready" in out["calling"]
+
+
+
+def test_moving_a_call_ignores_its_own_calendar_event(db_session, brand, manager, world, monkeypatch):
+    from app.services import external_busy as extbusy
+    c, _ = world
+    o = _lead(db_session, brand, manager, "Mover", phone="2145550607")
+    t = _soon(7)
+    out = R.calls_book(R.CallBookIn(lead_id=o.id, starts_at=t, host_id=manager.id, send=False), c, db_session)
+    # the host calendar now shows this same call (6:00-6:30)
+    monkeypatch.setattr(extbusy, "external_conflicts",
+                        lambda db, ids, s, e: [{"starts_at": t, "ends_at": t + timedelta(minutes=30)}])
+    import app.routers.sales_scheduling_router as SR
+    monkeypatch.setattr(SR, "_refresh_external", lambda *a, **k: {})
+    moved = R.calls_check(R.CallCheckIn(starts_at=t + timedelta(minutes=15), host_id=manager.id,
+                                        exclude_appointment_id=out["id"]), c, db_session)
+    assert moved["available"] is True
+    other = R.calls_check(R.CallCheckIn(starts_at=t + timedelta(minutes=15), host_id=manager.id), c, db_session)
+    assert other["available"] is False                       # a different booking still sees the clash
