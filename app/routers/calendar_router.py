@@ -7,10 +7,11 @@ from datetime import datetime
 from urllib.parse import quote
 import logging
 import os
+from typing import Optional
 
 from app.deps import get_db, get_current_user
 from app.models.models import User, BookingLink
-from app.models.oauth_models import FLOW_SETUP, PROVIDER_GOOGLE
+from app.models.oauth_models import FLOW_EVOSYS_SALES, FLOW_SETTINGS, FLOW_SETUP, PROVIDER_GOOGLE
 from app.services import oauth_state_service
 from app.services.oauth_state_service import OAuthStateError
 from app.services.platform_utils import get_brand_name
@@ -28,10 +29,13 @@ logger = logging.getLogger(__name__)
 # the Settings page, since that's where the "Connect Google Calendar" button lives.
 FRONTEND_SETTINGS_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173") + "/settings"
 FRONTEND_SETUP_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173") + "/setup-integrations"
+# Fixed return pages, chosen by name. The browser never supplies a URL.
+FRONTEND_EVOSYS_SALES_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173") + "/program/evosys-sales/appointments/settings"
 
 
 @router.get("/connect")
 def connect_google_calendar(request: Request,
+                            back: Optional[str] = None,
                             current_user: User = Depends(get_current_user),
                             db: Session = Depends(get_db)):
     """Returns the URL the advisor should visit to grant Google Calendar access.
@@ -43,6 +47,7 @@ def connect_google_calendar(request: Request,
     """
     state = oauth_state_service.issue_state(
         db, provider=PROVIDER_GOOGLE, subject=current_user,
+        flow=(FLOW_EVOSYS_SALES if back == "evosys-sales" else FLOW_SETTINGS),
         client_ip=(request.client.host if request.client else None))
     try:
         url = get_authorization_url(state)
@@ -97,7 +102,8 @@ def oauth_callback(
     # The flow — and therefore the page the advisor is sent back to — is read
     # from the transaction, never from the shape of the state string.
     is_setup_flow = (txn.flow == FLOW_SETUP)
-    redirect_base = FRONTEND_SETUP_URL if is_setup_flow else FRONTEND_SETTINGS_URL
+    redirect_base = (FRONTEND_SETUP_URL if is_setup_flow else
+                     FRONTEND_EVOSYS_SALES_URL if txn.flow == FLOW_EVOSYS_SALES else FRONTEND_SETTINGS_URL)
     real_user_id = txn.user_id
 
     if error:

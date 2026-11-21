@@ -395,12 +395,115 @@ export function CallDetail() {
 }
 
 // ── settings ─────────────────────────────────────────────────────────────────
+const toHM = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+const fromHM = v => { const [h, m] = (v || '0:0').split(':').map(Number); return h * 60 + m }
+
+// Weekly hours for the signed-in person, saved to the same place the booking page reads.
+function HoursEditor({ onSaved, onError }) {
+  const [w, setW] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+  useEffect(() => {
+    api.get('/sales/availability/me')
+      .then(p => setW((p.windows || []).map(x => ({ day: x.day_of_week, start: x.start_minute, end: x.end_minute }))))
+      .catch(e => onError(errText(e)))
+  }, [onError])
+  if (!w) return <div className="v2-skel card" />
+  const set = (i, k, v) => setW(w.map((x, j) => j === i ? { ...x, [k]: v } : x))
+  const add = day => setW([...w, { day, start: 9 * 60, end: 17 * 60 }])
+  const del = i => setW(w.filter((_, j) => j !== i))
+  const save = async () => {
+    const bad = w.find(x => x.end <= x.start)
+    if (bad) { setMsg(DAYS[bad.day] + ': the end time has to be after the start time.'); return }
+    setBusy(true); setMsg(null)
+    try {
+      await api.put('/sales/availability/me', { windows: w.map(x => ({ day_of_week: x.day, start_minute: x.start, end_minute: x.end })) })
+      onSaved()
+    } catch (e) { setMsg(errText(e)) } finally { setBusy(false) }
+  }
+  return (
+    <div className="v2-hours">
+      <div className="v2-label">Hours you take calls (Central Time)</div>
+      {DAYS.map((name, day) => {
+        const rows = w.map((x, i) => [x, i]).filter(([x]) => x.day === day)
+        return (
+          <div key={day} className="v2-hours-day">
+            <b>{name}</b>
+            <div className="v2-hours-slots">
+              {!rows.length && <span className="v2-muted">Closed</span>}
+              {rows.map(([x, i]) => (
+                <span key={i} className="v2-hours-slot">
+                  <input className="v2-input" type="time" step="900" value={toHM(x.start)} aria-label={name + ' start'} onChange={e => set(i, 'start', fromHM(e.target.value))} />
+                  <span>to</span>
+                  <input className="v2-input" type="time" step="900" value={toHM(x.end)} aria-label={name + ' end'} onChange={e => set(i, 'end', fromHM(e.target.value))} />
+                  <button type="button" className="v2-linkbtn" onClick={() => del(i)} aria-label={'Remove ' + name + ' hours'}>Remove</button>
+                </span>
+              ))}
+              <button type="button" className="v2-linkbtn" onClick={() => add(day)}>{rows.length ? '+ more hours' : '+ open this day'}</button>
+            </div>
+          </div>
+        )
+      })}
+      {msg && <p className="v2-err">{msg}</p>}
+      <div className="v2-row"><button className="v2-btn v2-primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save hours'}</button></div>
+    </div>
+  )
+}
+
+// The signed-in person's calendar connection, without leaving EvoSys Sales.
+function CalendarPanel({ host, hostIsMe }) {
+  const [d, setD] = useState(null)
+  const [err, setErr] = useState(null)
+  const [busy, setBusy] = useState(null)
+  const [note, setNote] = useState(null)
+  const load = useCallback(() => api.get('/sales/calendar/connections').then(setD).catch(e => setErr(errText(e))), [])
+  useEffect(() => { load() }, [load])
+  const test = async p => {
+    setBusy(p); setNote(null)
+    try { const r = await api.post('/sales/calendar/connections/' + p + '/test', {}); setNote({ ok: r.ok, text: r.message + (r.ok ? ' ' + r.busy_blocks_found + ' busy times in the next 7 days.' : '') }); load() }
+    catch (e) { setNote({ ok: false, text: errText(e) }) } finally { setBusy(null) }
+  }
+  const connect = async () => {
+    setBusy('google')
+    try { const r = await api.get('/calendar/connect?back=evosys-sales'); window.location.href = r.authorization_url }
+    catch (e) { setNote({ ok: false, text: errText(e) }); setBusy(null) }
+  }
+  if (!hostIsMe) return <article className="v2-card"><p className="v2-muted">Calls are booked on {host.name}'s calendar. They manage that connection when signed in as themselves.</p></article>
+  if (err) return <article className="v2-card"><p className="v2-err">{err}</p></article>
+  if (!d) return <div className="v2-skel card" />
+  const rows = d.connections.filter(c => c.provider === 'google' || c.has_token)
+  return (
+    <article className="v2-card">
+      {rows.map(c => (
+        <div key={c.provider} className="v2-listrow v2-cal">
+          <b>{c.label}</b>
+          <span>
+            {c.state === 'connected' ? 'Connected' : c.state === 'reconnect_required' ? 'Needs reconnecting' : 'Not connected'}
+            {c.account_email ? ' · ' + c.account_email : ''}
+            {c.state === 'connected' && c.last_sync_at ? ' · last read ' + ctDay(utc(c.last_sync_at)) + ' ' + ctTime(utc(c.last_sync_at)) : ''}
+            {c.detail && <div className="v2-muted">{c.detail}</div>}
+            {c.last_error && c.state !== 'connected' && <div className="v2-err">Last error: {c.last_error}</div>}
+          </span>
+        </div>
+      ))}
+      <p className="v2-hint">{d.uses_email_fallback ? d.fallback_explainer : 'Booked calls go straight onto this calendar, and anything already on it blocks those times on the booking page.'}</p>
+      {note && <p className={note.ok ? 'v2-okmsg' : 'v2-err'}>{note.text}</p>}
+      <div className="v2-row">
+        {rows.some(c => c.provider === 'google' && c.has_token) && <button className="v2-btn" disabled={!!busy} onClick={() => test('google')}>{busy === 'google' ? 'Checking…' : 'Test connection'}</button>}
+        {rows.some(c => c.provider === 'google' && c.state !== 'connected') && <button className="v2-btn v2-primary" disabled={!!busy} onClick={connect}>{rows.some(c => c.has_token) ? 'Reconnect Google Calendar' : 'Connect Google Calendar'}</button>}
+      </div>
+    </article>
+  )
+}
+
 export function CallsSettings() {
   const [d, setD] = useState(null)
-  const [tab, setTab] = useState('availability')
+  const [sp0] = useSearchParams()
+  const back = sp0.get('calendar_connected') ? 'Google Calendar connected.' : sp0.get('calendar_error') ? 'Google Calendar did not connect: ' + sp0.get('calendar_error') : null
+  const [tab, setTab] = useState(back ? 'calendar' : 'availability')
   const [err, setErr] = useState(null)
   const [fwd, setFwd] = useState('')
-  const [toast, setToast] = useState(null)
+  const [toast, setToast] = useState(back)
   const load = useCallback(() => api.get(`${API}/calls-settings`).then(x => { setD(x); setFwd(x.calling?.forward_to || '') }).catch(e => setErr(errText(e))), [])
   useEffect(() => { load() }, [load])
   const saveFwd = async () => { try { await api.put(`${API}/outreach`, { voice_forward_to: fwd }); setToast('Saved. Calls to the Sales number ring ' + fwd + '.'); load() } catch (e) { setErr(errText(e)) } }
@@ -418,22 +521,21 @@ export function CallsSettings() {
       {d && tab === 'availability' && (
         <article className="v2-card v2-form">
           <dl className="v2-dl">
-            <dt>Default host</dt><dd>{d.host.name}</dd>
+            <dt>Calls are booked on</dt><dd>{d.host.name}{d.host_is_me ? ' (you)' : ''}</dd>
             <dt>Appointment length</dt><dd>{d.duration_minutes} minutes, {d.gap_between_calls_minutes} minutes kept free between calls</dd>
             <dt>Time zone</dt><dd>{d.timezone}</dd>
             <dt>Notice</dt><dd>At least {Math.round((d.min_notice_minutes || 0) / 60)} hours ahead · up to {d.booking_horizon_days} days out</dd>
-            <dt>Hours</dt><dd>{d.windows.length ? d.windows.map((w, k) => <div key={k}>{DAYS[w.day]} {hm(w.start)}–{hm(w.end)}</div>) : 'No hours set'}</dd>
             {d.blocks.length > 0 && <><dt>Blocked</dt><dd>{d.blocks.map((b, k) => <div key={k}>{DAYS[b.day]} {hm(b.start)}–{hm(b.end)} · {b.label}</div>)}</dd></>}
           </dl>
-          <div className="v2-row"><Link className="v2-btn v2-primary" to="/sales/availability">Edit days, hours, and exceptions</Link></div>
+          {d.host_is_me
+            ? <HoursEditor onSaved={() => { setToast('Hours saved. The booking page offers these times now.'); load() }} onError={setErr} />
+            : <>
+                <dl className="v2-dl"><dt>Hours</dt><dd>{d.windows.length ? d.windows.map((w, k) => <div key={k}>{DAYS[w.day]} {hm(w.start)}–{hm(w.end)}</div>) : 'No hours set'}</dd></dl>
+                <p className="v2-hint">These are {d.host.name}'s hours. They change them when signed in as themselves.</p>
+              </>}
         </article>
       )}
-      {d && tab === 'calendar' && (
-        <article className="v2-card">
-          {d.calendars.length ? d.calendars.map((x, k) => <div key={k} className="v2-listrow"><b>{x.provider === 'google' ? 'Google Calendar' : x.provider}</b><span>{x.account || 'account'} · {x.connected ? 'Connected' : 'Not connected'}</span></div>) : <p className="v2-muted">No calendar connected for {d.host.name}.</p>}
-          <div className="v2-row"><Link className="v2-btn" to="/settings">View connection and choose calendar</Link><button className="v2-btn" onClick={load}>Check connections</button></div>
-        </article>
-      )}
+      {d && tab === 'calendar' && <CalendarPanel host={d.host} hostIsMe={d.host_is_me} />}
       {d && tab === 'zoom' && (
         <article className="v2-card"><div className="v2-listrow"><b>Zoom</b><span>{d.zoom.ready ? 'Connected · every booked call gets its own participant link' : 'Not ready' + (d.zoom.detail ? ': ' + d.zoom.detail : '')}</span></div>
           <div className="v2-row"><button className="v2-btn" onClick={load}>Check connections</button></div></article>

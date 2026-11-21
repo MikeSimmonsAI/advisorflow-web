@@ -294,3 +294,16 @@
   .evs-leads-actions > :only-child { grid-column: 1 / -1; }
   .evs-leads-actions .evs-act { min-height: 44px; justify-content: center; }
 }
+
+/* Calls > Settings: weekly hours editor */
+.evs.v2 .v2-hours { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+.evs.v2 .v2-hours-day { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); align-items: start; }
+.evs.v2 .v2-hours-day > b { font-size: 13px; padding-top: 8px; }
+.evs.v2 .v2-hours-slots { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.evs.v2 .v2-hours-slot { display: inline-flex; gap: 6px; align-items: center; }
+.evs.v2 .v2-hours-slot .v2-input { width: 118px; padding: 7px 8px; }
+.evs.v2 .v2-hours-slots .v2-muted { padding-top: 2px; }
+@media (max-width: 640px) {
+  .evs.v2 .v2-hours-day { grid-template-columns: 1fr; gap: 4px; }
+  .evs.v2 .v2-hours-day > b { padding-top: 0; }
+}

@@ -77,7 +77,8 @@ FLOW_SETTINGS = "settings"      # a signed-in advisor connecting from /settings
 FLOW_SETUP = "setup"            # an advisor following an admin's setup link
 FLOW_MAILBOX = "mailbox"        # a platform owner connecting a shared reply mailbox
 FLOW_VOLT_MAILBOX = "volt_mailbox"  # VOLT staff connecting VOLT's support mailbox
-FLOWS = (FLOW_SETTINGS, FLOW_SETUP, FLOW_MAILBOX, FLOW_VOLT_MAILBOX)
+FLOW_EVOSYS_SALES = "evosys_sales"  # same as settings, but returns to EvoSys Sales > Calls > Settings
+FLOWS = (FLOW_SETTINGS, FLOW_SETUP, FLOW_MAILBOX, FLOW_VOLT_MAILBOX, FLOW_EVOSYS_SALES)
 
 # How long a started authorization may sit unfinished. Long enough for a real
 # person to read a consent screen, pick an account and approve; short enough

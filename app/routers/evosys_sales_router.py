@@ -814,6 +814,7 @@ def calls_settings(host_id: Optional[str] = None, c: Ctx = Depends(ctx), db: Ses
         for r in (s.alert_also or []) if isinstance(r, dict)]
     db.commit()
     return {"host": {"id": host.id, "name": host.full_name or host.email}, "hosts": CL.hosts(db, c.bso),
+            "host_is_me": host.id == c.user.id,
             "timezone": prof.timezone, "duration_minutes": 30, "min_notice_minutes": prof.min_notice_minutes,
             "buffer_before_minutes": prof.buffer_before_minutes, "buffer_after_minutes": prof.buffer_after_minutes,
             "gap_between_calls_minutes": 15, "booking_horizon_days": prof.booking_horizon_days,
