@@ -49,7 +49,11 @@ _WHOLE_MESSAGE_OPT_OUT = re.compile(rf"^(?:please )?(?:{_OPT_OUT_WORD})(?: pleas
 # Unambiguous requests inside a longer message. "stop" alone is NOT here: it
 # only counts when it is directed at us contacting them.
 _OPT_OUT_INTENT = re.compile(
-    r"\bunsubscribe\b"
+    # A message that STARTS with STOP and keeps going ("STOP I don't need this",
+    # "Stop. Not interested") - owner, 2026-11-20. Not "stop by / stop in / stop
+    # over / stop at", which are visits, not opt-outs.
+    r"^(?:please )?stop(?:all)?\b(?![ -]+(?:by|in|over|at|after)\b)"
+    r"|\bunsubscribe\b"
     r"|\bremove me\b"
     r"|\btake me off\b"
     r"|\bstop (?:all )?(?:texting|texts|messaging|messages|calling|calls|emailing|emails|contacting|sending)\b"
