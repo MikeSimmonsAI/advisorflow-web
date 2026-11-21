@@ -165,3 +165,10 @@ def test_a_spanish_draft_always_comes_with_english(db_session, brand, manager, m
                  {"category": "question", "summary": "", "simple": True,
                   "draft": "¡Hola! Sí, podemos seguir por texto. ¿Qué zonas atiende?"})
     assert out["draft"].startswith("¡Hola!") and out["draft_english"] == "Hi! Yes, we can keep talking by text."
+
+
+def test_never_says_we_have_no_website(db_session, brand, manager, monkeypatch):
+    out = _draft(db_session, brand, manager, monkeypatch, "Yes",
+                 {"category": "interested", "summary": "", "simple": True,
+                  "draft": "¡Hola! No tenemos un sitio web oficial, pero visite https://evosyspro.live"})
+    assert out["auto_ok"] is False and any("claim" in n for n in out["needs_person"])
