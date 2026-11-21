@@ -144,3 +144,16 @@ def test_a_text_that_starts_with_stop_is_an_opt_out():
     for t in ("can I stop by Friday?", "Stop by Friday at 3", "stop in tomorrow?", "Yes", "I will stop working at 5",
               "stopping by later", "Stop over after lunch"):
         assert not f(t), t
+
+
+def test_a_business_on_do_not_contact_is_never_in_needs_you(db_session, brand, manager):
+    from app.routers import evosys_sales_router as R
+    from app.services import sales_suppression as SDNC
+    _ready(db_session, brand)
+    o = _lead(db_session, brand, manager, "Stacey's", phone="2145550307")
+    _msg(db_session, brand, o, "in", "I don't need this anymore", 30, label="not_interested")
+    SDNC.record(db_session, o, manager, "asked us to stop")
+    db_session.commit()
+    out = R.overview(R.Ctx(manager, brand.id, True), db_session)
+    assert not [m for m in out["replies"] if m["lead"]["id"] == o.id]
+    assert [m for m in out["opted_out"] if m["lead"]["id"] == o.id]

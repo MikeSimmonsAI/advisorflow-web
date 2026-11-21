@@ -176,7 +176,19 @@ def overview(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     from app.services.evosys_sales import inbox as IB
     opted = {oid for oid, x in states.items() if x.opted_out_at}
     groups = IB.group(db, ids, opted, week)
+    from app.services import sales_suppression as _SDNC
+    by_opp = {o.id: o for o in leads}
+    dnc = [p for p in groups["needs_you"] if by_opp.get(p[0].opportunity_id) is not None
+           and _SDNC.for_opportunity(db, by_opp[p[0].opportunity_id])]
+    if dnc:                    # on Do Not Contact (however they got there): shown under Opted out, never as work
+        groups["needs_you"] = [p for p in groups["needs_you"] if p not in dnc]
+        groups["opted_out"] = sorted(groups["opted_out"] + dnc, key=lambda p: p[0].created_at, reverse=True)
     replies = [m for m, _ in groups["needs_you"]]
+    try:                       # Spanish texts get English before they're shown (owner doesn't read Spanish)
+        from app.services.evosys_sales import ai as _AI
+        _AI.fill_translations(db, replies + [m for m, _ in groups["handled"][:30]], c.bso, c.user.id, background=True)
+    except Exception:                                                # noqa: BLE001
+        pass
     by_id = {o.id: o for o in leads}
     working = [o for o in leads if o.stage in O.WORKING_STAGES]
     to_call = [o for o in working if not O._has_email(o) and o.id not in booked
