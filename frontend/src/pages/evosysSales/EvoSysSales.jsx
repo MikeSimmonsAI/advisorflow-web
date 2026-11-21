@@ -42,6 +42,7 @@ const P = {
   fork: 'M12 3v6M6 21a3 3 0 1 0 0-.01M18 21a3 3 0 1 0 0-.01M12 9 6 18M12 9l6 9',
   off: 'M3 3l18 18M10.6 5.1A7 7 0 0 1 19 12M6 7.5A7 7 0 0 0 12 19',
   upload: 'M12 16V4M7 9l5-5 5 5M4 20h16',
+  check: 'M20 6 9 17l-5-5',
 }
 export function Icon({ name, size = 20 }) {
   return (
@@ -178,101 +179,128 @@ function attLink(i) {
   return BASE
 }
 
+const SENT_BY = { ai: 'AI answered', person: 'You answered', booking: 'Booked a call', outside: 'Marked done', system: 'Answered' }
+
+function Said({ m }) {
+  // Spanish texts show in English first (owner doesn't read Spanish), original underneath
+  if (m.translation) return (
+    <span className="evs-said">“{m.translation}”<small className="evs-orig">Translated from Spanish · “{m.body}”</small></span>
+  )
+  return <span className="evs-said">“{m.body}”</span>
+}
+
 export function Today() {
-  const { data, error } = useLoad(`${API}/overview`)
+  const { data, error, reload } = useLoad(`${API}/overview`)
   const att = useLoad(`${API}/attention`)
   const camps = useLoad(`${API}/campaigns`)
-  const [tab, setTab] = useState('replies')
+  const [tab, setTab] = useState('needs')
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState(null)
   const c = data?.counts || {}
-  const replies = data?.replies || []
+  const needs = data?.replies || []
+  const handled = data?.handled || []
+  const opted = data?.opted_out || []
   const items = att.data?.items || []
-  const aiItems = items.filter(i => i.kind === 'reply_needs_person')
-  const review = items.filter(i => ['possible_duplicate', 'unclear_market', 'no_contact'].includes(i.kind))
-  const other = items.filter(i => !aiItems.includes(i) && !review.includes(i))
+  const why = {}
+  items.filter(i => i.kind === 'reply_needs_person' && i.lead_id).forEach(i => { why[i.lead_id] = why[i.lead_id] || i.text })
+  const review = items.filter(i => i.kind !== 'reply_needs_person')
   const onCount = (camps.data?.campaigns || []).filter(x => x.can_send).length
-  const next = (data?.appointments || [])[0]
+  const now = Date.now()
+  const upcoming = (data?.appointments || []).filter(a => a.status === 'scheduled' && new Date(a.ends_at).getTime() > now)
+
+  async function markDone(m) {
+    setBusy(m.id); setErr(null)
+    try { await api.post(`${API}/contacts/${m.lead.id}/handled`, {}); await reload() }
+    catch (e) { setErr(errText(e)) }
+    finally { setBusy(null) }
+  }
+
+  const TABS = [['needs', 'Needs you', needs.length, 'chat'], ['handled', 'Handled', handled.length, 'check'],
+                ['opted', 'Opted out', opted.length, 'off']]
   return (
     <Box error={error} data={data}>
       <PageHead title="Today">
         <Link to={`${BASE}/outreach`} className={'evs-chipbtn' + (onCount ? ' on' : '')}>
           <Icon name={onCount ? 'send' : 'off'} size={16} />{onCount ? `Outreach on · ${onCount}` : 'Outreach off'}
         </Link>
-        <Link to={`${BASE}/conversations`} className="evs-chipbtn evs-chipbtn-blue"><Icon name="reply" size={16} />{replies.length} {replies.length === 1 ? 'reply' : 'replies'} waiting</Link>
         <Link to={`${BASE}/leads?add=1`} className="evs-btn evs-btn-add"><Icon name="plus" size={18} />Add leads</Link>
       </PageHead>
 
       <div className="evs-strip">
-        <Link to={`${BASE}/conversations`} className="evs-strip-i gold"><Icon name="chat" size={26} /><div><b>{replies.length}</b><span>Replies</span></div></Link>
-        <a href="#queue" onClick={() => setTab('calls')} className="evs-strip-i"><Icon name="phone" size={26} /><div><b>{c.to_call ?? 0}</b><span>To call</span></div></a>
-        <Link to={`${BASE}/leads?view=followup`} className="evs-strip-i"><Icon name="people" size={26} /><div><b>{c.in_followup ?? 0}</b><span>In follow-up</span></div></Link>
-        <Link to={`${BASE}/appointments`} className="evs-strip-i"><Icon name="cal" size={26} /><div><b>{c.booked ?? 0}</b><span>Booked</span></div></Link>
+        <button type="button" onClick={() => setTab('needs')} className={'evs-strip-i' + (needs.length ? ' gold' : '')}>
+          <Icon name="chat" size={26} /><div><b>{needs.length}</b><span>Need you</span></div></button>
+        <Link to={`${BASE}/appointments`} className="evs-strip-i"><Icon name="cal" size={26} /><div><b>{upcoming.length}</b><span>Upcoming calls</span></div></Link>
+        <button type="button" onClick={() => setTab('handled')} className="evs-strip-i"><Icon name="check" size={26} /><div><b>{handled.length}</b><span>Handled this week</span></div></button>
+        <button type="button" onClick={() => setTab('opted')} className="evs-strip-i"><Icon name="off" size={26} /><div><b>{opted.length}</b><span>Opted out</span></div></button>
       </div>
 
       <div className="evs-today">
         <section className="evs-card evs-queue" id="queue">
-          <h2>Work queue</h2>
+          <h2>Replies</h2>
           <div className="evs-tabs" role="tablist">
-            <button role="tab" aria-selected={tab === 'replies'} className={tab === 'replies' ? 'on' : ''} onClick={() => setTab('replies')}><Icon name="chat" size={16} />Replies ({replies.length})</button>
-            <button role="tab" aria-selected={tab === 'calls'} className={tab === 'calls' ? 'on' : ''} onClick={() => setTab('calls')}><Icon name="phone" size={16} />Calls ({c.to_call ?? 0})</button>
-            <button role="tab" aria-selected={tab === 'review'} className={tab === 'review' ? 'on' : ''} onClick={() => setTab('review')}><Icon name="warn" size={16} />Needs review ({items.length})</button>
+            {TABS.map(([k, label, n, icon]) => (
+              <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
+                <Icon name={icon} size={16} />{label} ({n})</button>
+            ))}
           </div>
-          {tab === 'replies' && (replies.length ? replies.map((m, i) => (
-            <div key={m.id} className={'evs-qrow' + (i === 0 ? ' first' : '')}>
+          {err && <p className="evs-err" role="alert">{err}</p>}
+
+          {tab === 'needs' && (needs.length ? needs.map(m => (
+            <div key={m.id} className="evs-qrow evs-reply">
               <Link to={`${BASE}/leads/${m.lead.id}`} className="evs-row-main">
                 <b>{m.lead.company}</b>
-                <small>{m.lead.contact} · Replied {when(m.at)}</small>
-                <span className="evs-snip">“{m.body}”</span>
+                <small>{m.lead.contact ? m.lead.contact + ' · ' : ''}Texted {when(m.at)}</small>
+                <Said m={m} />
+                {why[m.lead.id] && <span className="evs-why"><Icon name="tag" size={14} />{why[m.lead.id]}</span>}
               </Link>
-              <Link className={'evs-act ' + (i === 0 ? 'evs-act-primary' : '')} to={`${BASE}/leads/${m.lead.id}`}>{i === 0 ? 'Open reply' : 'Review reply'}<Icon name="arrow" size={14} /></Link>
+              <div className="evs-row-acts">
+                <Link className="evs-act evs-act-primary" to={`${BASE}/leads/${m.lead.id}`}>Answer<Icon name="arrow" size={14} /></Link>
+                <button type="button" className="evs-act" disabled={busy === m.id} onClick={() => markDone(m)}>{busy === m.id ? 'Saving…' : 'Mark done'}</button>
+              </div>
             </div>
-          )) : <p className="evs-empty">No replies waiting. A reply to a follow-up email shows up here by itself and stops that lead's emails.</p>)}
-          {tab === 'calls' && (data?.to_call?.length ? data.to_call.map(l => (
-            <div key={l.id} className="evs-qrow">
-              <Link to={`${BASE}/leads/${l.id}`} className="evs-row-main"><b>{l.company}</b><small>{l.contact || 'No name'} · {l.phone} · no email on file</small></Link>
-              <div className="evs-row-acts"><CallBtn phone={l.phone} /><Link className="evs-act" to={`${BASE}/leads/${l.id}#log`}>Log call</Link></div>
+          )) : <p className="evs-empty">You're all caught up. When a business texts something the AI shouldn't answer by itself, it shows up here.</p>)}
+
+          {tab === 'handled' && (handled.length ? handled.map(m => (
+            <Link key={m.id} to={`${BASE}/leads/${m.lead.id}`} className="evs-qrow evs-reply evs-done">
+              <div className="evs-row-main">
+                <b>{m.lead.company}</b>
+                <small>Texted {when(m.at)}</small>
+                <Said m={m} />
+                <span className="evs-answer"><span className={'evs-pill ' + (m.answer.sent_by === 'ai' ? 'evs-blue' : m.answer.sent_by === 'booking' ? 'evs-good' : 'evs-muted')}>{SENT_BY[m.answer.sent_by] || 'Answered'}</span>
+                  {m.answer.sent_by === 'outside' ? null : <span className="evs-snip">{m.answer.body}</span>}</span>
+              </div>
+            </Link>
+          )) : <p className="evs-empty">Nothing answered this week yet.</p>)}
+
+          {tab === 'opted' && (opted.length ? opted.map(m => (
+            <div key={m.id} className="evs-qrow evs-reply evs-stopped">
+              <div className="evs-row-main">
+                <b>{m.lead.company}</b>
+                <small>Said “{(m.body || '').split('\n')[0].slice(0, 40)}” · {when(m.at)} · On Do Not Contact - they won't get another text</small>
+              </div>
             </div>
-          )) : <p className="evs-empty">Nobody to call right now.</p>)}
-          {tab === 'review' && (items.length ? items.map((i, k) => (
-            <div key={k} className="evs-qrow">
-              <div className="evs-row-main"><b>{i.title}</b><small>{i.text}</small></div>
-              <Link className="evs-act" to={attLink(i)}>{i.action}<Icon name="arrow" size={14} /></Link>
-            </div>
-          )) : <p className="evs-empty">Nothing needs you right now.</p>)}
+          )) : <p className="evs-empty">Nobody has opted out.</p>)}
         </section>
 
         <div className="evs-side-col">
           <section className="evs-card">
-            <h3 className="evs-h3i"><Icon name="spark" />AI suggestions</h3>
-            {aiItems.length ? aiItems.slice(0, 3).map((i, k) => (
-              <div key={k} className="evs-aibox">
-                <Icon name="tag" size={22} />
-                <div>
-                  <b>{i.title.split(': ').slice(1).join(': ') || i.title}</b>
-                  <small>{i.text}</small>
-                  <Link className="evs-btn evs-btn-sm" to={attLink(i)}>Open conversation<Icon name="arrow" size={14} /></Link>
-                </div>
-              </div>
-            )) : <p className="evs-empty">When AI reads a reply and something needs you - a price question with no approved offer, a wrong person - it shows here.</p>}
-          </section>
-          <section className="evs-card">
-            <h3 className="evs-h3i"><Icon name="warn" />Needs review</h3>
-            {review.length || other.length ? (
-              <>
-                {[...review, ...other].slice(0, 5).map((i, k) => (
-                  <Link key={k} to={attLink(i)} className="evs-attrow"><Icon name={ATT_ICON[i.kind] || 'warn'} size={18} /><span>{i.title}</span></Link>
-                ))}
-                <Link className="evs-more" to={`${BASE}/leads?view=needs_review`}>Review leads <Icon name="arrow" size={14} /></Link>
-              </>
-            ) : <p className="evs-empty">All clear.</p>}
-          </section>
-          <section className="evs-card">
-            <h3 className="evs-h3i"><Icon name="cal" />Next booked call</h3>
-            {next ? (
-              <Link to={next.lead_id ? `${BASE}/leads/${next.lead_id}` : `${BASE}/appointments`} className="evs-nextcall">
-                <div><b>{next.company || next.title}</b><small>{when(next.starts_at, LONG)}</small></div><Icon name="arrow" />
+            <h3 className="evs-h3i"><Icon name="cal" />Upcoming calls</h3>
+            {upcoming.length ? upcoming.slice(0, 6).map(a => (
+              <Link key={a.id} to={a.lead_id ? `${BASE}/leads/${a.lead_id}` : `${BASE}/appointments`} className="evs-nextcall">
+                <div><b>{a.company || a.title}</b><small>{when(a.starts_at, LONG)}</small></div><Icon name="arrow" />
               </Link>
-            ) : <p className="evs-empty">No calls booked yet.</p>}
+            )) : <p className="evs-empty">No calls coming up. <Link to={`${BASE}/appointments`}>See past calls</Link></p>}
+            {upcoming.length > 6 && <Link className="evs-more" to={`${BASE}/appointments`}>All calls <Icon name="arrow" size={14} /></Link>}
           </section>
+          {review.length > 0 && (
+            <section className="evs-card">
+              <h3 className="evs-h3i"><Icon name="warn" />Needs a look</h3>
+              {review.slice(0, 5).map((i, k) => (
+                <Link key={k} to={attLink(i)} className="evs-attrow"><Icon name={ATT_ICON[i.kind] || 'warn'} size={18} /><span>{i.title}</span></Link>
+              ))}
+              {review.length > 5 && <Link className="evs-more" to={`${BASE}/leads?view=needs_review`}>See all <Icon name="arrow" size={14} /></Link>}
+            </section>
+          )}
         </div>
       </div>
     </Box>

@@ -332,3 +332,34 @@
 .evs-translation { margin-top: 8px; padding: 8px 10px; border-left: 3px solid #0b62d6; background: rgba(11, 98, 214, 0.06); border-radius: 6px; }
 .evs-translation small { display: block; font-weight: 700; color: #0b62d6; margin-bottom: 2px; }
 .evs-translation p { margin: 0; white-space: pre-wrap; }
+
+/* Today: replies grouped as Needs you / Handled / Opted out (owner, 2026-11-20) */
+.evs button.evs-strip-i { font: inherit; text-align: left; cursor: pointer; width: 100%; background: transparent;
+                          border: 0; border-left: 1px solid var(--line); }
+.evs button.evs-strip-i.gold { border: 1px solid #f1d796; }
+.evs .evs-reply .evs-said { display: block; margin-top: 6px; color: var(--ink, #14213d); font-size: 14px; line-height: 1.45;
+                            overflow-wrap: anywhere; }
+.evs .evs-reply .evs-orig { display: block; margin-top: 3px; color: var(--muted, #6b7280); font-size: 12px; }
+.evs .evs-why { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 4px 10px; border-radius: 999px;
+                background: var(--gold-soft); color: #8a6512; font-size: 12.5px; font-weight: 600; }
+.evs .evs-reply .evs-row-main { min-width: 0; flex: 1 1 auto; max-width: 100%; }
+.evs .evs-reply .evs-answer { max-width: 100%; }
+.evs .evs-answer { display: flex; gap: 8px; align-items: baseline; margin-top: 8px; min-width: 0; }
+.evs .evs-answer .evs-snip { color: var(--muted, #6b7280); font-size: 13px; white-space: nowrap; overflow: hidden;
+                             text-overflow: ellipsis; min-width: 0; }
+.evs .evs-reply .evs-row-acts { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+.evs .evs-reply .evs-row-acts .evs-act { justify-content: center; min-height: 36px; }
+.evs button.evs-act { font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; background: #fff; }
+.evs button.evs-act:disabled { opacity: .6; cursor: default; }
+.evs a.evs-done { text-decoration: none; color: inherit; }
+.evs .evs-stopped small { color: var(--muted, #6b7280); }
+.evs .evs-err { color: #b42318; background: #fef3f2; border-radius: 10px; padding: 8px 12px; font-size: 14px; margin: 8px 0; }
+@media (max-width: 720px) {
+  .evs .evs-queue .evs-tabs { gap: 0; overflow-x: auto; }
+  .evs .evs-queue .evs-tabs button { padding-left: 8px; padding-right: 8px; font-size: 14px; white-space: nowrap; flex: 1 0 auto; }
+  .evs .evs-queue .evs-tabs button .evs-ico { display: none; }
+  .evs .evs-reply { flex-direction: column; align-items: stretch; }
+  .evs .evs-reply .evs-row-main { width: 100%; flex: none; }
+  .evs .evs-reply .evs-row-acts { flex-direction: row; }
+  .evs .evs-reply .evs-row-acts .evs-act { flex: 1; min-height: 44px; }
+}
