@@ -3028,3 +3028,28 @@ def run_auto_migrations(engine) -> None:
                     print("[auto_migrate] repeat-bounce addresses flagged: %d" % res.rowcount)
         except Exception as e:
             print(f"[auto_migrate] repeat-bounce flag note: {e}")
+
+    # ── SCI program email back through the email service (2026-11-21) ───────
+    #
+    # Owner, Nov 21: "SCI email needs to be switched back to resend just like
+    # restland" (the paid email-service plan has no daily cap). SCI's
+    # send_via_mailbox has been support@evosyspro.live since Oct; clearing it
+    # sends SCI family email through the email service with the program's own
+    # sender name. Replies still come to support@evosyspro.live (SCI has no
+    # separate reply-to), which the mailbox poller reads.
+    # ONE-TIME: only acts before 2026-11-23, so a later choice made in the app
+    # (switching a mailbox back on) is never undone by a restart.
+    if not is_sqlite:
+        try:
+            with engine.connect() as conn:
+                res = conn.execute(text("""
+                    UPDATE outreach_programs SET send_via_mailbox = NULL
+                     WHERE id = 'caf4e523-0797-43b2-afb5-3752d4843d76'
+                       AND send_via_mailbox IS NOT NULL
+                       AND now() < timestamptz '2026-11-23 06:00:00+00'
+                """))
+                conn.commit()
+                if res.rowcount:
+                    print("[auto_migrate] SCI program email now goes through the email service")
+        except Exception as e:
+            print(f"[auto_migrate] SCI email path note: {e}")
