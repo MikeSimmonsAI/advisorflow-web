@@ -336,49 +336,68 @@ export function Leads() {
   }, [data, q])
   const rv = meta.data?.review || {}
   return (
-    <>
+    <section className="evs-leads-directory">
       <PageHead title="Leads" sub={data ? `${rows.length} of ${data.total} businesses` : 'Businesses EvoSys is signing up'}>
         {meta.data?.can_manage && <button className="evs-btn evs-btn-add" onClick={() => setAdding(a => !a)}><Icon name="plus" size={18} />Add leads</button>}
       </PageHead>
       {adding && meta.data && <ImportPanel meta={meta.data} onDone={() => { reload(); meta.reload() }} onClose={() => setAdding(false)} />}
-      <div className="evs-filters">
+      <div className="evs-leads-tabs" role="group" aria-label="Lead status">
         {VIEWS.map(([k, l]) => (
-          <button key={k} className={'evs-chip' + (view === k ? ' on' : '')} onClick={() => setView(k)}>
+          <button key={k} className={'evs-chip' + (view === k ? ' on' : '')} aria-pressed={view === k} onClick={() => setView(k)}>
             {l}{k === 'needs_review' && (rv.unclear_market || 0) + (rv.possible_duplicate || 0) ? ` (${(rv.unclear_market || 0) + (rv.possible_duplicate || 0)})` : ''}
           </button>
         ))}
       </div>
-      <div className="evs-filters">
-        <select className="evs-input evs-groupsel" value={group} onChange={e => setGroup(e.target.value)} aria-label="Group">
+      <div className="evs-leads-toolbar">
+        <input type="search" aria-label="Search leads" className="evs-input evs-search" placeholder="Search company, name, phone, source ID…" value={q} onChange={e => setQ(e.target.value)} />
+        <select className="evs-input evs-groupsel" value={group} onChange={e => setGroup(e.target.value)} aria-label="Industry and market">
           <option value="">Every industry and market</option>
           {(meta.data?.groups || []).map(g => {
             const k = `${g.industry_key || ''}|${g.market_key || ''}`
             return <option key={k} value={k}>{g.label} ({g.leads})</option>
           })}
         </select>
-        <input className="evs-input evs-search" placeholder="Search company, name, phone, source ID…" value={q} onChange={e => setQ(e.target.value)} />
       </div>
       <Box error={error} data={data}>
-        <div className="evs-card evs-list">
+        <div className="evs-leads-table" role="table" aria-label="Leads">
+          <div className="evs-leads-columns" role="row">
+            {['Business', 'Contact', 'Market & source', 'Status', 'Actions'].map(label => (
+              <span key={label} role="columnheader">{label}</span>
+            ))}
+          </div>
           {rows.length ? rows.map(l => (
-            <div key={l.id} className="evs-row">
-              <LogoThumb lead={l} />
-              <Link to={`${BASE}/leads/${l.id}`} className="evs-row-main">
-                <b>{l.company}</b>
-                <small>{[l.contact, l.phone, l.email].filter(Boolean).join(' · ')}</small>
-                <span className="evs-meta">{[l.industry || 'Industry unclear', l.market || (l.state ? `${l.city ? l.city + ', ' : ''}${l.state} - market unclear` : 'Market unclear'), l.source_label, l.source_record_id].filter(Boolean).join(' · ')}</span>
-              </Link>
-              <div className="evs-row-acts">
-                <ReviewPill status={l.review_status} label={l.review_label} />
+            <div key={l.id} className="evs-leads-entry" role="row">
+              <div className="evs-leads-company" role="cell">
+                <LogoThumb lead={l} />
+                <div>
+                  <Link to={`${BASE}/leads/${l.id}`}>{l.company}</Link>
+                  <small>{l.industry || 'Industry unclear'}</small>
+                </div>
+              </div>
+              <div role="cell" className="evs-leads-contact">
+                {l.contact && <span>{l.contact}</span>}
+                {l.phone && <small>{l.phone}</small>}
+                {l.email && <small>{l.email}</small>}
+                {!l.contact && !l.phone && !l.email && <small>No contact details</small>}
+              </div>
+              <div role="cell" className="evs-leads-market">
+                <span>{l.market || [l.city, l.state].filter(Boolean).join(', ') || 'Market unclear'}</span>
+                {l.source_label && <small>{l.source_label}</small>}
+                {l.source_record_id && <small>{l.source_record_id}</small>}
+              </div>
+              <div role="cell" className="evs-leads-status">
                 <Status o={l.outreach} />
+                <ReviewPill status={l.review_status} label={l.review_label} />
+              </div>
+              <div role="cell" className="evs-leads-actions">
                 <CallBtn lead={l} />
-                <Link className="evs-act" to={`${BASE}/leads/${l.id}`}>Open</Link>
+                <Link className="evs-act" to={`${BASE}/leads/${l.id}`} aria-label={`Open ${l.company}`}>Open</Link>
               </div>
             </div>
-          )) : <p className="evs-empty">No leads here.</p>}
+          )) : <div role="row"><p role="cell" aria-colspan={5} className="evs-empty">{q.trim() ? 'No leads match your search.' : 'No leads in this view.'}</p></div>}
         </div>
       </Box>
-    </>
+    </section>
   )
 }
 
