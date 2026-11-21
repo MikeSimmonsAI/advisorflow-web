@@ -116,8 +116,19 @@ def book(db: Session, bso: str, user: User, *, host: User, starts_at: datetime, 
     """Book through the real scheduler; optionally send the invitation (email
     via the calendar invite, text via the team number with the Zoom link)."""
     from app.routers.sales_scheduling_router import BookIn, create_appointment
+    from app.routers.evosys_sales_work_router import _meeting_type
     from app.models.scheduling_models import SalesAppointment
-    body = BookIn(starts_at=starts_at, duration_minutes=minutes, opportunity_id=opp.id if opp else None,
+    from app.services.evosys_sales import booking_page as BP
+    # Same meeting type as the booking page: that is what gives every
+    # Business Growth Call its own Zoom room (found live, 2026-11-20).
+    mt = _meeting_type(db, bso, BP.MEETING_KEY)
+    if mt is None:
+        from app.services.meeting_roles import ensure_meeting_types
+        ensure_meeting_types(db, bso)
+        db.flush()
+        mt = _meeting_type(db, bso, BP.MEETING_KEY)
+    body = BookIn(starts_at=starts_at, duration_minutes=minutes, meeting_type_id=mt.id if mt else None,
+                  opportunity_id=opp.id if opp else None,
                   brand_sales_org_id=bso, title=title or TITLE, timezone=timezone or TZ,
                   required_user_ids=[host.id], meeting_provider="zoom", notes=notes or None,
                   prospect_name=guest.get("name") or (opp.contact_name if opp else None),

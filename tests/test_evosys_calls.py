@@ -42,6 +42,9 @@ def test_book_and_send_vs_book_without_sending(db_session, brand, manager, world
     out = R.calls_book(R.CallBookIn(lead_id=o.id, starts_at=_soon(), host_id=manager.id, send=True), c, db_session)
     a = db_session.get(SalesAppointment, out["id"])
     assert a.title == "Business Growth Call" and int((a.ends_at - a.starts_at).total_seconds()) == 1800
+    from app.models.scheduling_models import MeetingType
+    mt = db_session.get(MeetingType, a.meeting_type_id)
+    assert mt is not None and mt.key == BP.MEETING_KEY             # the type that carries the Zoom room
     assert sent["invite"] == 1 and sent["texts"] and "zoom.test" in sent["texts"][0] and out["texted"]
     o2 = _lead(db_session, brand, manager, "Quiet Co", phone="2145550602", email="q@example.test")
     R.calls_book(R.CallBookIn(lead_id=o2.id, starts_at=_soon(3), host_id=manager.id, send=False), c, db_session)
