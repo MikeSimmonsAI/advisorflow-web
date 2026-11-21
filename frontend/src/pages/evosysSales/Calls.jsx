@@ -51,7 +51,7 @@ export function CallsList() {
   const view = sp.get('view') || 'upcoming'
   const [d, setD] = useState(null)
   const [err, setErr] = useState(null)
-  useEffect(() => { setD(null); api.get(`${API}/calls?view=${view}`).then(setD).catch(e => setErr(errText(e))) }, [view])
+  useEffect(() => { setD(null); api.get(`${API}/calls-list?view=${view}`).then(setD).catch(e => setErr(errText(e))) }, [view])
   return (
     <div className="v2-page">
       <Head title="Appointments" sub="Book, send, and manage Business Growth Calls." />

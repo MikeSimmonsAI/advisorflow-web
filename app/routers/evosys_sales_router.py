@@ -671,7 +671,8 @@ def _call_row(db: Session, a, c: Ctx) -> dict:
     return out
 
 
-@router.get("/calls")
+# Not "/calls": evosys_bd_router already owns GET /sales/evosys/calls and is registered first.
+@router.get("/calls-list")
 def calls_list(view: str = "upcoming", c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     from app.models.scheduling_models import SalesAppointment
     from app.services import availability as av
