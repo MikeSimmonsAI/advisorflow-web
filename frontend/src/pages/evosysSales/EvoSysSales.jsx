@@ -15,7 +15,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { api, getCurrentUser } from '../../api/client'
+import CallPanel from './CallPanel'
 import './evosysSales.css'
+import './evosysV2.css'
 
 export const BASE = '/program/evosys-sales'
 export const API = '/sales/evosys'
@@ -53,13 +55,30 @@ export function Icon({ name, size = 20 }) {
 }
 
 const NAV = [
-  { to: BASE, label: 'Today', icon: 'today', end: true },
+  { to: BASE, label: 'Inbox', icon: 'chat', end: true },
   { to: `${BASE}/leads`, label: 'Leads', icon: 'leads' },
-  { to: `${BASE}/conversations`, label: 'Conversations', short: 'Replies', icon: 'chat' },
-  { to: `${BASE}/outreach`, label: 'Outreach', icon: 'send' },
-  { to: `${BASE}/appointments`, label: 'Appointments', short: 'Calls', icon: 'cal' },
+  { to: `${BASE}/appointments`, label: 'Calls', icon: 'cal' },
+  { to: `${BASE}/outreach`, label: 'Campaigns', icon: 'send' },
   { to: `${BASE}/results`, label: 'Results', icon: 'chart' },
 ]
+
+function AiSwitch() {
+  // The same setting as Campaigns > AI answers simple texts (text_auto_reply).
+  const [on, setOn] = useState(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { api.get(`${API}/outreach`).then(s => setOn(!!s.text_auto_reply)).catch(() => setOn(null)) }, [])
+  if (on === null) return null
+  const flip = async () => {
+    setBusy(true)
+    try { const r = await api.put(`${API}/outreach`, { text_auto_reply: !on }); setOn(!!r.text_auto_reply) } catch { /* stays as it was */ } finally { setBusy(false) }
+  }
+  return (
+    <button className={'v2-aiswitch' + (on ? ' on' : '')} onClick={flip} disabled={busy} aria-pressed={on}
+            title={on ? 'AI answers simple texts by itself. Click to turn off.' : 'AI only drafts. Click to let it answer simple texts.'}>
+      <span>AI replies</span><b>{on ? 'ON' : 'OFF'}</b>
+    </button>
+  )
+}
 
 export function errText(e) {
   if (typeof e?.detail === 'string') return e.detail
@@ -103,9 +122,16 @@ export function Box({ error, data, children }) {
   return children
 }
 
-export function CallBtn({ phone, label = 'Call' }) {
-  if (!phone) return null
-  return <a className="evs-act evs-act-call" href={'tel:' + phone} onClick={e => e.stopPropagation()}><Icon name="phone" size={16} />{label}</a>
+export function CallBtn({ lead, label = 'Call' }) {
+  // Calls go through the EvoSys Sales number in the browser, never tel:.
+  const [open, setOpen] = useState(false)
+  if (!lead?.phone || lead?.outreach?.key === 'opted_out') return null
+  return (
+    <>
+      <button className="evs-act evs-act-call" onClick={e => { e.preventDefault(); e.stopPropagation(); setOpen(true) }}><Icon name="phone" size={16} />{label}</button>
+      {open && <div className="v2-modal" onClick={e => { e.stopPropagation(); if (e.target === e.currentTarget) setOpen(false) }}><CallPanel lead={lead} onClose={() => setOpen(false)} /></div>}
+    </>
+  )
 }
 
 export function PageHead({ title, sub, children }) {
@@ -125,11 +151,20 @@ export default function EvoSysSalesShell() {
   const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || 'ES'
   const { pathname } = useLocation()
   useEffect(() => { window.scrollTo?.(0, 0) }, [pathname])
+  useEffect(() => {
+    // Cormorant Garamond + Inter. Loaded as a plain <link>: if it can't load,
+    // the screen still works with the fallback fonts.
+    if (document.getElementById('evs-v2-fonts')) return
+    const l = document.createElement('link')
+    l.id = 'evs-v2-fonts'; l.rel = 'stylesheet'
+    l.href = 'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap'
+    document.head.appendChild(l)
+  }, [])
   return (
-    <div className="evs">
+    <div className="evs v2">
       <aside className="evs-side" aria-label="EvoSys Sales">
         <div className="evs-logo">
-          <img src={EMBLEM} alt="EvoSys Pro" width="40" height="40" />
+          <span className="v2-ep">EP</span>
           <div><b>EvoSys Sales</b></div>
         </div>
         <nav className="evs-nav">
@@ -142,13 +177,15 @@ export default function EvoSysSalesShell() {
         <div className="evs-side-foot">
           <Link to="/workspaces" className="evs-back"><Icon name="back" size={16} />Program Access</Link>
           <div className="evs-me"><span className="evs-avatar">{initials}</span><span>{name || 'Signed in'}</span></div>
+          <AiSwitch />
         </div>
       </aside>
 
       <header className="evs-mtop">
-        <img src={EMBLEM} alt="EvoSys Pro" width="32" height="32" />
+        <span className="v2-ep">EP</span>
         <b>EvoSys Sales</b>
-        <Link to="/workspaces" className="evs-back evs-back-m"><Icon name="back" size={16} />Programs</Link>
+        <span className="v2-mtop-me">{(name || '').split(' ')[0]}</span>
+        <AiSwitch />
       </header>
 
       <main className="evs-main"><Outlet /></main>
@@ -229,7 +266,7 @@ export function Today() {
           {tab === 'calls' && (data?.to_call?.length ? data.to_call.map(l => (
             <div key={l.id} className="evs-qrow">
               <Link to={`${BASE}/leads/${l.id}`} className="evs-row-main"><b>{l.company}</b><small>{l.contact || 'No name'} · {l.phone} · no email on file</small></Link>
-              <div className="evs-row-acts"><CallBtn phone={l.phone} /><Link className="evs-act" to={`${BASE}/leads/${l.id}#log`}>Log call</Link></div>
+              <div className="evs-row-acts"><CallBtn lead={l} /><Link className="evs-act" to={`${BASE}/leads/${l.id}#log`}>Log call</Link></div>
             </div>
           )) : <p className="evs-empty">Nobody to call right now.</p>)}
           {tab === 'review' && (items.length ? items.map((i, k) => (
@@ -334,7 +371,7 @@ export function Leads() {
               <div className="evs-row-acts">
                 <ReviewPill status={l.review_status} label={l.review_label} />
                 <Status o={l.outreach} />
-                <CallBtn phone={l.phone} />
+                <CallBtn lead={l} />
                 <Link className="evs-act" to={`${BASE}/leads/${l.id}`}>Open</Link>
               </div>
             </div>
@@ -564,6 +601,38 @@ function LogoCard({ id, lead, manage, onChange }) {
   )
 }
 
+const NEXT_STEPS = {
+  replied: ['Interested', 'Answer them in the inbox, or book a time from open slots.'],
+  booked: ['Booked', 'Open the appointment and check the calendar and Zoom details.'],
+  active: ['In follow-up', 'The next step goes out on schedule unless they reply.'],
+  opted_out: ['Opted out', 'On Do Not Contact. Nothing else will be sent.'],
+  finished: ['Sequence finished', 'No reply after every step. Call them or leave it.'],
+}
+
+function Cadence({ lead, data }) {
+  const k = lead.outreach?.key
+  const msgs = data?.messages || []
+  const recent = [...msgs].slice(-4)
+  const [title, nextText] = NEXT_STEPS[lead.booked ? 'booked' : k] || [lead.outreach?.label || 'Not started', 'Add them to a campaign to start the sequence.']
+  return (
+    <div className="evs-two v2-cadence">
+      <section className="evs-card">
+        <h3>Cadence and history</h3>
+        <p className="evs-hint">{lead.outreach?.label}{data?.next ? ` · next: step ${data.next.step} (${data.next.channel || 'email'}) ${when(data.next.due_at)}` : ''}</p>
+        {recent.length ? recent.map(m => (
+          <div key={m.id} className="evs-hist"><small>{when(m.at)}</small> <b>{m.direction === 'in' ? 'Inbound ' + m.channel : m.channel === 'call' ? 'Call' : (m.label === 'ai_answer' ? 'AI ' : m.step ? 'Step ' + m.step + ' ' : '') + m.channel}</b> · {(m.translation || m.body || '').slice(0, 90)}</div>
+        )) : <p className="evs-empty">Nothing sent yet.</p>}
+        {k === 'replied' && <Link className="evs-act evs-act-primary" to={`${BASE}?tab=needs&c=${lead.id}`}>Answer {lead.company.split(' ')[0]}</Link>}
+      </section>
+      <section className="evs-card">
+        <h3>Next step</h3>
+        <div className="evs-hist"><b>{title}</b><br /><small>{nextText}</small></div>
+        {lead.booked && <Link className="evs-act" to={`${BASE}/appointments?view=upcoming`}>Open appointments</Link>}
+      </section>
+    </div>
+  )
+}
+
 export function Lead() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -573,6 +642,7 @@ export function Lead() {
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
+  const [calling, setCalling] = useState(false)
   const act = async (path, body, okText) => {
     setBusy(true); setMsg(null)
     try { await api.post(`${API}/leads/${id}/${path}`, body || {}); setNote(''); await Promise.all([reload(), grp.reload()]); if (okText) setMsg({ ok: true, text: okText }) }
@@ -586,8 +656,14 @@ export function Lead() {
       <Link className="evs-crumb" to={`${BASE}/leads`}><Icon name="back" size={14} />Leads</Link>
       <PageHead title={l?.company} sub={[l?.contact, grp.data?.industry, grp.data?.market].filter(Boolean).join(' · ')}>
         <Status o={l?.outreach} /><ReviewPill status={grp.data?.review_status} label={grp.data?.review_label} />
-        <CallBtn phone={l?.phone} label={l?.phone} />
+        {l && l.outreach?.key !== 'opted_out' && <>
+          <button className="evs-act" disabled={!l.phone} onClick={() => setCalling(true)}>Call</button>
+          <Link className="evs-act" to={`${BASE}?tab=needs&c=${l.id}`}>Text</Link>
+          <Link className="evs-act evs-act-primary" to={`${BASE}/appointments/new?lead=${l.id}`}>Book a call</Link>
+        </>}
       </PageHead>
+      {calling && l && <div className="v2-modal" onClick={e => e.target === e.currentTarget && setCalling(false)}><CallPanel lead={l} onClose={() => { setCalling(false); reload() }} onLogged={reload} /></div>}
+      {l && <Cadence lead={l} data={data} />}
       {msg && <div className={msg.ok ? 'evs-okmsg' : 'evs-error'} role="status">{msg.text}</div>}
 
       <div className="evs-two">
@@ -610,7 +686,7 @@ export function Lead() {
 
           {data?.next && (
             <section className="evs-card">
-              <h3>Next email · {data.next.campaign} · step {data.next.step} · {when(data.next.due_at)}</h3>
+              <h3>Next {data.next.channel === 'text' ? 'text' : 'email'} · {data.next.campaign} · step {data.next.step} · {when(data.next.due_at)}</h3>
               {data.next.paused && <p className="evs-banner">This campaign is paused or needs approving, so this email is waiting.</p>}
               {l?.logo_in_email && <img className="evs-email-logo" src={l.logo_url} alt={`${l.company} logo`} />}
               <p className="evs-subject">{data.next.subject}</p>
@@ -873,7 +949,7 @@ export function Conversations() {
                 </Link>
                 <div className="evs-row-acts">
                   <Status o={c.outreach} />
-                  <CallBtn phone={c.phone} />
+                  <CallBtn lead={{ id: c.lead_id || c.id, company: c.company, phone: c.phone }} />
                   <Link className={'evs-act' + (lm.direction === 'in' ? ' evs-act-primary' : '')} to={`${BASE}/leads/${c.id}`}>{lm.direction === 'in' ? 'Answer' : 'Open'}</Link>
                 </div>
               </div>
@@ -921,6 +997,33 @@ const BY = [['campaign', 'Campaign'], ['industry', 'Industry'], ['market', 'Mark
 const COLS = [['leads', 'Leads'], ['contacted', 'Emailed'], ['replied', 'Replied'], ['interested', 'Interested'],
               ['intro_booked', 'Intro calls'], ['intro_completed', 'Calls held'], ['demos', 'Demos'], ['signed_up', 'Signed up']]
 
+function Funnel({ stages, days }) {
+  const [open, setOpen] = useState(null)
+  const top = Math.max(1, stages[0]?.count || 0)
+  if (!stages.length) return null
+  const st = stages.find(x => x.key === open)
+  return (
+    <section className="evs-card v2-funnel">
+      <h3>Last {days} days: from first message to customer</h3>
+      {stages.map((x, i) => (
+        <button key={x.key} className={'v2-fstage' + (open === x.key ? ' on' : '')} onClick={() => setOpen(open === x.key ? null : x.key)} aria-expanded={open === x.key}>
+          <span className="v2-flabel">{x.label}</span>
+          <span className="v2-fbar"><i style={{ width: `${Math.max(x.count ? 4 : 0, Math.round(100 * x.count / top))}%` }} /></span>
+          <b>{x.count}</b>
+          <small>{i ? (stages[i - 1].count ? Math.round(100 * x.count / stages[i - 1].count) + '%' : '-') : ''}</small>
+        </button>
+      ))}
+      {st && (
+        <div className="v2-fdrill">
+          {st.leads.length ? st.leads.map(l => <Link key={l.id} to={`${BASE}/leads/${l.id}`} className="v2-tag">{l.company}</Link>) : <span className="evs-hint">Nobody at this stage yet.</span>}
+          {st.count > st.leads.length && <span className="evs-hint">and {st.count - st.leads.length} more</span>}
+        </div>
+      )}
+      <p className="evs-hint">Counts come from real messages, bookings, call outcomes and sign-ups. Attended only counts calls with an outcome recorded.</p>
+    </section>
+  )
+}
+
 export function Results() {
   const [days, setDays] = useState(30)
   const [by, setBy] = useState('campaign')
@@ -935,8 +1038,9 @@ export function Results() {
         {[7, 30, 90].map(d => <button key={d} className={'evs-chip' + (days === d ? ' on' : '')} onClick={() => setDays(d)}>Last {d} days</button>)}
       </div>
       <Box error={error} data={data}>
+        <Funnel stages={data?.funnel || []} days={days} />
         <div className="evs-stats evs-stats-6">
-          <div className="evs-stat"><b>{t.emails_sent}</b><span>Emails sent</span></div>
+          <div className="evs-stat"><b>{t.emails_sent}</b><span>Messages sent</span></div>
           <div className="evs-stat evs-stat-gold"><b>{t.replied}</b><span>Replied ({t.reply_rate}%)</span></div>
           <div className="evs-stat"><b>{t.booked}</b><span>Booked calls</span></div>
           <div className="evs-stat"><b>{t.calls_logged}</b><span>Calls logged</span></div>
@@ -960,7 +1064,7 @@ export function Results() {
           </div>
         </section>
         <section className="evs-card">
-          <h3>Emails sent by day</h3>
+          <h3>Campaign messages sent by day</h3>
           {data?.by_day?.length ? (
             <div className="evs-bars">
               {data.by_day.map(d => (

@@ -9,10 +9,11 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy import func
@@ -474,7 +475,7 @@ def results(days: int = 14, c: Ctx = Depends(ctx), db: Session = Depends(get_db)
     for m in msgs:
         d = m.created_at.replace(tzinfo=ZoneInfo("UTC")).astimezone(O.CENTRAL).date().isoformat()
         e = per_day.setdefault(d, {"date": d, "sent": 0, "replies": 0, "calls": 0, "failed": 0})
-        if m.direction == "out" and m.channel == "email" and m.status == "sent":
+        if m.direction == "out" and m.channel in ("email", "text") and m.status == "sent" and m.step_no is not None:
             e["sent"] += 1
         elif m.direction == "in":
             e["replies"] += 1
@@ -485,7 +486,31 @@ def results(days: int = 14, c: Ctx = Depends(ctx), db: Session = Depends(get_db)
     sent = sum(1 for m in msgs if m.direction == "out" and m.status == "sent")
     replied = sum(1 for s in states if s.replied_at)
     booked = len(_booked_ids(db, c.bso) & set(ids))
-    return {"days": days,
+    # The funnel (owner 2026-11-20): every stage from the same records, with the
+    # businesses behind each number so it can be drilled into. Contacted = got
+    # a campaign message in the period; the rest are of those leads.
+    from app.models.scheduling_models import SalesAppointment
+    from app.routers.evosys_bd_router import SIGNED_UP
+    try:
+        from app.models.scheduling_models import OUTCOMES_OCCURRED as _OCC
+    except Exception:                                                # noqa: BLE001
+        from app.services.appointment_outcome import OUTCOMES_OCCURRED as _OCC
+    by_id = {o.id: o for o in _leads_q(db, c).all()}
+    contacted = {m.opportunity_id for m in msgs if m.direction == "out" and m.step_no is not None and m.status == "sent"}
+    st_by = {x.opportunity_id: x for x in states}
+    rep = {i for i in contacted if st_by.get(i) and st_by[i].replied_at}
+    appts = (db.query(SalesAppointment).filter(SalesAppointment.opportunity_id.in_(list(contacted))).all()
+             if contacted else [])
+    bk = {a.opportunity_id for a in appts if a.status != "cancelled"}
+    att = {a.opportunity_id for a in appts if a.outcome and a.outcome in _OCC}
+    sig = {i for i in contacted if by_id.get(i) is not None and by_id[i].stage in SIGNED_UP}
+    def _names(ids):
+        return sorted([{"id": i, "company": by_id[i].company_name} for i in ids if i in by_id],
+                      key=lambda x: x["company"] or "")[:60]
+    funnel = [{"key": k, "label": l, "count": len(v), "leads": _names(v)} for k, l, v in (
+        ("contacted", "Contacted", contacted), ("replied", "Replied", rep), ("booked", "Booked a call", bk),
+        ("attended", "Attended", att), ("signed_up", "Signed up", sig))]
+    return {"days": days, "funnel": funnel,
             "totals": {"emails_sent": sent, "replied": replied, "booked": booked,
                        "opted_out": sum(1 for s in states if s.opted_out_at),
                        "bounced": sum(1 for s in states if s.stop_reason == "email_failed"),
@@ -624,6 +649,181 @@ def texting_check(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     _manager(c)
     from app.services.evosys_sales import sms_setup
     return sms_setup.check(O.get_settings(db, c.bso))
+
+
+# ── Calls: Business Growth Calls (design pages 11-18) ────────────────────────
+
+def _host(db: Session, c: Ctx, host_id: Optional[str]):
+    from app.models.models import User
+    from app.services.evosys_sales import calls as CL
+    hid = host_id or CL.default_host_id(db, c.bso, c.user)
+    if hid not in {h["id"] for h in CL.hosts(db, c.bso)} and hid != c.user.id:
+        raise HTTPException(422, "That person isn't on the EvoSys Sales team.")
+    u = db.get(User, hid)
+    if u is None:
+        raise HTTPException(404, "Host not found.")
+    return u
+
+
+def _call_row(db: Session, a, c: Ctx) -> dict:
+    from app.routers.sales_scheduling_router import _appt_out
+    out = jsonable_encoder(_appt_out(db, a, c.user))
+    return out
+
+
+@router.get("/calls")
+def calls_list(view: str = "upcoming", c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    from app.models.scheduling_models import SalesAppointment
+    from app.services import availability as av
+    now = datetime.utcnow()
+    q = db.query(SalesAppointment).filter(SalesAppointment.brand_sales_org_id == c.bso)
+    if view == "today":
+        d = av.utc_to_local(now, "America/Chicago").date()
+        q = q.filter(SalesAppointment.starts_at >= av.local_to_utc(d, 0, "America/Chicago"),
+                     SalesAppointment.starts_at < av.local_to_utc(d + timedelta(days=1), 0, "America/Chicago"),
+                     SalesAppointment.status != "cancelled").order_by(SalesAppointment.starts_at)
+    elif view == "past":
+        q = q.filter(SalesAppointment.ends_at < now).order_by(SalesAppointment.starts_at.desc())
+    else:
+        q = q.filter(SalesAppointment.ends_at >= now, SalesAppointment.status != "cancelled").order_by(SalesAppointment.starts_at)
+    return {"view": view, "calls": [_call_row(db, a, c) for a in q.limit(60).all()]}
+
+
+@router.get("/calls/meta")
+def calls_meta(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    from app.services.evosys_sales import calls as CL
+    return {"hosts": CL.hosts(db, c.bso), "default_host_id": CL.default_host_id(db, c.bso, c.user),
+            "timezone": CL.TZ, "title": CL.TITLE, "durations": [15, 30, 45, 60]}
+
+
+@router.get("/calls/day")
+def calls_day(day: date, host_id: Optional[str] = None, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    from app.services.evosys_sales import calls as CL
+    return CL.day(db, c.bso, _host(db, c, host_id), day)
+
+
+class CallCheckIn(BaseModel):
+    starts_at: datetime
+    duration_minutes: int = 30
+    host_id: Optional[str] = None
+    exclude_appointment_id: Optional[str] = None
+
+
+def _naive(t: datetime) -> datetime:
+    from datetime import timezone as _tz
+    return t if t.tzinfo is None else t.astimezone(_tz.utc).replace(tzinfo=None)
+
+
+@router.post("/calls/check")
+def calls_check(body: CallCheckIn, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    from app.services.evosys_sales import calls as CL
+    return CL.check(db, _host(db, c, body.host_id), _naive(body.starts_at), body.duration_minutes,
+                    body.exclude_appointment_id)
+
+
+class CallBookIn(BaseModel):
+    lead_id: Optional[str] = None
+    guest_name: Optional[str] = None
+    guest_email: Optional[str] = None
+    guest_phone: Optional[str] = None
+    title: Optional[str] = None
+    starts_at: datetime
+    duration_minutes: int = 30
+    timezone: str = "America/Chicago"
+    host_id: Optional[str] = None
+    notes: Optional[str] = None
+    send: bool = True
+
+
+@router.post("/calls", status_code=201)
+def calls_book(body: CallBookIn, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    from app.services.evosys_sales import calls as CL
+    opp = _opp(db, c, body.lead_id) if body.lead_id else None
+    if opp is None and not (body.guest_email or body.guest_phone):
+        raise HTTPException(422, "Pick a lead or enter the guest's email or phone.")
+    if not 5 <= body.duration_minutes <= 240:
+        raise HTTPException(422, "Pick a duration between 5 minutes and 4 hours.")
+    out = CL.book(db, c.bso, c.user, host=_host(db, c, body.host_id), starts_at=_naive(body.starts_at),
+                  minutes=body.duration_minutes, title=(body.title or "").strip() or CL.TITLE,
+                  timezone=body.timezone, notes=(body.notes or "").strip(), opp=opp,
+                  guest={"name": body.guest_name, "email": (body.guest_email or "").strip() or None,
+                         "phone": O.e164(body.guest_phone) if body.guest_phone else None}, send=body.send)
+    from app.models.scheduling_models import SalesAppointment
+    return dict(out, call=_call_row(db, db.get(SalesAppointment, out["id"]), c))
+
+
+def _brand_appt(db: Session, c: Ctx, appt_id: str):
+    from app.models.scheduling_models import SalesAppointment
+    a = db.get(SalesAppointment, appt_id)
+    if a is None or a.brand_sales_org_id != c.bso:
+        raise HTTPException(404, "Call not found.")
+    return a
+
+
+@router.get("/calls/{appt_id}")
+def calls_detail(appt_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    from app.services.evosys_sales import calls as CL
+    a = _brand_appt(db, c, appt_id)
+    out = {"call": _call_row(db, a, c), "replays": CL.replays(db, a), "replies": [], "activity": []}
+    if a.opportunity_id:
+        msgs = (db.query(EvoSysOutreachMessage).filter(EvoSysOutreachMessage.opportunity_id == a.opportunity_id)
+                .order_by(EvoSysOutreachMessage.created_at.desc()).limit(30).all())
+        out["replies"] = [_msg(m) for m in msgs if m.direction == "in"][:10]
+        out["activity"] = [{"at": iso(e.occurred_at), "summary": e.summary, "detail": e.detail}
+                           for e in db.query(OpportunityEvent).filter(OpportunityEvent.opportunity_id == a.opportunity_id)
+                           .order_by(OpportunityEvent.occurred_at.desc()).limit(25).all()]
+    return out
+
+
+class CallNotesIn(BaseModel):
+    notes: str = ""
+
+
+@router.post("/calls/{appt_id}/notes")
+def calls_notes(appt_id: str, body: CallNotesIn, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    a = _brand_appt(db, c, appt_id)
+    a.notes = (body.notes or "").strip()[:5000] or None
+    db.commit()
+    return {"ok": True, "notes": a.notes}
+
+
+@router.get("/calls-settings")
+def calls_settings(host_id: Optional[str] = None, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """Everything the Calls settings page shows, read from the real config."""
+    from app.services import availability as av
+    from app.services.evosys_sales import calls as CL, voice as V
+    from app.models.scheduling_models import AvailabilityWindow, AvailabilityBlock
+    host = _host(db, c, host_id)
+    s = O.get_settings(db, c.bso)
+    prof = av.get_or_create_profile(db, host)
+    wins = db.query(AvailabilityWindow).filter(AvailabilityWindow.profile_id == prof.id).order_by(
+        AvailabilityWindow.day_of_week, AvailabilityWindow.start_minute).all()
+    blocks = db.query(AvailabilityBlock).filter(AvailabilityBlock.profile_id == prof.id,
+                                                AvailabilityBlock.kind == "recurring").all()
+    from app.models.calendar_models import CalendarConnection
+    conns = db.query(CalendarConnection).filter(CalendarConnection.user_id == host.id).all()
+    try:
+        from app.services.meeting_providers import get_provider
+        zp = get_provider(db, c.bso, "zoom")
+        zoom_ready, zoom_why = zp.is_ready() if zp is not None else (False, "Zoom isn't connected.")
+    except Exception as e:                                           # noqa: BLE001
+        zoom_ready, zoom_why = False, str(e)[:120]
+    recips = [{"who": "Mike (primary)", "phone": s.alert_phone, "email": s.alert_email}] + [
+        {"who": r.get("name") or "Also", "phone": r.get("phone"), "email": r.get("email")}
+        for r in (s.alert_also or []) if isinstance(r, dict)]
+    db.commit()
+    return {"host": {"id": host.id, "name": host.full_name or host.email}, "hosts": CL.hosts(db, c.bso),
+            "timezone": prof.timezone, "duration_minutes": 30, "min_notice_minutes": prof.min_notice_minutes,
+            "buffer_before_minutes": prof.buffer_before_minutes, "buffer_after_minutes": prof.buffer_after_minutes,
+            "gap_between_calls_minutes": 15, "booking_horizon_days": prof.booking_horizon_days,
+            "windows": [{"day": w.day_of_week, "start": w.start_minute, "end": w.end_minute} for w in wins],
+            "blocks": [{"day": b.day_of_week, "start": b.start_minute, "end": b.end_minute, "label": b.label} for b in blocks],
+            "calendars": [{"provider": x.provider, "account": x.account_email, "calendar": x.calendar_id,
+                           "connected": bool(x.is_connected)} for x in conns],
+            "zoom": {"ready": bool(zoom_ready), "detail": zoom_why},
+            "reminders": ["Text the day before (9 AM - 7 PM Central)", "Text 1 hour before",
+                          "Calendar invite by email when the guest has an email"],
+            "alerts": recips, "calling": V.status(s)}
 
 
 # ── calling from the team number ─────────────────────────────────────────────

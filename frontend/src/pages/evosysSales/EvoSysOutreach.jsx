@@ -121,6 +121,28 @@ function CampaignEditor({ id, meta, onChange }) {
       {form?.problems?.length > 0 && <div className="evs-banner"><b>Before you can approve:</b><ul>{form.problems.map(p => <li key={p}>{p}</li>)}</ul></div>}
       {msg && <div className={msg.ok ? 'evs-okmsg' : 'evs-error'} role="status">{msg.text}</div>}
 
+      {form?.steps?.length > 0 && (
+        <section className="evs-card v2-seq">
+          <h3>Sequence at a glance</h3>
+          <div className="v2-seqrow">
+            {form.steps.map((st, i) => (
+              <div key={i} className="v2-seqstep">
+                <span className="v2-seqn">{i + 1}</span>
+                <b>{i === 0 ? 'First message' : i === form.steps.length - 1 ? 'Last follow-up' : 'Follow-up'}</b>
+                <small>Day {st.day} · {st.channel === 'text' ? 'Text' : 'Email'}</small>
+                <small className="v2-seqbody">{(st.body || st.subject || '').slice(0, 90)}{(st.body || '').length > 90 ? '…' : ''}</small>
+              </div>
+            ))}
+          </div>
+          <div className="v2-seqrules">
+            <div><b>Sends</b><small>{form.hours} · up to {form.daily_limit} a day · {form.can_send ? 'ON' : 'OFF'}</small></div>
+            <div><b>Stops</b><small>When they reply, book a call, or opt out (STOP or Do Not Contact). A delivery failure is retried once, then skipped.</small></div>
+            <div><b>Who gets it</b><small>{form.group}. Leads without the right contact for a step skip that step.</small></div>
+            {form.audience && <div><b>Right now</b><small>{form.audience.in_followup} in follow-up · {form.audience.waiting} waiting · {form.audience.stopped} stopped · {form.audience.finished} finished</small></div>}
+          </div>
+        </section>
+      )}
+
       <section className="evs-card">
         <h3>Offer, link and schedule</h3>
         <div className="evs-grid">

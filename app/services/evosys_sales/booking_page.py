@@ -131,7 +131,8 @@ def slots(db: Session, opp: Opportunity, start: Optional[date] = None, days: int
         if any(t < e + gap and t + dur + gap > b for b, e in busy):
             continue
         out.append(t.isoformat() + "Z")
-    return {"slots": out[:400],         # a full week of 15-minute starts (40 cut the week to ~3 days) "duration_minutes": (mt.duration_minutes if mt else 30) or 30,
+    # a full week of 15-minute starts (40 cut the week to ~3 days)
+    return {"slots": out[:400], "duration_minutes": (mt.duration_minutes if mt else 30) or 30,
             "timezone": "America/Chicago"}
 
 
