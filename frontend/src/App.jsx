@@ -182,13 +182,17 @@ const InsSettings = insPage('SettingsPage')
 // EvoSys Sales program (/program/evosys-sales/*): EvoSys's own sales team.
 const EvsShell = lazyPage(() => import('./pages/evosysSales/EvoSysSales'))
 const evsPage = name => lazyPage(() => import('./pages/evosysSales/EvoSysSales').then(m => ({ default: m[name] })))
-const EvsToday = evsPage('Today')
 const EvsLeads = evsPage('Leads')
 const EvsLead = evsPage('Lead')
-const EvsConversations = evsPage('Conversations')
 const EvsOutreach = evsPage('Outreach')
-const EvsAppointments = evsPage('Appointments')
 const EvsResults = evsPage('Results')
+const EvsInbox = lazyPage(() => import('./pages/evosysSales/Inbox'))
+const evsCalls = name => lazyPage(() => import('./pages/evosysSales/Calls').then(m => ({ default: m[name] })))
+const EvsCallsList = evsCalls('CallsList')
+const EvsCallsCalendar = evsCalls('CallsCalendar')
+const EvsNewCall = evsCalls('NewCall')
+const EvsCallDetail = evsCalls('CallDetail')
+const EvsCallsSettings = evsCalls('CallsSettings')
 // EvoSys Business Development (/program/evosys-business-development/*): the second
 // version of the same program, on the same data, so both can be compared.
 const BdShell = lazyPage(() => import('./pages/evosysBD/EvoSysBD'))
@@ -1744,12 +1748,16 @@ export default function App() {
         </Route>
         {/* EvoSys Sales program: /sales/evosys/* admits only the EvoSys Pro sales team. */}
         <Route path="/program/evosys-sales" element={<ProtectedRoute bare><EvsShell /></ProtectedRoute>}>
-          <Route index element={<EvsToday />} />
+          <Route index element={<EvsInbox />} />
           <Route path="leads" element={<EvsLeads />} />
           <Route path="leads/:id" element={<EvsLead />} />
-          <Route path="conversations" element={<EvsConversations />} />
+          <Route path="conversations" element={<EvsInbox />} />
           <Route path="outreach" element={<EvsOutreach />} />
-          <Route path="appointments" element={<EvsAppointments />} />
+          <Route path="appointments" element={<EvsCallsList />} />
+          <Route path="appointments/calendar" element={<EvsCallsCalendar />} />
+          <Route path="appointments/new" element={<EvsNewCall />} />
+          <Route path="appointments/settings" element={<EvsCallsSettings />} />
+          <Route path="appointments/:id" element={<EvsCallDetail />} />
           <Route path="results" element={<EvsResults />} />
         </Route>
         <Route path="/program/evosys-business-development" element={<ProtectedRoute bare><BdShell /></ProtectedRoute>}>

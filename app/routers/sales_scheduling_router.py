@@ -541,6 +541,9 @@ class BookIn(BaseModel):
     prospect_email: Optional[str] = None
     prospect_phone: Optional[str] = None
     prospect_timezone: Optional[str] = None
+    # False = book it (calendar + Zoom) but don't email the prospect the
+    # invitation yet ("Book without sending"). Default keeps old behavior.
+    send_invite: bool = True
 
 
 class ConfirmIn(BaseModel):
@@ -1129,14 +1132,18 @@ def create_appointment(body: BookIn,
     # un-book it: both calls swallow their own failures and record them on the
     # rows, so a Microsoft outage produces a meeting flagged "needs attention",
     # never a lost booking or a 500 to the person who just booked it.
-    _push_appointment(db, appt, user, kind="invite")
+    _push_appointment(db, appt, user, kind="invite", send_invite=body.send_invite)
 
     db.refresh(appt)
     return _appt_out(db, appt, user)
 
 
+class _SkipInvite(Exception):
+    pass
+
+
 def _push_appointment(db: Session, appt: SalesAppointment, user: User,
-                      kind: str = "invite") -> dict:
+                      kind: str = "invite", send_invite: bool = True) -> dict:
     """Sync the internal team's calendars and email the prospect.
 
     One place, so booking and rescheduling cannot drift apart. Never raises —
@@ -1163,7 +1170,11 @@ def _push_appointment(db: Session, appt: SalesAppointment, user: User,
         logging.getLogger(__name__).exception(
             "appointment sync raised for %s", appt.id)
     try:
+        if not send_invite:
+            raise _SkipInvite()
         invite_report = apinvite.send_prospect_invitation(db, appt, kind=kind)
+    except _SkipInvite:
+        invite_report = {"skipped": "booked without sending"}
     except Exception:
         import logging
         logging.getLogger(__name__).exception(
