@@ -121,6 +121,7 @@ def _settings_out(s, c: Ctx, db: Session) -> dict:
             "problems": O.settings_problems(s), "can_manage": c.manager,
             "sms_from_number": s.sms_from_number,
             "alert_phone": s.alert_phone, "alert_email": s.alert_email,
+            "voice_forward_to": s.voice_forward_to,
             "text_auto_reply": bool(s.text_auto_reply),
             "alert_also": s.alert_also or [], "reply_examples": s.reply_examples or [],
             "texting_ready": bool(O.e164(s.sms_from_number)),
@@ -515,6 +516,7 @@ class SettingsIn(BaseModel):
     mailing_address: Optional[str] = None
     sms_from_number: Optional[str] = None
     alert_phone: Optional[str] = None
+    voice_forward_to: Optional[str] = None
     alert_email: Optional[str] = None
     text_auto_reply: Optional[bool] = None
     alert_also: Optional[list] = None
@@ -565,6 +567,8 @@ def save_team_settings(db: Session, s, data: dict, user_id: str) -> bool:
     # never stops a campaign.
     if data.get("alert_phone") is not None:
         s.alert_phone = O.e164(data["alert_phone"]) or None
+    if data.get("voice_forward_to") is not None:
+        s.voice_forward_to = O.e164(data["voice_forward_to"]) or None
     if data.get("alert_also") is not None:
         cleaned = []
         for r in data["alert_also"][:10]:
@@ -620,6 +624,95 @@ def texting_check(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     _manager(c)
     from app.services.evosys_sales import sms_setup
     return sms_setup.check(O.get_settings(db, c.bso))
+
+
+# ── calling from the team number ─────────────────────────────────────────────
+
+@router.get("/voice/status")
+def voice_status(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    from app.services.evosys_sales import voice as V
+    return V.status(O.get_settings(db, c.bso))
+
+
+@router.post("/voice/setup")
+def voice_setup(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """Owner: create the calling app/key once and route incoming calls."""
+    from app.services.evosys_sales import voice as V
+    from app.services.support_authority import is_god
+    if not is_god(c.user):
+        raise HTTPException(403, "Only the platform owner can set up calling.")
+    out = V.ensure_setup(db, O.get_settings(db, c.bso))
+    if out.get("error"):
+        raise HTTPException(409, out["error"])
+    return out
+
+
+@router.get("/voice/token")
+def voice_token(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    from app.services.evosys_sales import voice as V
+    return V.token(O.get_settings(db, c.bso), c.user)
+
+
+class CallOutcomeIn(BaseModel):
+    outcome: str
+    note: Optional[str] = None
+
+
+@router.post("/leads/{opp_id}/calls/{call_id}/outcome")
+def call_outcome(opp_id: str, call_id: str, body: CallOutcomeIn, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    from app.services.evosys_sales import voice as V
+    o = _opp(db, c, opp_id)
+    try:
+        row = V.record_outcome(db, o, call_id, body.outcome, (body.note or "").strip(), c.user)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    return _msg(row)
+
+
+async def _voice_params(request: Request, db: Session) -> dict:
+    """Twilio-signed calls on the PLATFORM account only."""
+    from app.utils.twilio_webhook_guard import _form_params, platform_account
+    from app.utils.twilio_security import verify_signature_or_403
+    params = await _form_params(request)
+    acct = platform_account()
+    if not acct or (params.get("AccountSid") or "") != acct[0]:
+        raise HTTPException(403, "Forbidden")
+    verify_signature_or_403(request, acct[1], params)
+    return params
+
+
+def _xml(body: str):
+    from fastapi.responses import Response
+    return Response(content=body, media_type="application/xml")
+
+
+@public_router.post("/voice/outbound")
+async def voice_outbound(request: Request, db: Session = Depends(get_db)):
+    from app.services.evosys_sales import voice as V
+    p = await _voice_params(request, db)
+    return _xml(V.outbound(db, O.get_settings(db, O.brand_id(db)), p))
+
+
+@public_router.post("/voice/inbound")
+async def voice_inbound(request: Request, db: Session = Depends(get_db)):
+    from app.services.evosys_sales import voice as V
+    p = await _voice_params(request, db)
+    return _xml(V.inbound(db, O.get_settings(db, O.brand_id(db)), p))
+
+
+@public_router.post("/voice/inbound-done")
+async def voice_inbound_done(request: Request, db: Session = Depends(get_db)):
+    from app.services.evosys_sales import voice as V
+    p = await _voice_params(request, db)
+    return _xml(V.inbound_done(db, O.get_settings(db, O.brand_id(db)), p))
+
+
+@public_router.post("/voice/status")
+async def voice_status_cb(request: Request, db: Session = Depends(get_db)):
+    from app.services.evosys_sales import voice as V
+    p = await _voice_params(request, db)
+    V.status_update(db, p)
+    return _xml("<Response/>")
 
 
 @router.get("/texting/audit")

@@ -46,6 +46,12 @@ class EvoSysOutreachSettings(Base):
     alert_also = Column(JSON, nullable=True)
     # Example answers the owner wrote; AI text replies follow their style.
     reply_examples = Column(JSON, nullable=True)
+    # Calling from the team number (2026-11-20): the platform-account calling
+    # app + browser key (secret encrypted), and where incoming calls ring.
+    voice_app_sid = Column(String(64), nullable=True)
+    voice_key_sid = Column(String(64), nullable=True)
+    voice_key_secret_enc = Column(Text, nullable=True)
+    voice_forward_to = Column(String(20), nullable=True)
     # Owner request 2026-11-18: AI answers simple text replies on its own
     # (interested / "is it free" / "how does it work"); anything else waits
     # for a person with a draft ready. Off by default.
