@@ -61,7 +61,14 @@ def check(db: Session, host: User, starts_at: datetime, minutes: int,
     try:
         vis = _refresh_external(db, [host], starts_at - timedelta(hours=1), ends_at + timedelta(hours=1), force=True)
         out["calendar_readable"] = not (vis or {}).get("unreadable")
-        if extbusy.external_conflicts(db, [host.id], starts_at, ends_at):
+        own = None
+        if exclude_appointment_id:
+            from app.models.scheduling_models import SalesAppointment
+            a = db.get(SalesAppointment, exclude_appointment_id)
+            own = a.starts_at if a is not None else None
+        # Same rule as reschedule_appointment: the call's OWN calendar event is
+        # in the cache too, and must not count as a clash with itself.
+        if [x for x in extbusy.external_conflicts(db, [host.id], starts_at, ends_at) if x.get("starts_at") != own]:
             out["conflicts"].append("Busy on the connected calendar")
     except Exception:                                                # noqa: BLE001
         out["calendar_readable"] = False
