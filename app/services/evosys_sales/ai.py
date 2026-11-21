@@ -407,8 +407,16 @@ def _lead_booking_link(settings, campaign, opp) -> str:
     return F._booking_link(src, opp) or ""
 
 
+REPLY_TONES = {
+    "cold": "Use a neutral, low-pressure introduction.",
+    "warm": "Sound friendly and personal, with a simple next step.",
+    "hot": "Be direct and ask for one concrete next step.",
+    "extremely_hot": "Be concise and action-oriented. Mention urgency only when supported by verified facts.",
+}
+
+
 def text_reply(db: Session, settings, campaign, opp, reply_msg, conversation: list, user_id: str,
-               force: bool = False, background: bool = False) -> EvoSysAITask:
+               force: bool = False, background: bool = False, tone: str | None = None) -> EvoSysAITask:
     """Summarise a text reply and draft the answer. `output.auto_ok` says the
     rules allow it to go out by itself; the caller decides."""
     lang = preferred_language(conversation, reply_msg.body)
@@ -426,6 +434,9 @@ def text_reply(db: Session, settings, campaign, opp, reply_msg, conversation: li
              "style_examples": [str(x)[:1200] for x in (settings.reply_examples or []) if str(x).strip()][:6],
              "booking_link": _lead_booking_link(settings, campaign, opp),
              "sender_name": settings.sender_name or "Mike"}
+
+    if tone in REPLY_TONES:
+        facts["reply_tone_instruction"] = REPLY_TONES[tone]
 
     def check(raw):
         cat = raw.get("category") if raw.get("category") in REPLY_CATEGORIES else "unclear"
@@ -452,7 +463,7 @@ def text_reply(db: Session, settings, campaign, opp, reply_msg, conversation: li
             needs.append("The draft is long for a text - trim it.")
         if draft and (looks_spanish(draft) != (lang == "Spanish")):
             needs.append("The draft is not in %s - check it." % lang)
-        auto_ok = (bool(raw.get("simple")) and cat in AUTO_CATEGORIES and not needs and bool(draft))
+        auto_ok = (tone is None and bool(raw.get("simple")) and cat in AUTO_CATEGORIES and not needs and bool(draft))
         out = {"category": cat, "summary": str(raw.get("summary") or "")[:400], "draft": draft,
                "needs_person": needs, "auto_ok": auto_ok, "used_offer": True,
                "draft_english": (str(raw.get("draft_english") or "")[:600] or None) if lang == "Spanish" and draft else None}
