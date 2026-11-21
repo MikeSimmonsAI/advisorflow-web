@@ -346,6 +346,7 @@ def run(db: Session, now: Optional[datetime] = None) -> Dict:
         try:   # Nov 17: queue the families starting over (once; sends nothing)
             from app.services.programs import sci_rerun
             sci_rerun.ensure_staged(db, prog, now=now)
+            sci_rerun.top_up(db, prog, now=now)      # Nov 21: later non-responders join too
         except Exception:  # noqa: BLE001
             db.rollback()
             log.exception("sci rerun staging failed for program %s", prog.id)

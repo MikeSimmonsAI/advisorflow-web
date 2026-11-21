@@ -218,6 +218,23 @@ def main(argv=None) -> int:
     except Exception as e:                                   # noqa: BLE001
         log.error("VOLT seed errored (deploy continues): %s: %s", type(e).__name__, str(e)[:200])
 
+    # ── 3e2. OWNER-ORDERED ONE-TIME OUTREACH CHANGES (Nov 21) ──
+    # Restland and SCI "full blast" (programs/owner_changes.py). Each change
+    # runs once (ledger row), records every before-value, and is inert after
+    # Nov 23. Never changes the exit code.
+    try:
+        from app.deps import SessionLocal
+        from app.services.programs import owner_changes
+        _db = SessionLocal()
+        try:
+            res = owner_changes.apply_pending(_db)
+            if res:
+                log.info("owner changes: %s", json.dumps(res, default=str)[:1500])
+        finally:
+            _db.close()
+    except Exception as e:                                   # noqa: BLE001
+        log.error("Owner changes errored (deploy continues): %s: %s", type(e).__name__, str(e)[:200])
+
     # ── 3f. WORKSPACE DATA RESET (#507) - inert unless switched on ──
     # WORKSPACE_RESET="<organization id>:<plan|apply|configure>:<run key>" or
     # "<organization id>:rollback:<run id>". `apply` is idempotent per run key
