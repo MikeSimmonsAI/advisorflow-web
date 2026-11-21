@@ -284,7 +284,8 @@ PERSON_ONLY_RE = re.compile(
 # Claims we may not make.
 CLAIM_RE = re.compile(r"\b(verified|pre-?qualified|actively looking|already (requested|asked for)|guarantee[ds]?|"
                       r"verificad[oa]s|garantiza\w*)\b"
-                      r"|\b(no|don'?t|do not) (tenemos|have)( an?)?( official| oficial)? (sitio web|website|web site)\b", re.I)
+                      r"|\b(no|don'?t|do not)\s+(tenemos|have)\s+(?:(?:un|una|an?|any)\s+)?(?:official\s+)?"
+                      r"(sitio web|website|web site|p[aá]gina web)", re.I)
 
 
 def preferred_language(conversation: list, latest_text: str) -> str:
