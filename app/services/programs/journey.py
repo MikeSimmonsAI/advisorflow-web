@@ -319,10 +319,10 @@ def _slot_schedule(db: Session, prog: OutreachProgram) -> Optional[Dict]:
     if cfg is None:
         return None
     return dict(cfg, label=("A new family's first text at %s AM Central and every %d minutes until %s; "
-                            "a due follow-up %d minutes after each; every day."
+                            "a due follow-up %d minutes after each; %s."
                             % (cfg["open"].lstrip("0"), cfg["new_every_minutes"],
                                "6:00 PM" if cfg["close"] == "18:00" else cfg["close"],
-                               cfg["followup_offset_minutes"])))
+                               cfg["followup_offset_minutes"], _os.days_label(cfg))))
 
 
 def _may_enrol(lead: Lead) -> bool:

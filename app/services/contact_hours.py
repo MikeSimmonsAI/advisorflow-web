@@ -260,8 +260,12 @@ def local_times(lead, now_utc: Optional[datetime] = None) -> List[Tuple[str, dat
     return out
 
 
-def check(lead, now_utc: Optional[datetime] = None) -> Dict[str, Any]:
+def check(lead, now_utc: Optional[datetime] = None, program_days: bool = True) -> Dict[str, Any]:
     """May this lead be contacted at this moment?
+
+    program_days: a program's closed days (Restland, Nov 22: nothing on
+    Sundays - outreach_slots.closed_days) count as not permitted. A person
+    sending by hand passes False; everything automatic keeps the default.
 
     {"permitted": bool, "code": str, "reason": str, "basis": str|None,
      "zones": [...], "local": {zone: "HH:MM"}}
@@ -300,6 +304,11 @@ def check(lead, now_utc: Optional[datetime] = None) -> Dict[str, Any]:
                                   WINDOW_START.strftime("%H:%M"),
                                   WINDOW_END.strftime("%H:%M"))),
                     "basis": resolved["basis"], "zones": zones, "local": local}
+    if program_days and _program_closed(lead, now_utc):
+        return {"permitted": False, "code": OUTSIDE_WINDOW,
+                "reason": ("This program sends nothing on Sundays (owner, Nov 22); "
+                           "it waits for the next open day."),
+                "basis": resolved["basis"], "zones": zones, "local": local}
     outside = [name for name, dt in pairs
                if not (LOCAL_FLOOR <= dt.time() <= LOCAL_CEILING)]
     if outside:
@@ -328,6 +337,21 @@ def _own_window(lead) -> bool:
         from sqlalchemy.orm import object_session
         from app.services.programs.outreach_slots import owns_window
         return owns_window(org_id, object_session(lead))
+    except Exception:                                    # noqa: BLE001
+        return False
+
+
+def _program_closed(lead, now_utc: datetime) -> bool:
+    """The lead's program is closed today (outreach_slots.closed_days)."""
+    org_id = getattr(lead, "organization_id", None)
+    if not org_id:
+        return False
+    try:
+        from sqlalchemy.orm import object_session
+        from app.services.programs.outreach_slots import closed_for_org
+        if now_utc.tzinfo is not None:
+            now_utc = now_utc.astimezone(_timezone.utc).replace(tzinfo=None)
+        return closed_for_org(object_session(lead), org_id, now_utc)
     except Exception:                                    # noqa: BLE001
         return False
 

@@ -38,7 +38,13 @@ TZ = "America/Chicago"
 GRACE = timedelta(minutes=3)
 SEARCH_DAYS = 120
 DEFAULTS = {"open": "08:30", "close": "18:00", "new_every_minutes": 8, "followup_offset_minutes": 2,
-            "followup_fill": False}
+            "followup_fill": False, "closed_days": ""}
+# closed_days (owner, Nov 22 - "I want everything to stop on Sundays, only on
+# Sundays"): ISO weekdays (1 = Monday ... 7 = Sunday) on which this program
+# sends NOTHING automatic - no new-family texts, no follow-up texts, no
+# emails, no AI answers, no daily batch, no survey. The day simply has no
+# slots: whatever falls due waits for the next open day, in order. Replies
+# still come in and alert staff, bookings still work, STOP is still honoured.
 # followup_fill (owner, Nov 21 - "full blast, no slow drip"): follow-up texts
 # may use EVERY minute between the new-family slots (not just one slot per
 # gap), so follow-ups keep up when new families go every few minutes. Still
@@ -69,7 +75,49 @@ def config_from_policy(raw) -> Optional[Dict]:
     out["new_every_minutes"] = max(1, int(out["new_every_minutes"]))
     out["followup_offset_minutes"] = max(1, min(out["new_every_minutes"] - 1, int(out["followup_offset_minutes"])))
     out["followup_fill"] = bool(out.get("followup_fill"))
+    out["closed_days"] = "".join(sorted({c for c in str(out.get("closed_days") or "") if c in "1234567"}))
     return out
+
+
+DAY_NAMES = {"1": "Monday", "2": "Tuesday", "3": "Wednesday", "4": "Thursday", "5": "Friday",
+             "6": "Saturday", "7": "Sunday"}
+
+
+def closed_on(day, cfg: Optional[Dict]) -> bool:
+    """Is this local date one of the program's closed days?"""
+    return bool(cfg) and str(day.isoweekday()) in (cfg.get("closed_days") or "")
+
+
+def closed_now(now_utc: Optional[datetime], cfg: Optional[Dict]) -> bool:
+    """Is it (Central) a closed day for this program right now?"""
+    if not cfg or not cfg.get("closed_days"):
+        return False
+    return closed_on(_local(now_utc or datetime.utcnow()).date(), cfg)
+
+
+def closed_for_org(db: Optional[Session], org_id: Optional[str], now_utc: Optional[datetime] = None) -> bool:
+    """True when this workspace's program is closed today. False on any error
+    or for a workspace without a text schedule (SCI and the rest)."""
+    if not org_id:
+        return False
+    try:
+        if db is None:
+            from app.deps import SessionLocal
+            s = SessionLocal()
+            try:
+                return closed_now(now_utc, config_for_org(s, org_id))
+            finally:
+                s.close()
+        return closed_now(now_utc, config_for_org(db, org_id))
+    except Exception:                                    # noqa: BLE001 - never blocks on a lookup error
+        log.exception("closed-day lookup failed for %s", org_id)
+        return False
+
+
+def days_label(cfg: Optional[Dict]) -> str:
+    """"every day" or "every day except Sunday" (for screens and summaries)."""
+    closed = [DAY_NAMES[c] for c in (cfg or {}).get("closed_days") or ""]
+    return "every day except %s" % " and ".join(closed) if closed else "every day"
 
 
 _cache: Dict[str, tuple] = {}
@@ -137,7 +185,10 @@ def _local(utc_naive: datetime) -> datetime:
 
 
 def day_slots(day, cfg: Dict, kind: str) -> List[datetime]:
-    """Naive-UTC slot times of one kind on one local date (DST-safe)."""
+    """Naive-UTC slot times of one kind on one local date (DST-safe). A
+    closed day (closed_days) has none."""
+    if closed_on(day, cfg):
+        return []
     open_t, close_t = _t(cfg["open"]), _t(cfg["close"])
     if kind == "followup" and cfg.get("followup_fill"):
         return _fill_slots(day, cfg)
@@ -177,6 +228,8 @@ def slots_from(earliest: datetime, cfg: Dict, kind: str, days: int = SEARCH_DAYS
 
 
 def permits(now_utc: datetime, cfg: Dict) -> bool:
+    if closed_now(now_utc, cfg):
+        return False
     lt = _local(now_utc).time().replace(tzinfo=None)
     return _t(cfg["open"]) <= lt < _t(cfg["close"])
 

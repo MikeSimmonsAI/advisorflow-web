@@ -266,6 +266,11 @@ def run_for(db: Session, prog: OutreachProgram, now: Optional[datetime] = None) 
         return None
     if str(local.isoweekday()) not in days_of(prog):
         return None
+    # A program's closed day (Restland, Nov 22: nothing on Sundays): no batch
+    # that day - and the day is not claimed, so Monday's batch runs as usual.
+    from app.services.programs import outreach_slots as _os
+    if _os.closed_for_org(db, prog.organization_id, now or datetime.utcnow()):
+        return None
     start_t = _start_time(prog)
     if local.time() < start_t:
         return None
