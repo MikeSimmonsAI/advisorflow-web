@@ -238,6 +238,14 @@ function Shell() {
   }, [navigate, location.pathname])
   useEffect(() => { live.current = true; if (authed) loadMe(); return () => { live.current = false } }, [authed]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Home-screen icon dot follows the unread count (where the phone supports it).
+  useEffect(() => {
+    try {
+      if (unread > 0 && navigator.setAppBadge) navigator.setAppBadge(unread).catch(() => {})
+      else if (!unread && navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {})
+    } catch { /* unsupported */ }
+  }, [unread])
+
   // Unread badge: a quiet poll, no new service.
   useEffect(() => {
     if (!authed || !me || !me.access || !me.access.chat) return undefined

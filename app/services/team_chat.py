@@ -350,8 +350,53 @@ def post(db: Session, access, user: User, room: TeamChatRoom, body: str,
         r.last_read_at = now
     else:
         db.add(TeamChatRead(room_id=room.id, user_id=user.id, last_read_at=now))
+    alert_ids = _queue_phone_alerts(db, user, room, msg, readers, clean_mentions)
     db.commit()
+    if alert_ids:
+        from app.services import web_push_service as wps
+        wps.deliver_now_in_background(alert_ids)
     return serialize_messages(db, user, [msg])[0]
+
+
+def _first_name(u: Optional[User]) -> str:
+    name = (getattr(u, "name", None) or getattr(u, "full_name", None) or "").strip()
+    return name.split()[0] if name else "a teammate"
+
+
+def _alert_title(user: User, room: TeamChatRoom, mentioned: bool) -> str:
+    """The only words on the lock screen: who and where - never the message
+    itself (a lock screen is public)."""
+    who = _first_name(user)
+    if room.kind == ROOM_ANNOUNCEMENTS:
+        return "New company announcement"
+    if mentioned:
+        return ("%s mentioned you" % who)[:80]
+    if room.kind == ROOM_DM:
+        return ("New message from %s" % who)[:80]
+    return ("%s posted in %s" % (who, room.name or "Team Chat"))[:80]
+
+
+def _queue_phone_alerts(db: Session, user: User, room: TeamChatRoom, msg: TeamChatMessage,
+                        readers: set, mentions: List[str]) -> List[str]:
+    """One phone alert per other person in the conversation, in the same
+    transaction as the message. Never raises: a missing alert must never
+    stop a message from sending."""
+    try:
+        from app.models.push_models import TYPE_TEAM_CHAT
+        from app.services import web_push_service as wps
+        ids = []
+        for uid in sorted(readers - {user.id}):
+            ev = wps.enqueue(db, target_user_id=uid, organization_id=None, event_type=TYPE_TEAM_CHAT,
+                             idempotency_key="chat:%s:%s" % (msg.id, uid),
+                             title=_alert_title(user, room, uid in mentions),
+                             url="/app/chat/%s" % room.id, record_type="team_chat_room", record_id=room.id)
+            if ev is not None:
+                ids.append(ev.id)
+        return ids
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception("team chat: could not queue phone alerts")
+        return []
 
 
 def _drive_label(url: str) -> str:

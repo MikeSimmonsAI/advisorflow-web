@@ -44,8 +44,8 @@ from sqlalchemy.orm import Session
 
 from app.models.push_models import (
     EVENT_FAILED, EVENT_NO_SUBSCRIPTIONS, EVENT_NOT_CONFIGURED, EVENT_PARTIAL,
-    EVENT_PENDING, EVENT_SENT, TYPE_GENERIC, TYPE_HOT_REPLY, TYPE_REPLY,
-    TYPE_TEST, PushEvent, PushSubscription)
+    EVENT_PENDING, EVENT_SENDING, EVENT_SENT, TYPE_GENERIC, TYPE_HOT_REPLY, TYPE_REPLY,
+    TYPE_TEAM_CHAT, TYPE_TEST, PushEvent, PushSubscription)
 
 _log = logging.getLogger(__name__)
 
@@ -59,6 +59,7 @@ TITLES = {
     TYPE_REPLY: "New reply on one of your leads",
     TYPE_TEST: "Test alert",
     TYPE_GENERIC: "New activity",
+    TYPE_TEAM_CHAT: "New team message",
 }
 
 
@@ -297,7 +298,8 @@ def enqueue(db: Session, *, target_user_id: str, organization_id: Optional[str],
                 return obj
     if existing is not None:
         return existing
-    safe_url = url if (isinstance(url, str) and (url.startswith("/m") or url.startswith("/wholesale"))) else DEFAULT_URL
+    safe_url = url if (isinstance(url, str) and (url.startswith("/m") or url.startswith("/wholesale")
+                                                  or url.startswith("/app/"))) else DEFAULT_URL
     ev = PushEvent(id=str(uuid.uuid4()), organization_id=organization_id,
                    target_user_id=target_user_id, type=event_type,
                    title=(title or TITLES.get(event_type) or TITLES[TYPE_GENERIC])[:80],
@@ -368,8 +370,11 @@ def deliver_event(db: Session, ev: PushEvent, *, sender: Optional[Sender] = None
             db.commit()
             return {"status": ev.status, "sent": 0}
         sender = _pywebpush_sender
+    # Team Chat is the person's own conversation, not one workspace's data:
+    # it buzzes every phone they turned alerts on for, whichever workspace
+    # that phone was in when they did.
     subs = subscriptions if subscriptions is not None else live_subscriptions(
-        db, ev.target_user_id, ev.organization_id)
+        db, ev.target_user_id, ev.organization_id, any_workspace=(ev.type == TYPE_TEAM_CHAT))
     if not subs:
         ev.status = EVENT_NO_SUBSCRIPTIONS
         db.commit()
@@ -439,14 +444,66 @@ def deliver_pending(db: Session, *, limit: int = 50, sender: Optional[Sender] = 
     return out
 
 
+def deliver_now(event_ids: List[str], *, sender: Optional[Sender] = None,
+                session_factory=None) -> int:
+    """Send these just-queued events straight away (Team Chat should buzz in
+    seconds, not on the next 20-second outbox pass). Each event is CLAIMED
+    with one conditional update (pending -> sending) so the background pass
+    and this call can never both send it. Anything that goes wrong puts the
+    event back to pending for the background pass. Never raises."""
+    if not event_ids or (sender is None and not is_configured()):
+        return 0
+    if session_factory is None:
+        from app.deps import SessionLocal as session_factory  # noqa: N813
+    db = session_factory()
+    done = 0
+    try:
+        for eid in event_ids:
+            try:
+                n = (db.query(PushEvent).filter(PushEvent.id == eid, PushEvent.status == EVENT_PENDING)
+                     .update({PushEvent.status: EVENT_SENDING}, synchronize_session=False))
+                db.commit()
+                if n != 1:
+                    continue
+                ev = db.query(PushEvent).filter(PushEvent.id == eid).first()
+                deliver_event(db, ev, sender=sender)
+                done += 1
+            except Exception:  # noqa: BLE001
+                _log.exception("web push: immediate send failed; leaving it for the outbox")
+                db.rollback()
+                try:
+                    (db.query(PushEvent).filter(PushEvent.id == eid, PushEvent.status == EVENT_SENDING)
+                     .update({PushEvent.status: EVENT_PENDING}, synchronize_session=False))
+                    db.commit()
+                except Exception:  # noqa: BLE001
+                    db.rollback()
+    finally:
+        db.close()
+    return done
+
+
+def deliver_now_in_background(event_ids: List[str]) -> None:
+    """Fire-and-forget deliver_now on a daemon thread, so posting a chat
+    message never waits on Apple's or Google's push servers."""
+    ids = [e for e in (event_ids or []) if e]
+    if not ids:
+        return
+    try:
+        import threading
+        threading.Thread(target=deliver_now, args=(ids,), daemon=True, name="push-now").start()
+    except Exception:  # noqa: BLE001
+        _log.exception("web push: could not start the immediate send; the outbox will send it")
+
+
 def send_test(db: Session, user, *, organization_id: Optional[str],
-              sender: Optional[Sender] = None) -> dict:
+              sender: Optional[Sender] = None, url: Optional[str] = None) -> dict:
     """A test alert to the CALLER's own live subscriptions only."""
     subs = live_subscriptions(db, user.id, any_workspace=True)
-    url = "/m/more"
+    # The team app asks to keep the person there; everyone else gets /m/more.
+    url = url if (url and url.startswith("/app/")) else "/m/more"
     try:
         from app.services import wholesale_team as _wt
-        if _wt.is_wholesale_only(db, user):
+        if not url.startswith("/app/") and _wt.is_wholesale_only(db, user):
             url = "/wholesale/appointments"     # the field app, not the advisor one
     except Exception:  # noqa: BLE001
         pass

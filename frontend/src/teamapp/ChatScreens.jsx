@@ -7,6 +7,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
+import TeamAlerts from './TeamAlerts'
 import { badge, bodyPieces, chatSections, fileSize, fmtListTime, fmtTime, insertMention, LABELS, mentionedIds,
          mentionMatches, mentionQuery, mergeMessages } from './teamHelpers'
 import { Avatar, ErrorNote, Icon, Loading, ScreenTitle, useTeam, useTeamApi } from './TeamApp'
@@ -55,6 +56,7 @@ export function ChatList() {
         <input type="search" placeholder="Search conversations…" value={q} onChange={e => setQ(e.target.value)} enterKeyHint="search" autoComplete="off" />
         {q && <button type="button" className="ta-icon-btn ta-icon-btn--sm" onClick={() => setQ('')} aria-label="Clear search"><Icon name="x" size={16} /></button>}
       </label>
+      <TeamAlerts banner />
       {loading && !data && <Loading />}
       {error && !data && <ErrorNote error={error} onRetry={reload} />}
       {data && !searching && featured.length > 0 && (
