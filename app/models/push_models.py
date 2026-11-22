@@ -47,6 +47,7 @@ EVENT_PARTIAL = "partial"            # some subscriptions failed
 EVENT_FAILED = "failed"
 EVENT_NO_SUBSCRIPTIONS = "no_subscriptions"
 EVENT_NOT_CONFIGURED = "not_configured"
+EVENT_SENDING = "sending"            # claimed by an immediate send; never left here on success
 EVENT_STATUSES = (EVENT_PENDING, EVENT_SENT, EVENT_PARTIAL, EVENT_FAILED,
                   EVENT_NO_SUBSCRIPTIONS, EVENT_NOT_CONFIGURED)
 
@@ -55,6 +56,7 @@ TYPE_REPLY = "reply_received"
 TYPE_HOT_REPLY = "hot_reply"
 TYPE_OFFER_ASSIGNED = "offer_assigned"
 TYPE_TEST = "test"
+TYPE_TEAM_CHAT = "team_chat"        # Team Chat message (platform-wide, not one workspace)
 TYPE_GENERIC = "notification"
 
 

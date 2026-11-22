@@ -92,11 +92,18 @@ def push_status(db: Session = Depends(get_db), current_user: User = Depends(get_
     return wps.status_for(db, current_user)
 
 
+class TestBody(BaseModel):
+    # Where tapping the test alert lands. Only the team app (/app/...) may ask;
+    # anything else keeps the default screen.
+    url: Optional[str] = Field(None, max_length=200)
+
+
 @router.post("/test")
-def push_test(request: Request, db: Session = Depends(get_db),
+def push_test(request: Request, body: Optional[TestBody] = None, db: Session = Depends(get_db),
               current_user: User = Depends(require_not_observation)):
     if not wps.is_configured():
         raise HTTPException(status_code=409, detail="Push alerts are not configured on this server.")
     if not wps.live_subscriptions(db, current_user.id, any_workspace=True):
         raise HTTPException(status_code=409, detail="Enable push alerts on this device first.")
-    return wps.send_test(db, current_user, organization_id=_workspace(current_user, db, request))
+    url = body.url if (body and body.url and body.url.startswith("/app/")) else None
+    return wps.send_test(db, current_user, organization_id=_workspace(current_user, db, request), url=url)

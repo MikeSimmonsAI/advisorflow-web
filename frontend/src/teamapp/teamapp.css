@@ -410,3 +410,10 @@
 .ta-chip { flex: none; min-height: 38px; padding: 0 14px; border-radius: 19px; border: 1px solid #cfd8e6; background: #fff;
   color: var(--ta-navy); font: inherit; font-size: 14.5px; font-weight: 700; cursor: pointer; white-space: nowrap; }
 .ta-chip.is-on { background: var(--ta-blue); border-color: var(--ta-blue); color: #fff; box-shadow: 0 2px 6px rgba(21, 84, 232, .3); }
+
+/* Phone alerts (TeamAlerts.jsx) */
+.ta-alerts-banner { display: flex; align-items: center; gap: 10px; }
+.ta-alerts-text { flex: 1; }
+.ta-btn--sm { padding: 8px 12px; min-height: 36px; font-size: 14px; }
+.ta-alerts { margin-top: 16px; }
+.ta-alerts-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }

@@ -103,7 +103,7 @@ if (typeof self !== 'undefined' && self.addEventListener) {
   });
 
   // PUSH-READY: displays a data-minimal payload (see src/mobile/push.js for
-  // the server contract). No server sends pushes yet.
+  // the server contract).
   self.addEventListener('push', function (event) {
     var data = {};
     try { data = event.data ? event.data.json() : {}; } catch (e) { data = {}; }
@@ -112,12 +112,20 @@ if (typeof self !== 'undefined' && self.addEventListener) {
     // Wholesale field app (/wholesale). Anything else opens the default screen.
     var url = typeof data.url === 'string' ? data.url : '';
     var field = url.indexOf('/wholesale') === 0;
-    var safeUrl = (url.indexOf('/m') === 0 || field) ? url : '/m';
-    event.waitUntil(self.registration.showNotification(title, {
-      body: 'Open the app to view details.',
-      icon: field ? '/icons/field-192.png' : '/icons/icon.svg', badge: field ? '/icons/field-192.png' : '/icons/icon.svg',
+    var team = url.indexOf('/app/') === 0;   // the EvoSys Pro team app (Team Chat)
+    var safeUrl = (url.indexOf('/m') === 0 || field || team) ? url : '/m';
+    var icon = field ? '/icons/field-192.png' : (team ? '/icons/evosys-192.png' : '/icons/icon.svg');
+    var shown = self.registration.showNotification(title, {
+      body: team ? 'Open EvoSys Pro to read it.' : 'Open the app to view details.',
+      icon: icon, badge: icon,
+      tag: team ? safeUrl : undefined, renotify: team ? true : undefined,
       data: { url: safeUrl },
-    }));
+    });
+    // Red dot on the home-screen icon where the phone supports it.
+    if (team && self.navigator && self.navigator.setAppBadge) {
+      shown = shown.then(function () { return self.navigator.setAppBadge().catch(function () {}); });
+    }
+    event.waitUntil(shown);
   });
 
   self.addEventListener('notificationclick', function (event) {

@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { isInstalled, isIOS, canPromptInstall, promptInstall } from '../pages/wholesale/appts/fieldApp'
 import { LABELS, TEAM_RIGHTS } from './teamHelpers'
+import TeamAlerts from './TeamAlerts'
 import { Avatar, ErrorNote, Icon, Loading, ScreenTitle, useTeam, useTeamApi } from './TeamApp'
 
 function roleLine(user, a) {
@@ -55,6 +56,7 @@ export function AccountScreen() {
         <ActionTile icon="logout" label="Sign out" tone="red" onClick={signOut} />
       </div>
       {installMsg && <p className="ta-note" role="status">{installMsg}</p>}
+      <TeamAlerts />
     </div>
   )
 }
