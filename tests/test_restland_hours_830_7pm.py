@@ -37,7 +37,8 @@ def test_restland_texts_run_until_7pm_central_every_day(rl):
     _launched(rl)
     lead = _dallas(rl)
     assert CH.is_permitted(lead, utc(18, 50))           # 6:50 PM Central: past 7:45 PM Eastern, now allowed
-    assert CH.is_permitted(lead, utc(18, 50, d=22))     # Sunday too
+    assert CH.is_permitted(lead, utc(18, 50, d=21))     # Saturday too
+    assert not CH.is_permitted(lead, utc(12, 0, d=22))  # Sunday: nothing goes out (owner, Nov 22)
     assert not CH.is_permitted(lead, utc(7, 45))        # the family's own 8 AM floor still holds
     cfg = OS.config_for_org(rl["db"], rl["org"].id)
     assert (cfg["open"], cfg["close"]) == ("08:30", "19:00")

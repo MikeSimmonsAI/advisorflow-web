@@ -1295,6 +1295,12 @@ def _deliver(db, prog, lead, conv, resp, text, action, mode, *, now) -> ProgramC
         return _turn(db, conv, "ai", text, action=action, delivery="draft",
                      response_id=resp.id if resp else None, reason="draft mode - a person sends it")
     if is_email:
+        # Closed day (Restland, Nov 22: nothing on Sundays): the answer is
+        # held and sweep() sends it in its thread once the day is open.
+        from app.services.programs import outreach_slots as _os
+        if _os.closed_for_org(db, lead.organization_id, now):
+            return _turn(db, conv, "ai", text, action=action, delivery="held",
+                         response_id=resp.id, reason="closed day - nothing is sent on Sundays")
         # AUTO, and this conversation is the AI's: answer the email in its own
         # thread, to the person who wrote it, from the mailbox it came to.
         from app.services.programs import email_reply
@@ -1882,12 +1888,35 @@ def sweep(db: Session, now: Optional[datetime] = None) -> Dict:
         if not (lead and conv and prog) or mode_of(prog) != AUTO or conv.state in ("human", "stopped"):
             t.delivery = "dropped"
             continue
-        if not contact_hours.check(lead, now).get("permitted"):
+        _resp = (db.query(ProgramResponse).filter(ProgramResponse.id == t.response_id).first()
+                 if t.response_id else None)
+        _is_email = _resp is not None and _resp.channel == "email"
+        if _is_email:
+            from app.services.programs import outreach_slots as _os
+            if _os.closed_for_org(db, lead.organization_id, now):
+                continue                                 # closed day: waits for the next open day
+        elif not contact_hours.check(lead, now).get("permitted"):
             continue
         from app.services.sci_staging_demo import is_demo_lead
         from app.services.test_records import is_owner_test_lead
         if A._opted_out(db, lead) or is_demo_lead(lead) or is_owner_test_lead(lead):
             t.delivery, t.reason = "dropped", "family opted out / test or demo - not sent"
+            db.commit()
+            continue
+        if _is_email:
+            # An email answer held for a closed day goes back in its own thread.
+            from app.services.programs import email_reply
+            res = email_reply.send_reply(db, prog, lead, _resp, t.text, send_source=ss.SCI_SETTER,
+                                         idempotency_key="ai:%s:%s" % (_resp.id, t.action))
+            if res.get("ok"):
+                t.delivery = "sent"
+                _answered(_resp, now)
+                sent += 1
+            else:
+                t.delivery, t.reason = "blocked", (res.get("error") or "email not sent")[:240]
+                _resp.suggested_reply = t.text
+                _handoff(db, prog, lead, conv, "held email reply could not be sent: %s"
+                         % (res.get("error") or "")[:120], notify=True)
             db.commit()
             continue
         try:
@@ -1960,6 +1989,9 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
         mode = mode_of(prog) if prog else OFF
         if mode == OFF:
             continue                                     # stays due; nothing happens while off
+        from app.services.programs import outreach_slots as _os
+        if _os.closed_for_org(db, lead.organization_id, now):
+            continue                                     # closed day (Sundays): stays due until it opens
         from app.services.test_records import is_owner_test_lead as _owner_test
         # The owner's live test contact never gets a follow-up: a test proves
         # one exchange and is then cleaned up; it must not keep texting the owner.

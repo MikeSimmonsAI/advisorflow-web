@@ -42,7 +42,9 @@ TZ = "America/Chicago"
 CYCLE_KEY = "ffr-batch-1"
 CAMPAIGN_NAME = "Restland — Family File Review"
 OUTREACH = {"slots": True, "open": "08:30", "close": "19:00", "new_every_minutes": 8,
-            "followup_offset_minutes": 2}
+            "followup_offset_minutes": 2,
+            # Owner, Nov 22: nothing goes out on Sundays (outreach_slots.closed_days).
+            "closed_days": "7"}
 
 
 class LaunchRefused(ValueError):

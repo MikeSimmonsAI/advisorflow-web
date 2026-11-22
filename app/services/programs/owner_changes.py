@@ -15,6 +15,14 @@ full blast ... running them at the maximum capacity"):
     slots, in the same order. Daily batch 200 a day, 3 minutes apart.
   * SCI: daily batch 200 a day (the most allowed), 2 minutes apart (was 40,
     10 minutes apart): the remaining new families and the start-over queue.
+
+2026-11-22, owner ("I need you to turn off the cadence for Restland only on
+Sundays ... I want everything to stop on Sundays, only on Sundays"):
+  * RESTLAND: Sunday becomes a closed day (outreach_slots closed_days "7"):
+    no texts, emails, AI answers, daily batch or survey go out on Sundays.
+    Every text already reserved for a Sunday slot moves to the next open
+    day in the same order - first texts to the next new-family slots,
+    follow-ups to the next free follow-up slots. SCI is not touched.
 """
 import json
 import logging
@@ -31,9 +39,12 @@ SCI_KEY = "sci-full-speed-2026-11-21"
 RESTLAND_NEW_EVERY = 3
 RESTLAND_DAILY, RESTLAND_SPACING = 200, 3
 SCI_DAILY, SCI_SPACING = 200, 2
-# Only before this moment (Mon Nov 23 2026, midnight Central): an old build
-# restarted weeks later never applies a stale order.
+RESTLAND_SUNDAYS_KEY = "restland-sundays-off-2026-11-22"
+RESTLAND_CLOSED_DAYS = "7"
+# Only before these moments: an old build restarted weeks later never
+# applies a stale order. Nov 21 changes: Mon Nov 23 midnight Central.
 APPLY_UNTIL = datetime(2026, 11, 23, 6, 0)
+SUNDAYS_APPLY_UNTIL = datetime(2026, 12, 6, 6, 0)
 
 
 def _ledger(db: Session, org_id: str, key: str):
@@ -110,6 +121,86 @@ def restland_full_speed(db: Session, prog, now: datetime) -> Dict:
     return summary
 
 
+def restland_sundays_off(db: Session, prog, now: datetime) -> Dict:
+    """Close Sundays for Restland and move every text reserved for a Sunday
+    slot (from today on) to the next open day, keeping its order."""
+    from app.models.models import CadenceState
+    from app.services.programs import outreach_slots as OS
+    from app.services.programs import restland_restart as RR
+    org_id = prog.organization_id
+    pol = json.loads(prog.booking_policy_json or "{}")
+    o = pol.get("outreach")
+    if not isinstance(o, dict) or not o.get("slots"):
+        return {"skipped": "no text schedule"}
+    run, item = _open_run(db, org_id, RESTLAND_SUNDAYS_KEY)
+    before = dict(o)
+    o["closed_days"] = RESTLAND_CLOSED_DAYS
+    pol["outreach"] = o
+    prog.booking_policy_json = json.dumps(pol)
+    item("outreach_program", prog.id, "text_schedule", before, dict(o), "owner Nov 22: nothing on Sundays")
+    db.flush()
+    OS.clear_cache()
+    cfg = OS.config_from_policy(prog.booking_policy_json)
+    S = OS._model()
+    today_local = OS._local(now).date()
+    since = OS._utc(datetime.combine(today_local, datetime.min.time()).replace(tzinfo=OS._zone()))
+    rows = (db.query(S).filter(S.organization_id == org_id, S.status == "reserved", S.slot_at >= since)
+            .order_by(S.slot_at).all())
+    closed = [r for r in rows if OS.closed_on(OS._local(r.slot_at).date(), cfg)]
+    first = OS.next_open(now, cfg)
+    # First texts keep their order: every first text from the first Sunday
+    # one onward is re-laid on the new-family grid from the next opening, so a
+    # Sunday family is never put behind Monday's.
+    closed_new = [r for r in closed if r.kind == "new"]
+    new_rows = [r for r in rows if r.kind == "new" and r.slot_at >= closed_new[0].slot_at] if closed_new else []
+    fu_rows = [r for r in closed if r.kind != "new"]
+    recs_by_state = {w["state"].id: w["recs"] for w in RR._waiting(db, org_id, set()) if w["state"] is not None}
+    states = {st.id: st for st in db.query(CadenceState).filter(
+        CadenceState.id.in_([r.cadence_state_id for r in closed + new_rows] or ["-"])).all()}
+    moves_new = [(r.cadence_state_id, r.touch_number, r.slot_at) for r in new_rows]
+    moves_fu = [(r.cadence_state_id, r.touch_number, r.slot_at) for r in fu_rows]
+    for sid, touch, _at in moves_new:
+        OS.release(db, sid, touch)
+    db.flush()
+    taken = {t for (t,) in db.query(S.slot_at).filter(S.organization_id == org_id, S.slot_at >= first,
+                                                     S.status == "reserved").all()}
+    slots = OS.new_family_slots(first, len(moves_new), cfg, taken) if moves_new else []
+    moved_new = 0
+    for (sid, touch, was), at in zip(moves_new, slots):
+        st = states.get(sid)
+        if st is None:
+            continue
+        item("cadence_state", st.id, "sunday_moved",
+             {"next_touch_due_at": st.next_touch_due_at, "slot_at": was}, {"next_touch_due_at": at},
+             "owner Nov 22: nothing on Sundays")
+        if (st.current_touch_number or 0) == 0:
+            st.cadence_started_at = at
+            for r in recs_by_state.get(st.id, []):
+                r.scheduled_start_at = at
+        st.next_touch_due_at = at
+        OS.reserve(db, org_id, st, touch, at, "new")
+        moved_new += 1
+    moved_fu = 0
+    for sid, touch, was in moves_fu:
+        st = states.get(sid)
+        if st is None:
+            continue
+        before_due = st.next_touch_due_at
+        at = OS.place_followup(db, org_id, st, touch, first, cfg)
+        item("cadence_state", st.id, "sunday_moved", {"next_touch_due_at": before_due, "slot_at": was},
+             {"next_touch_due_at": at}, "owner Nov 22: nothing on Sundays")
+        moved_fu += 1
+    summary = {"closed_days": RESTLAND_CLOSED_DAYS, "sunday_first_texts": len(closed_new),
+               "first_texts_relaid": moved_new, "moved_follow_ups": moved_fu,
+               "next_open_utc": first.isoformat(),
+               "first_moved_utc": slots[0].isoformat() if slots else None,
+               "last_moved_utc": slots[-1].isoformat() if slots else None}
+    run.status, run.finished_at, run.summary_json = "applied", datetime.utcnow(), json.dumps(summary)
+    db.commit()
+    OS.clear_cache()
+    return summary
+
+
 def sci_full_speed(db: Session, prog) -> Dict:
     run, item = _open_run(db, prog.organization_id, SCI_KEY)
     _batch(prog, item, SCI_DAILY, SCI_SPACING, "owner Nov 21: SCI full blast")
@@ -126,16 +217,21 @@ def apply_pending(db: Session, now: Optional[datetime] = None) -> Dict:
     from app.services.programs import outreach_slots as OS
     now = now or datetime.utcnow()
     out: Dict = {}
-    if now >= APPLY_UNTIL:
+    if now >= max(APPLY_UNTIL, SUNDAYS_APPLY_UNTIL):
         return out
     for prog in db.query(OutreachProgram).all():
         try:
             if sms_programs.is_sci_org(db, prog.organization_id):
-                if _ledger(db, prog.organization_id, SCI_KEY) is None:
+                if now < APPLY_UNTIL and _ledger(db, prog.organization_id, SCI_KEY) is None:
                     out[prog.organization_id] = sci_full_speed(db, prog)
             elif OS.config_from_policy(prog.booking_policy_json) is not None:
-                if _ledger(db, prog.organization_id, RESTLAND_KEY) is None:
-                    out[prog.organization_id] = restland_full_speed(db, prog, now)
+                res = {}
+                if now < APPLY_UNTIL and _ledger(db, prog.organization_id, RESTLAND_KEY) is None:
+                    res["full_speed"] = restland_full_speed(db, prog, now)
+                if now < SUNDAYS_APPLY_UNTIL and _ledger(db, prog.organization_id, RESTLAND_SUNDAYS_KEY) is None:
+                    res["sundays_off"] = restland_sundays_off(db, prog, now)
+                if res:
+                    out[prog.organization_id] = res
         except Exception as exc:                         # noqa: BLE001 - never stops a deploy
             db.rollback()
             log.exception("owner change failed for program %s", prog.id)

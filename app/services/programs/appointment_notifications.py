@@ -534,7 +534,11 @@ def run(db: Session, organization_id: Optional[str] = None, *, now: Optional[dat
         if not s["enabled"]:
             out["held_off"] += len(rows)          # left exactly as they are: sending is off
             continue
+        from app.services.programs import outreach_slots as _os
+        closed_today = _os.closed_for_org(db, prog.organization_id, now)
         for row in rows:
+            if closed_today and row.purpose == "survey":
+                continue                           # closed day (Sundays): the survey waits for Monday
             if row.status == "retry" and row.next_attempt_at and row.next_attempt_at > now:
                 continue
             booking = db.query(BookingLink).filter(BookingLink.id == row.booking_id).first()

@@ -45,7 +45,7 @@ def test_restland_moves_everyone_waiting_up_in_order_once(rl):
     before = [s.lead_id for s in _waiting(db, org)]
     assert before
     out = OC.apply_pending(db, now=NOW)
-    summary = out[org.id]
+    summary = out[org.id]["full_speed"]
     assert summary["moved_up"] == len(before)
     prog = db.query(OutreachProgram).filter_by(organization_id=org.id).one()
     cfg = OS.config_from_policy(prog.booking_policy_json)
@@ -67,7 +67,8 @@ def test_restland_moves_everyone_waiting_up_in_order_once(rl):
 def test_nothing_runs_after_the_window(rl):
     db, org = rl["db"], rl["org"]
     _launch(rl)
-    assert OC.apply_pending(db, now=OC.APPLY_UNTIL + timedelta(minutes=1)) == {}
+    late = max(OC.APPLY_UNTIL, OC.SUNDAYS_APPLY_UNTIL) + timedelta(minutes=1)
+    assert OC.apply_pending(db, now=late) == {}
 
 
 def test_sci_goes_to_200_a_day_two_minutes_apart(program, monkeypatch):

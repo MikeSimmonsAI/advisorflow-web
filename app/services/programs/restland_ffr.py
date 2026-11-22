@@ -201,7 +201,7 @@ def schedule_summary() -> Dict:
         days.setdefault(d + 1, []).append("email %d" % n)
     return {"days": [{"day": k, "touches": v} for k, v in sorted(days.items())],
             "texts": len(SMS_STEPS), "emails": len(EMAIL_STEPS), "span_days": 14,
-            "window": "8:30 AM - 6:00 PM Central, every day",
+            "window": "8:30 AM - 7:00 PM Central, every day except Sunday (nothing goes out on Sundays)",
             "slots": "a new family's first text at 8:30 AM and every 8 minutes; a due follow-up 2 minutes after each",
             "cooldown_days": COOLDOWN_DAYS}
 

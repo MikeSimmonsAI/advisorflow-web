@@ -535,7 +535,7 @@ def compose_gate(db: Session, lead: Lead, user: User) -> Dict[str, Any]:
     if (lead.phone or "").strip():
         try:
             from app.services import contact_hours
-            hours = contact_hours.check(lead, _utcnow())
+            hours = contact_hours.check(lead, _utcnow(), program_days=False)  # a person sending by hand
             if not hours.get("permitted"):
                 block("QUIET_HOURS", hours.get("reason") or "Outside permitted contact hours.")
         except Exception:                                    # noqa: BLE001
