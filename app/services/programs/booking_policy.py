@@ -51,13 +51,14 @@ SAME_DAY_NOTICE = timedelta(hours=2)
 LEGACY_MINUTES = 60            # a booking with no recorded length
 
 OFFICE, HOME, REMOTE = "office", "home", "remote"
-# Owner, Nov 22: a family who is out of town gets a REMOTE call (phone or
-# video) at a real date and time; the person assigned to the family sets the
-# call up and sends the details. Same times, same calendar, counted as an
-# appointment like the other two.
+# Owner, Nov 22: a REMOTE call (phone or video) at a real date and time, ONLY
+# when the family asks for one as the only way they can meet - never offered
+# ("on_request": not on the family's booking page, never suggested by the
+# AI). The person assigned sets the call up and sends the details. Same
+# times, same calendar, counted as an appointment like the other two.
 REMOTE_OPTION = {"key": REMOTE, "label": "By phone or video call",
                  "appt_label": "Family File Review by phone or video call",
-                 "note": "If you're out of town - we'll send you the call details"}
+                 "note": "Only when the family asked for a call", "on_request": True}
 
 RESTLAND_ORG_ID = "01fed629-9a95-412b-895a-c8b09f37a98c"
 RESTLAND_ADDRESS = "13005 Greenville Ave, Dallas, TX 75243"
@@ -134,10 +135,14 @@ def option(policy: Dict, key: Optional[str]) -> Optional[Dict]:
     return next((o for o in policy.get("meeting_options") or [] if o.get("key") == key), None)
 
 
-def public_options(policy: Dict) -> List[Dict]:
-    """What the family's page shows - never anything internal."""
+def public_options(policy: Dict, staff: bool = False) -> List[Dict]:
+    """What the family's page shows - never anything internal. A choice made
+    only on the family's request ("on_request", the remote call) shows to
+    staff, never on the family's page."""
     out = []
     for o in policy.get("meeting_options") or []:
+        if o.get("on_request") and not staff:
+            continue
         out.append({"key": o["key"], "label": o.get("label") or o["key"],
                     "appt_label": o.get("appt_label") or policy.get("label") or "Appointment",
                     "note": o.get("note") or "", "needs_address": bool(o.get("needs_address"))})

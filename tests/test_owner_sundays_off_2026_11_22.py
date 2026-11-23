@@ -163,7 +163,12 @@ def test_handoff_change_restores_later_follow_ups_and_adds_remote_calls(rl, monk
     assert [o["key"] for o in pol["meeting_options"]][-1] == BP.REMOTE
     assert pol["handoff_sheet"]["id"] == OC.RESTLAND_HANDOFF_SHEET_ID
     profs = db.query(LocationProfile).filter_by(organization_id=org.id).all()
-    assert profs and all("phone" in identity.appointment_ways(p) for p in profs)
+    # A call only when the family asks: the location never offers phone itself.
+    assert profs and all("phone" not in identity.appointment_ways(p) for p in profs)
+    jan = out[org.id]["jan4_remote"]
+    assert jan["moved_to_jan_4"] == []                    # this synthetic family isn't one of the four
+    remote = [o for o in pol["meeting_options"] if o["key"] == BP.REMOTE][0]
+    assert remote.get("on_request") is True
     assert OC.apply_pending(db, now=utc(2026, 11, 22, 19, 5)) == {}                          # once
 
 
@@ -197,3 +202,24 @@ def test_a_thumbs_up_after_agreeing_keeps_the_later_follow_up(rl, monkeypatch):
 def test_a_real_reply_after_agreeing_is_left_alone():
     assert OC._ACK.match("\U0001F44D") and OC._ACK.match("Thanks!")
     assert not OC._ACK.match("Actually call me Monday")
+
+
+def test_the_four_after_holiday_families_move_to_the_first_monday_after_new_year(rl, monkeypatch):
+    from app.models.program_models import LocationProfile, ProgramConversation
+    db, org = rl["db"], rl["org"]
+    _launch(rl)
+    lead = _dallas(rl)
+    lead.id  # noqa: B018
+    c = ProgramConversation(organization_id=org.id, lead_id=OC.AFTER_NEW_YEAR_LEADS[0], state="waiting_future",
+                            next_followup_at=datetime(2026, 11, 28, 15, 0), followups_sent=1)
+    db.add(c)
+    for prof in db.query(LocationProfile).filter_by(organization_id=org.id).all():
+        prof.brand_settings = json.dumps({"offer_phone_alternative": True})
+    db.commit()
+    monkeypatch.setattr(OC, "_ledger", lambda db_, org_id, key: None if key == OC.RESTLAND_HANDOFF_3_KEY else True)
+    out = OC.apply_pending(db, now=utc(2026, 11, 23, 2, 30))
+    res = out[org.id]["jan4_remote"]
+    assert res["moved_to_jan_4"] == [OC.AFTER_NEW_YEAR_LEADS[0]] and res["locations_phone_off"] >= 1
+    db.refresh(c)
+    assert c.next_followup_at == datetime(2027, 1, 4, 15, 0) and c.followups_sent == 0
+    assert datetime(2027, 1, 4).weekday() == 0                                               # a Monday

@@ -1171,7 +1171,7 @@ def command_slots(lead_id: str, kind: str = "visit", db: Session = Depends(get_d
                        "day": s.strftime("%a %b %-d"), "time": s.strftime("%-I:%M %p")} for s in slots],
             "reason": why,
             # Issue #507: where the visit can be (office / the family's home).
-            "meeting_options": _bp.public_options(_pol) if _pol else [],
+            "meeting_options": _bp.public_options(_pol, staff=True) if _pol else [],
             "minutes": _pol["duration"] if _pol else None}
 
 
@@ -1843,7 +1843,7 @@ def data_review_summary(db: Session = Depends(get_db), user: User = Depends(requ
                 "days": "Every day" if _pol["days"] == "0123456" else _pol["days"],
                 "starts": ["%d:%02d %s" % ((h - 1) % 12 + 1, m, "AM" if h < 12 else "PM") for h, m in _pol["starts"]],
                 "minutes": _pol["duration"], "gap_minutes": _pol["gap_after"], "timezone": _pol.get("timezone"),
-                "places": [o["label"] for o in _bp.public_options(_pol)]},
+                "places": [o["label"] for o in _bp.public_options(_pol, staff=True)]},
             "calendar": _cfg_sum.get("calendar"),
         },
         "schedule": _F.schedule_summary(),

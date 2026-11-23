@@ -61,6 +61,16 @@ RESTLAND_HANDOFF_KEY = "restland-followups-remote-2026-11-22"
 # sync service account as Editor). Not a secret.
 RESTLAND_HANDOFF_SHEET_ID = "1o8gPHz0-tLcrN_IxSQsSQE3Mt6IUX0bQ1U4jlmDfPgo"
 RESTLAND_HANDOFF_2_KEY = "restland-followups-acks-2026-11-22"
+RESTLAND_HANDOFF_3_KEY = "restland-jan4-remote-on-request-2026-11-22"
+# Owner, Nov 22 8:18 PM: these four "after the holidays" families are followed
+# up the first Monday after New Year's - Mon Jan 4 2027, 9 AM Central.
+AFTER_NEW_YEAR = datetime(2027, 1, 4, 15, 0)
+AFTER_NEW_YEAR_LEADS = (
+    "e129cb24-c807-42c9-bec5-447efb494538",   # Annette Birt
+    "07dc8e9d-6ccb-4923-9245-58bdb1c86aaa",   # Brian Fehr
+    "13d1df8b-4829-4f11-9755-45b49bcfc245",   # Alleyne Henderson
+    "f4c9f1bf-9697-4183-bb46-5e29c4cc839c",   # Albert Faulkner
+)
 # A reply that only acknowledges what was agreed ("👍", "ok", "thanks") is not
 # a new message: the later follow-up still stands.
 _ACK = re.compile(r"^\W*(ok(ay)?|k|thanks?( you)?|thx|ty|sounds good|great|perfect|will do|yes|yep|sure|cool)?\W*$", re.I)
@@ -220,6 +230,51 @@ def restland_sundays_off(db: Session, prog, now: datetime) -> Dict:
     return summary
 
 
+def restland_jan4_and_remote_on_request(db: Session, prog, now: datetime) -> Dict:
+    """Owner, Nov 22 8:18 PM: (1) the four families above follow up Mon Jan 4
+    2027; (2) a phone/video call ONLY when the family asks - off the booking
+    page, and the location no longer offers phone appointments itself."""
+    from app.models.program_models import LocationProfile, ProgramConversation
+    from app.services.programs import booking_policy as BP
+    org_id = prog.organization_id
+    run, item = _open_run(db, org_id, RESTLAND_HANDOFF_3_KEY)
+    moved = []
+    for c in (db.query(ProgramConversation)
+              .filter(ProgramConversation.organization_id == org_id,
+                      ProgramConversation.lead_id.in_(AFTER_NEW_YEAR_LEADS),
+                      ProgramConversation.state == "waiting_future").all()):
+        item("program_conversation", c.id, "follow_up_date", {"next_followup_at": c.next_followup_at},
+             {"next_followup_at": AFTER_NEW_YEAR}, "owner Nov 22: first Monday after New Year's")
+        c.next_followup_at, c.followups_sent = AFTER_NEW_YEAR, 0
+        moved.append(c.lead_id)
+    pol = json.loads(prog.booking_policy_json or "{}")
+    opts = pol.get("meeting_options")
+    if isinstance(opts, list):
+        new = []
+        for o in opts:
+            if o.get("key") == BP.REMOTE and not o.get("on_request"):
+                item("outreach_program", prog.id, "remote_on_request", dict(o), None, "owner Nov 22: only on request")
+                o = dict(BP.REMOTE_OPTION)
+            new.append(o)
+        pol["meeting_options"] = new
+        prog.booking_policy_json = json.dumps(pol)
+    phone_off = 0
+    for prof in db.query(LocationProfile).filter(LocationProfile.organization_id == org_id).all():
+        try:
+            bs = json.loads(prof.brand_settings or "{}") if isinstance(prof.brand_settings, str) else dict(prof.brand_settings or {})
+        except ValueError:
+            bs = {}
+        if bs.get("offer_phone_alternative"):
+            item("location_profile", prof.id, "brand_settings", dict(bs), None, "owner Nov 22: calls only on request")
+            bs.pop("offer_phone_alternative", None)
+            prof.brand_settings = json.dumps(bs)
+            phone_off += 1
+    summary = {"moved_to_jan_4": moved, "locations_phone_off": phone_off}
+    run.status, run.finished_at, run.summary_json = "applied", datetime.utcnow(), json.dumps(summary)
+    db.commit()
+    return summary
+
+
 def restland_followups_acks(db: Session, prog, now: datetime) -> Dict:
     """Second pass of the Nov 22 restore: families whose only later reply was
     an acknowledgement ("👍") also go back on the follow-up list."""
@@ -273,20 +328,7 @@ def restland_followups_and_remote(db: Session, prog, now: datetime) -> Dict:
         item("outreach_program", prog.id, "handoff_sheet", pol.get("handoff_sheet"), None, "owner Nov 22: handoff board")
         pol["handoff_sheet"] = {"id": RESTLAND_HANDOFF_SHEET_ID}
         prog.booking_policy_json = json.dumps(pol)
-    phone_on = 0
-    for prof in db.query(LocationProfile).filter(LocationProfile.organization_id == org_id).all():
-        bs = prof.brand_settings
-        if isinstance(bs, str):
-            try:
-                bs = json.loads(bs or "{}")
-            except ValueError:
-                bs = {}
-        bs = dict(bs or {})
-        if not bs.get("offer_phone_alternative"):
-            item("location_profile", prof.id, "brand_settings", dict(bs), None, "owner Nov 22: remote calls")
-            bs["offer_phone_alternative"] = True
-            prof.brand_settings = json.dumps(bs)
-            phone_on += 1
+    phone_on = 0          # superseded the same evening: calls only on the family's request
     # 2. later follow-ups back on the follow-up list
     back = []
     convs = (db.query(ProgramConversation)
@@ -349,6 +391,8 @@ def apply_pending(db: Session, now: Optional[datetime] = None) -> Dict:
                     res["handoff"] = restland_followups_and_remote(db, prog, now)
                 if now < SUNDAYS_APPLY_UNTIL and _ledger(db, prog.organization_id, RESTLAND_HANDOFF_2_KEY) is None:
                     res["handoff_acks"] = restland_followups_acks(db, prog, now)
+                if now < SUNDAYS_APPLY_UNTIL and _ledger(db, prog.organization_id, RESTLAND_HANDOFF_3_KEY) is None:
+                    res["jan4_remote"] = restland_jan4_and_remote_on_request(db, prog, now)
                 if res:
                     out[prog.organization_id] = res
         except Exception as exc:                         # noqa: BLE001 - never stops a deploy
