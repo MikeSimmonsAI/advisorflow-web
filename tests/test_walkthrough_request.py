@@ -79,3 +79,10 @@ def test_managers_see_requests(client, db_session, alerts, manager_headers):
 
 def test_strangers_cannot_see_requests(client):
     assert client.get("/sales/evosys/walkthrough-requests").status_code in (401, 403)
+
+
+def test_short_link_goes_to_the_page(client):
+    r = client.get("/walkthrough", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == "/evosys-sales-public/walkthrough"
+    r = client.get("/walkthrough?src=Card<x>", follow_redirects=False)
+    assert r.headers["location"] == "/evosys-sales-public/walkthrough?src=cardx"

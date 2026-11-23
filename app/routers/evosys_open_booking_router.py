@@ -14,7 +14,7 @@ GET  /sales/evosys/walkthrough-requests the requests, for EvoSys sales managers
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -25,6 +25,8 @@ from app.services.evosys_sales import open_booking as OB
 from app.services.evosys_sales import walkthrough_request as WR
 
 public_router = APIRouter(prefix="/evosys-sales-public", tags=["evosys-sales-public"])
+# Short link for cards and texts: links.evosyspro.live/walkthrough
+short_router = APIRouter(tags=["evosys-sales-public"])
 router = APIRouter(prefix="/sales/evosys", tags=["evosys-sales"])
 
 _HEADERS = {"Cache-Control": "no-store", "X-Robots-Tag": "noindex", "Referrer-Policy": "no-referrer"}
@@ -101,3 +103,11 @@ def walkthrough_requests(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     if not c.manager:
         raise HTTPException(403, "Only an EvoSys sales manager can see walkthrough requests.")
     return {"url": OB.link().replace(OB.PATH, WR.PATH), "requests": WR.listing(db)}
+
+
+@short_router.get("/walkthrough", include_in_schema=False)
+def walkthrough_short(src: Optional[str] = None):
+    """links.evosyspro.live/walkthrough -> the request page (owner request 2026-11-22)."""
+    import re as _re
+    tag = _re.sub(r"[^a-z0-9_-]", "", (src or "").lower())[:60]
+    return RedirectResponse(WR.PATH + ("?src=" + tag if tag else ""), status_code=302)
