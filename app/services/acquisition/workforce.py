@@ -452,7 +452,10 @@ def run_discovery(db: Session, job, **_):
     cities = C.jload(prof.service_area, []) if prof else []
     if org is not None and cities:
         st = sorted(states)[0] if states else "TX"
-        r = OSM.run(db, org, prof, city=cities[0], state=st, is_practice=job.is_practice or s.mode == "practice",
+        from app.services.acquisition import viability as V
+        city = V.next_city(db, org.id, cities) or cities[0]
+        result["city"] = city
+        r = OSM.run(db, org, prof, city=city, state=st, is_practice=job.is_practice or s.mode == "practice",
                     geocode=kw_geocode(_), overpass=kw_overpass(_))
         result["free_discovery"] = {k: r.get(k) for k in ("batch", "segments", "found", "added", "duplicates",
                                                           "excluded", "unqualified", "outside_city", "segment_errors", "error", "provider")}

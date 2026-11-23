@@ -297,6 +297,14 @@ def run(db: Session, org, profile, *, city: str, state: str = "TX", max_new: int
                                      import_batch_id=None, source_record_id=osm_id,
                                      evidence_json=json.dumps(ev), raw_json=json.dumps(tags)[:8000]))
             out["added"] += 1
+        db.flush()
+        try:                                    # score what this run added (viability, #452)
+            from app.services.acquisition import viability as V
+            for np in (db.query(LeadIntelProspect).filter(LeadIntelProspect.source == PROVIDER,
+                                                          LeadIntelProspect.viability_at.is_(None)).all()):
+                V.store(np, V.score_prospect(np), now)
+        except Exception:                        # noqa: BLE001 - scoring never fails a discovery run
+            log.exception("viability scoring after discovery failed")
         runrow.found, runrow.added, runrow.duplicates = out["found"], out["added"], out["duplicates"]
         runrow.excluded, runrow.junk = out["excluded"], out["unqualified"]
         runrow.status, runrow.finished_at = "done", datetime.utcnow()

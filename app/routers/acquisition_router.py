@@ -464,6 +464,53 @@ def workforce_discover(payload: dict = Body(...), db: Session = Depends(get_db),
     return out
 
 
+# ── HARVEY VIABILITY SCORE + ATTACK QUEUE (#452) - owner/admin only ─────────
+@god_router.get("/workforce/viability")
+def workforce_viability(group: Optional[str] = None, limit: int = Query(100), db: Session = Depends(get_db),
+                        me: User = Depends(require_acq_master)):
+    """Master pool by viability group (A/B/C/D) with each business's score and reasons."""
+    from app.services.acquisition import viability as V
+    if group and group.upper() not in ("A", "B", "C", "D"):
+        raise HTTPException(422, "group must be A, B, C or D")
+    return {"groups": V.group_counts(db), "actions": V.GROUP_ACTION, "group_c_due_recheck": V.due_for_recheck(db),
+            "rows": V.ranked(db, group, limit)}
+
+
+@god_router.post("/workforce/viability/rescore")
+def workforce_viability_rescore(payload: dict = Body(default={}), db: Session = Depends(get_db),
+                                me: User = Depends(require_acq_master)):
+    """Score the whole master pool again (or only unscored records). Writes
+    only the viability columns; contacts nobody; costs nothing."""
+    from app.services.acquisition import viability as V
+    out = V.rescore_pool(db, only_unscored=bool((payload or {}).get("only_unscored")))
+    _audit(db, None, me, "acquisition_viability_rescored", "acquisition_workforce", "global",
+           {"scored": out["scored"], "groups": out["groups"]})
+    return out
+
+
+@god_router.get("/workforce/search-queue")
+def workforce_search_queue(organization_id: Optional[str] = None, db: Session = Depends(get_db),
+                           me: User = Depends(require_acq_master)):
+    """The attack queue - business type x city, apartments and short-term
+    rental managers first, side by side - with what is done and what is next,
+    plus the daily count."""
+    from app.models.acquisition_models import AcquisitionProfile
+    from app.services.acquisition import viability as V
+    from app.services.acquisition import workforce as WF
+    segments, cities, org_id = list(V.FIRST_PAIR) + list(V.THEN), list(C.DEFAULT_SERVICE_AREA), None
+    if organization_id:
+        org = _client_org(db, organization_id)
+        prof = db.query(AcquisitionProfile).filter(AcquisitionProfile.organization_id == org.id).first()
+        org_id = org.id
+        segments = C.jload(getattr(prof, "segments", None), []) or segments
+        cities = C.jload(getattr(prof, "service_area", None), []) or cities
+    places_ready = bool(getattr(WF.state(db), "paid_discovery_approved", False))
+    out = V.queue(db, org_id, segments, cities, places_ready=places_ready)
+    out["daily_report"] = V.daily_report(db)
+    out["google_places_approved"] = places_ready
+    return out
+
+
 @god_router.post("/workforce/{action}")
 def workforce_control(action: str, payload: dict = Body(default={}), db: Session = Depends(get_db),
                       me: User = Depends(require_acq_master)):
