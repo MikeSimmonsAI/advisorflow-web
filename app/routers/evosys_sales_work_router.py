@@ -69,7 +69,11 @@ def _camp(db: Session, c: Ctx, cid: str) -> EvoSysCampaign:
 
 def _audience(db: Session, s, camp: EvoSysCampaign) -> Dict[str, int]:
     leads = db.query(EvoSysLead).filter(EvoSysLead.brand_sales_org_id == camp.brand_sales_org_id).all()
-    n = sum(1 for l in leads if CA.campaign_for(db, s, l) is not None and CA.campaign_for(db, s, l).id == camp.id)
+    camps = CA.all_for(db, s)                 # once, not twice per lead (saves took ~10 min)
+    n = 0
+    for l in leads:
+        hit = CA.campaign_for(db, s, l, camps)
+        n += 1 if hit is not None and hit.id == camp.id else 0
     sts = db.query(EvoSysOutreachState).filter(EvoSysOutreachState.campaign_id == camp.id).all()
     paused = not CA.can_send(camp, s)
     return {"matching_leads": n, "in_followup": sum(1 for x in sts if x.status == "active"),
