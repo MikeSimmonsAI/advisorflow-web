@@ -49,13 +49,19 @@ COLUMNS = {APPOINTMENTS: APPT_COLUMNS, FOLLOW_UPS: FU_COLUMNS}
 # header, by the sheet's setup - never by the sync).
 STAFF_COLUMNS = {
     # Owner, Nov 23 4:41 PM: no "Confirmed With Family?" column.
-    APPOINTMENTS: ("Assigned To", "Remote Call Link / Details", "Outcome", "Team Notes"),
+    # Owner, Nov 23 4:55 PM: "a sold column ... and a note saying what was sold".
+    APPOINTMENTS: ("Assigned To", "Remote Call Link / Details", "Outcome", "Team Notes", "Sold?", "What Was Sold"),
     FOLLOW_UPS: ("Assigned To", "Done?", "Team Notes", "Appointment Date", "Appointment Time", "How",
                  "Home Address"),
 }
 # Written by the system to the right of the team's Follow-Ups columns: what
 # happened when the team filled in an appointment (owner, Nov 22 9:16 PM).
 FU_RESULT_HEADER = "Booking Result"
+# Written by the system on both tabs: when the team last changed the row
+# (owner, Nov 23: "I need to know when it was updated or when the comments
+# were made").
+LAST_UPDATE_HEADER = "Last Update (CT)"
+SOLD_CHOICES = ("Yes", "No")
 # The team's follow-up log, to the right of the Booking Result (owner, Nov 23:
 # "annotate what we followed up, what date do we get an appointment"). Read
 # back like the other team columns; each change goes into the family's notes.
@@ -423,8 +429,16 @@ def layout_requests() -> List[Dict]:
           _when(A, "A2:P2000", '=AND($C2<>"",$C2=TODAY())', "#DCEFE3"),
           _when(A, "A2:P2000", '=OR(LEFT($K2,6)="Cancel",$O2="Cancelled")', "#EEEEEE", GREY),
           _when(A, "M2:M2000", '=AND($A2<>"",$M2="",$C2>=TODAY())', "#FBE3DF")]
+    # Sold? / What Was Sold (team, Q-R) and Last Update (system, S)
+    r += [_fmt(A, "Q1:R1", bold=True, fg="#FFFFFF", bg=BRASS, valign="MIDDLE", wrap=True),
+          _fmt(A, "S1", bold=True, fg="#FFFFFF", bg=GREEN, valign="MIDDLE", wrap=True),
+          _fmt(A, "Q2:R2000", bg=GOLD, size=10, fg=TEXT, valign="TOP"), _fmt(A, "R2:R2000", wrap=True),
+          _fmt(A, "S2:S2000", number="m/d/yyyy h:mm am/pm", size=10, fg=TEXT, valign="TOP"),
+          _list(A, "Q2:Q2000", list(SOLD_CHOICES)), _borders(A, "A1:S2000"),
+          _when(A, "Q2:Q2000", '=$Q2="Yes"', "#DCEFE3")]
     r += _widths(A, {"A": 90, "B": 135, "C": 130, "D": 80, "E": 85, "F": 170, "G": 115, "H": 190, "I": 135,
-                     "J": 200, "K": 120, "L": 260, "M": 140, "N": 200, "O": 110, "P": 240})
+                     "J": 200, "K": 120, "L": 260, "M": 140, "N": 200, "O": 110, "P": 240, "Q": 70, "R": 220,
+                     "S": 135})
     # Follow-Ups: system A-I, the team's J-P, the booking result Q, the team's
     # follow-up log R-S
     r += [_fmt(F, "A2:S2000", size=10, fg=TEXT, valign="TOP"),
@@ -451,7 +465,10 @@ def layout_requests() -> List[Dict]:
           _when(F, "Q2:Q2000", '=LEFT($Q2,10)="Not booked"', "#FBE3DF")]
     r += _widths(F, {"A": 90, "B": 135, "C": 170, "D": 115, "E": 190, "F": 260, "G": 130, "H": 280, "I": 110,
                      "J": 140, "K": 70, "L": 260, "M": 140, "N": 110, "O": 150, "P": 220, "Q": 260,
-                     "R": 130, "S": 200})
+                     "R": 130, "S": 200, "T": 135})
+    r += [_fmt(F, "T1", bold=True, fg="#FFFFFF", bg=GREEN, valign="MIDDLE", wrap=True),
+          _fmt(F, "T2:T2000", number="m/d/yyyy h:mm am/pm", size=10, fg=TEXT, valign="TOP"),
+          _borders(F, "A1:T2000")]
     # Dashboard
     r += [_fmt(D, "A1:H31", size=10, fg=TEXT),
           _fmt(D, "A1", bold=True, size=18, fg=GREEN), _fmt(D, "A2", italic=True, fg=GREY),
@@ -590,7 +607,7 @@ def known_ids(client, sid: str, tab: str) -> List[str]:
 PAUSE_AFTER = timedelta(days=7)
 PLACEHOLDER = re.compile(r"^\s*Person\s+\d+\s*$", re.I)
 TEAM_RANGE = "'Team'!A2:E30"
-APPT_KEYS = ("assigned", "link", "outcome", "notes")
+APPT_KEYS = ("assigned", "link", "outcome", "notes", "sold", "sold_what")
 FU_KEYS = ("assigned", "done", "notes", "appt_date", "appt_time", "appt_how", "appt_address",
            "fu_date", "fu_result")
 FU_WORK_KEYS = ("fu_date", "fu_result")
@@ -757,6 +774,11 @@ def _apply(db, prog, tab: str, rid: str, lead_id: Optional[str], old: Dict, new:
                     said.append("(not recorded as attendance: %s)" % str(exc)[:120])
         if "link" in changed and new.get("link"):
             said.append("call details: %s" % new["link"])
+        if ("sold" in changed or "sold_what" in changed) and (new.get("sold") or new.get("sold_what")):
+            if (new.get("sold") or "").strip().lower() == "no":
+                said.append("nothing sold")
+            else:
+                said.append("SOLD: %s" % (new.get("sold_what") or "(what was sold not filled in yet)"))
     else:
         if any(k in changed for k in APPT_FIELDS) and (new.get("appt_date") or new.get("appt_time")):
             result = _book_from_sheet(db, prog, rid, lead_id, new, who, now)
@@ -827,6 +849,7 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
     known = {r.row_id: r for r in db.query(R).filter(R.organization_id == org).all()}
     staff = {tab: read_staff(client, sid, tab) for tab in (APPOINTMENTS, FOLLOW_UPS)}
     booking_results: Dict[str, str] = {}
+    stamped: List[tuple] = []                            # (tab, sheet row) the team changed this pass
     # 1. what the team typed -> the app
     for tab, by_id in staff.items():
         for rid, cur in by_id.items():
@@ -838,11 +861,12 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
                 db.add(rec)
                 known[rid] = rec
             old = json.loads(rec.staff_json or "{}")
-            if old != vals:
+            if any((old.get(k) or "") != (vals.get(k) or "") for k in KEYS[tab]):
                 if _apply(db, prog, tab, rid, rec.lead_id, old, vals, now, results=booking_results):
                     out["changes"] += 1
                 rec.staff_json = json.dumps(vals)
                 rec.staff_changed_at = now
+                stamped.append((tab, cur["row"]))
                 if vals.get("assigned") != rec.assigned_to:
                     rec.assigned_to, rec.auto_assigned = vals.get("assigned") or None, False
                     rec.assigned_at = now if vals.get("assigned") else None
@@ -923,6 +947,23 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
         if cur is not None:
             writes.append({"range": _rng(FOLLOW_UPS, "%s%d" % (res_col, cur["row"])), "values": [[text]]})
     out["booked"] = sum(1 for t in booking_results.values() if t.startswith("Booked"))
+    # when the team last changed each row (a column the system owns, found by its header)
+    if stamped:
+        from app.services.volt.sheets_export import central_serial
+        for tab in (APPOINTMENTS, FOLLOW_UPS):
+            rows_changed = [r for t, r in stamped if t == tab]
+            if not rows_changed:
+                continue
+            try:
+                head = client.spreadsheets().values().get(spreadsheetId=sid, range=_rng(tab, "A1:AN1")).execute()
+                header = [str(c).strip() for c in ((head.get("values") or [[]])[0])]
+            except Exception:                            # noqa: BLE001 - a courtesy column
+                header = []
+            if LAST_UPDATE_HEADER in header:
+                lu = column(header.index(LAST_UPDATE_HEADER) + 1)
+                for r in rows_changed:
+                    writes.append({"range": _rng(tab, "%s%d" % (lu, r)), "values": [[central_serial(now)]]})
+        out["stamped"] = len(stamped)
     if writes:
         client.spreadsheets().values().batchUpdate(
             spreadsheetId=sid, body={"valueInputOption": "RAW", "data": writes}).execute()
