@@ -353,7 +353,7 @@ def test_round_robin_skips_placeholders_and_unchecked_people(setter):
     assert [got["a1"], got["a2"], got["a3"]] == ["Ann", "Bob", "Ann"]
     assert got.get("old", "") == ""                                   # past: not assigned
     fu = {r[0]: _c(r, 9) for r in sheet[RS.FOLLOW_UPS][1:]}
-    assert fu["FU-1"] == "Bob" and fu.get("FU-2", "") == ""          # continues the turn; closed skipped
+    assert fu["FU-1"] == "Ann" and fu.get("FU-2", "") == ""          # follow-ups balance on their own; closed skipped
     assert out["assigned"] == 4
     status = {r[0]: _c(r, 5) for r in sheet["Team"][1:]}
     assert status["Ann"] == "In the rotation" and "name here" in status["Person 2"] and "unchecked" in status["Cal"]
@@ -361,7 +361,7 @@ def test_round_robin_skips_placeholders_and_unchecked_people(setter):
     appts.append(_appt("a4", today + 4))
     out = _run_team(db, prog, sheet, appts, fus, now + timedelta(minutes=5))
     got = {r[0]: _c(r, 12) for r in sheet[RS.APPOINTMENTS][1:]}
-    assert out["assigned"] == 1 and got["a4"] == "Ann"
+    assert out["assigned"] == 1 and got["a4"] == "Bob"             # fewest upcoming appointments (Ann has 2)
 
 
 def test_what_the_team_types_goes_into_the_app(setter, sample_advisor):
@@ -736,10 +736,10 @@ def test_a_person_tab_lists_their_work_and_their_edits_reach_the_main_tab_and_th
     sheet["__titles__"] = {3: "Ann", 4: "Bob"}
     appts = [_appt(b.id, today + 7)]
     fus = [_fu("FU-x1")]
-    _run_team(db, prog, sheet, appts, fus, now)                   # appointment -> Ann, follow-up -> Bob
+    _run_team(db, prog, sheet, appts, fus, now)                   # appointment -> Ann, follow-up -> Ann
     ann = sheet["Ann"]
     assert ann[4][0] == b.id and ann[4][3] == "Fam " + b.id          # Ann's list, row 5
-    assert sheet["Bob"][4][15] == "FU-x1"                            # Bob's follow-ups start at P
+    assert ann[4][15] == "FU-x1"                                     # her follow-ups start at P
     # Ann types on HER tab: outcome, sold, what was sold, notes
     row = _pad(ann[4], 30)
     row[9], row[10], row[11], row[12] = "Showed", "Yes", "Lawn crypt", "Great visit"
@@ -784,3 +784,27 @@ def test_new_families_tab_is_found_by_id_after_a_rename(setter, sample_advisor):
     out = RS.new_families_pass(db, prog, _Client(sheet), "sid", ["Ann"], now=datetime(2026, 11, 23, 23, 0))
     assert out["added"] == 1 and sheet["6 Block"][1][12].startswith("Added")
     assert db.query(Lead).filter(Lead.first_name == "Rae").count() == 1
+
+
+
+# ── Owner, Nov 23 5:53 PM: "Kitty Arnold is sitting appointmentless" ───────
+
+def test_a_newcomer_gets_new_appointments_until_caught_up_and_follow_ups_balance_separately(setter):
+    db = setter["db"]
+    prog = _prog(setter)
+    now = datetime(2026, 11, 23, 23, 0)
+    today = int(__import__("app.services.volt.sheets_export", fromlist=["x"]).central_serial(now))
+    sheet = _board([("Ann", "TRUE"), ("Bob", "TRUE")])
+    appts = [_appt("a%d" % i, today + 1) for i in range(4)]
+    fus = [_fu("FU-%d" % i) for i in range(4)]
+    _run_team(db, prog, sheet, appts, fus, now)                   # 2 + 2 each
+    # Kit joins; three new appointments and two new follow-ups come in
+    sheet["Team"].append(["Kit", "", "", "", "TRUE", ""])
+    appts += [_appt("n%d" % i, today + 2) for i in range(3)]
+    fus += [_fu("FU-n%d" % i) for i in range(2)]
+    _run_team(db, prog, sheet, appts, fus, now + timedelta(minutes=2))
+    got = {r[0]: _c(r, 12) for r in sheet[RS.APPOINTMENTS][1:]}
+    assert [got["n0"], got["n1"]] == ["Kit", "Kit"]                  # catches up first
+    assert got["n2"] in ("Ann", "Bob", "Kit")
+    fu = {r[0]: _c(r, 9) for r in sheet[RS.FOLLOW_UPS][1:]}
+    assert [fu["FU-n0"], fu["FU-n1"]] == ["Kit", "Kit"]
