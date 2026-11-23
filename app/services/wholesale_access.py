@@ -196,6 +196,11 @@ def action_for(path: str, method: str) -> str:
         return "assign"
     if last in ("decide", "approve", "approvals") or n.endswith("/approvals/*/decide"):
         return "approve"
+    # Granting or declining an investor's exclusive review (POST /deal-room/holds/{id})
+    # is an approval, not "create": a login allowed to answer investors must not
+    # also be able to hand a property to one of them.
+    if m == "POST" and re.match(r"^/wholesale/deal-room/holds/\*$", n):
+        return "approve"
     if last in ("publish", "submit", "withdraw", "state", "redraft", "close") and ("package" in n or "publication" in n or "listings" in n):
         return "publish"
     if "share-links" in n and m == "POST":
