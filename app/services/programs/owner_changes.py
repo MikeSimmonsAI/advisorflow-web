@@ -62,6 +62,16 @@ RESTLAND_HANDOFF_KEY = "restland-followups-remote-2026-11-22"
 RESTLAND_HANDOFF_SHEET_ID = "1o8gPHz0-tLcrN_IxSQsSQE3Mt6IUX0bQ1U4jlmDfPgo"
 RESTLAND_HANDOFF_2_KEY = "restland-followups-acks-2026-11-22"
 RESTLAND_HANDOFF_3_KEY = "restland-jan4-remote-on-request-2026-11-22"
+# Owner, Nov 22 9:48 PM: "this was a test so undo everything about this test".
+# His sheet test at 9:43 PM marked Adolfo Vila's Nov 19 appointment confirmed +
+# showed (scheduling a thank-you survey) and closed Aftab Naseer's follow-up.
+RESTLAND_SHEET_TEST_UNDO_KEY = "restland-sheet-test-undo-2026-11-22"
+TEST_BOOKING_ID = "eccad87b-e484-4a29-959a-7023a9f4dbde"
+TEST_CONV_ID = "3bff2f95-1cda-4ce9-8fe8-b8ac5c5b2665"
+TEST_CONV_REASON = ("The family is upset due to receiving messages after Aftab's passing, and immediate attention "
+                    "is needed to update records and stop further messages.")
+TEST_NOTE_IDS = ("ef0e99d5-4d16-4a79-9b70-1a0e1d5ee4de", "e72cc136-01e8-41c5-9fff-a4debd909136")
+TEST_SURVEY_ID = "ac5f7d15-9e3e-484f-90c0-946be2decab3"
 # Owner, Nov 22 8:18 PM: these four "after the holidays" families are followed
 # up the first Monday after New Year's - Mon Jan 4 2027, 9 AM Central.
 AFTER_NEW_YEAR = datetime(2027, 1, 4, 15, 0)
@@ -275,6 +285,55 @@ def restland_jan4_and_remote_on_request(db: Session, prog, now: datetime) -> Dic
     return summary
 
 
+def restland_sheet_test_undo(db: Session, prog, now: datetime) -> Dict:
+    """Put both families back exactly as they were before the owner's test."""
+    from app.models.models import BookingLink
+    from app.models.program_models import HandoffSheetRow, ProgramConversation
+    from app.models.reset_models import AppointmentNotification, AppointmentSurvey
+    from app.models.work_models import LeadNote
+    org_id = prog.organization_id
+    run, item = _open_run(db, org_id, RESTLAND_SHEET_TEST_UNDO_KEY)
+    done = {}
+    b = db.query(BookingLink).filter(BookingLink.id == TEST_BOOKING_ID).first()
+    if b is not None and b.status == "completed":
+        item("booking_link", b.id, "undo_test", {"status": b.status, "confirmed_at": b.confirmed_at,
+                                                 "completed_at": b.completed_at}, {"status": "booked"},
+             "owner Nov 22: undo sheet test")
+        b.status, b.completed_at, b.confirmed_at = "booked", None, None
+        b.attendance_recorded_at, b.attendance_recorded_by = None, None
+        done["appointment"] = "back to booked, not confirmed"
+    n = 0
+    for r in (db.query(AppointmentNotification).filter(AppointmentNotification.booking_id == TEST_BOOKING_ID,
+                                                       AppointmentNotification.purpose == "survey",
+                                                       AppointmentNotification.status.in_(("scheduled", "retry"))).all()):
+        item("appointment_notification", r.id, "undo_test", {"status": r.status}, {"status": "superseded"},
+             "owner Nov 22: undo sheet test")
+        r.status, r.reason = "superseded", "owner's sheet test undone - never sent"
+        n += 1
+    done["surveys_stopped"] = n
+    sv = db.query(AppointmentSurvey).filter(AppointmentSurvey.id == TEST_SURVEY_ID).first()
+    if sv is not None:
+        item("appointment_survey", sv.id, "undo_test", {"booking_id": sv.booking_id}, None, "owner Nov 22: undo sheet test")
+        db.delete(sv)
+    c = db.query(ProgramConversation).filter(ProgramConversation.id == TEST_CONV_ID).first()
+    if c is not None and c.state == "closed":
+        item("program_conversation", c.id, "undo_test", {"state": c.state, "handoff_reason": c.handoff_reason},
+             {"state": "human"}, "owner Nov 22: undo sheet test")
+        c.state, c.handoff_reason = "human", TEST_CONV_REASON
+        done["follow_up"] = "open again (needs a person)"
+    notes = db.query(LeadNote).filter(LeadNote.id.in_(TEST_NOTE_IDS)).all()
+    for nt in notes:
+        item("lead_note", nt.id, "undo_test", {"body": nt.body}, None, "owner Nov 22: undo sheet test")
+        db.delete(nt)
+    done["notes_removed"] = len(notes)
+    for r in db.query(HandoffSheetRow).filter(HandoffSheetRow.organization_id == org_id,
+                                              HandoffSheetRow.row_id.in_((TEST_BOOKING_ID, "FU-" + TEST_CONV_ID))).all():
+        r.assigned_to, r.auto_assigned, r.assigned_at, r.staff_changed_at = None, False, None, None
+    run.status, run.finished_at, run.summary_json = "applied", datetime.utcnow(), json.dumps(done)
+    db.commit()
+    return done
+
+
 def restland_followups_acks(db: Session, prog, now: datetime) -> Dict:
     """Second pass of the Nov 22 restore: families whose only later reply was
     an acknowledgement ("👍") also go back on the follow-up list."""
@@ -393,6 +452,8 @@ def apply_pending(db: Session, now: Optional[datetime] = None) -> Dict:
                     res["handoff_acks"] = restland_followups_acks(db, prog, now)
                 if now < SUNDAYS_APPLY_UNTIL and _ledger(db, prog.organization_id, RESTLAND_HANDOFF_3_KEY) is None:
                     res["jan4_remote"] = restland_jan4_and_remote_on_request(db, prog, now)
+                if now < SUNDAYS_APPLY_UNTIL and _ledger(db, prog.organization_id, RESTLAND_SHEET_TEST_UNDO_KEY) is None:
+                    res["sheet_test_undo"] = restland_sheet_test_undo(db, prog, now)
                 if res:
                     out[prog.organization_id] = res
         except Exception as exc:                         # noqa: BLE001 - never stops a deploy
