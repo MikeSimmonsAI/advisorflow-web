@@ -92,35 +92,57 @@ def test_remote_reminders_never_point_to_the_office():
 # ── the sheet ───────────────────────────────────────────────────────────────
 
 class _Values:
+    """A tiny in-memory Sheets values API: get / batchUpdate / update on A1 ranges."""
     def __init__(self, sheet):
         self.sheet, self.writes = sheet, []
 
-    def get(self, spreadsheetId, range):
-        tab, a1 = range.split("!")
+    @staticmethod
+    def _parse(rng):
+        import re
+        tab, a1 = rng.rsplit("!", 1)
         tab = tab.strip("'")
-        rows = self.sheet[tab]
-        if a1.startswith("A1:"):
-            end = a1.split(":")[1].rstrip("0123456789")
-            return _Exec({"values": [rows[0][:ord(end) - 64]]})
-        return _Exec({"values": [[r[0]] for r in rows[1:]]})
+        m = re.match(r"([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$", a1)
+
+        def ci(c):
+            n = 0
+            for ch in c:
+                n = n * 26 + ord(ch) - 64
+            return n - 1
+        c1, r1 = ci(m.group(1)), int(m.group(2)) - 1
+        c2 = ci(m.group(3)) if m.group(3) else c1
+        r2 = int(m.group(4)) - 1 if m.group(4) else r1
+        return tab, r1, c1, r2, c2
+
+    def get(self, spreadsheetId, range):
+        tab, r1, c1, r2, c2 = self._parse(range)
+        rows = self.sheet.get(tab, [])
+        out = []
+        for r in rows[r1:r2 + 1]:
+            out.append([("" if v is None else v) for v in r[c1:c2 + 1]])
+        while out and not any(str(v) != "" for v in out[-1]):
+            out.pop()
+        return _Exec({"values": out} if out else {})
+
+    def _put(self, rng, values):
+        tab, r1, c1, _r2, _c2 = self._parse(rng)
+        rows = self.sheet.setdefault(tab, [])
+        for di, vals in enumerate(values):
+            while len(rows) <= r1 + di:
+                rows.append([])
+            cells = rows[r1 + di]
+            for j, v in enumerate(vals):
+                while len(cells) <= c1 + j:
+                    cells.append("")
+                cells[c1 + j] = v
 
     def batchUpdate(self, spreadsheetId, body):
         self.writes += body["data"]
         for d in body["data"]:
-            tab, a1 = d["range"].split("!")
-            tab = tab.strip("'")
-            import re
-            m = re.match(r"([A-Z]+)(\d+)", a1)
-            col = ord(m.group(1)[0]) - 65
-            row = int(m.group(2)) - 1
-            rows = self.sheet[tab]
-            while len(rows) <= row:
-                rows.append([""] * 20)
-            for j, v in enumerate(d["values"][0]):
-                cells = rows[row]
-                while len(cells) <= col + j:
-                    cells.append("")
-                cells[col + j] = v
+            self._put(d["range"], d["values"])
+        return _Exec({})
+
+    def update(self, spreadsheetId, range, valueInputOption, body):
+        self._put(range, body["values"])
         return _Exec({})
 
 
@@ -155,18 +177,17 @@ def _sheet():
 
 def test_the_sync_writes_only_system_columns_and_keeps_the_teams_work():
     sheet = _sheet()
-    sheet[RS.APPOINTMENTS].append(["b1", 1, 2, 3, "Mon", "Old Name", "", "", "At Restland", "", "Booked", "", "",
+    sheet[RS.APPOINTMENTS].append(["b1", 1, 2, 3, "Mon", "Old Name", "", "", "At Restland", "", "Booked", "",
                                    "Person 1", True, "zoom link", "Showed", "great visit"])
     c = _Client(sheet)
     row = ["b1", 46000.5, 46001, 0.4166, "Tuesday", "Ada Lovelace", "2145550100", "", "Phone / Video Call", "",
-           "Confirmed", "see you then", ""]
-    new = ["b2", 46000.6, 46002, 0.5, "Wednesday", "Bo Diddley", "2145550101", "", "At Restland", "", "Booked",
-           "", ""]
+           "Confirmed", "see you then"]
+    new = ["b2", 46000.6, 46002, 0.5, "Wednesday", "Bo Diddley", "2145550101", "", "At Restland", "", "Booked", ""]
     out = RS.upsert(c, "sid", RS.APPOINTMENTS, [row, new])
     assert out["inserted"] == 1
     r1 = sheet[RS.APPOINTMENTS][1]
     assert r1[5] == "Ada Lovelace" and r1[8] == "Phone / Video Call"
-    assert r1[13:18] == ["Person 1", True, "zoom link", "Showed", "great visit"]     # untouched
+    assert r1[12:17] == ["Person 1", True, "zoom link", "Showed", "great visit"]     # untouched
     assert sheet[RS.APPOINTMENTS][2][0] == "b2"
     assert all(len(w["values"][0]) <= len(RS.APPT_COLUMNS) for w in c.s.v.writes)
 
@@ -176,7 +197,7 @@ def test_a_changed_header_stops_the_sync():
     sheet = _sheet()
     sheet[RS.FOLLOW_UPS][0][0] = "Something else"
     try:
-        RS.upsert(_Client(sheet), "sid", RS.FOLLOW_UPS, [["FU-1"] + [""] * 9])
+        RS.upsert(_Client(sheet), "sid", RS.FOLLOW_UPS, [["FU-1"] + [""] * 8])
         raise AssertionError("should have refused")
     except SheetsError as e:
         assert e.category == "sheet_layout"
@@ -185,7 +206,7 @@ def test_a_changed_header_stops_the_sync():
 def test_an_update_only_row_never_creates_a_partial_row():
     sheet = _sheet()
     RS.upsert(_Client(sheet), "sid", RS.FOLLOW_UPS,
-              [["TOLD-x", None, None, None, None, None, None, None, "Booked or handled", None]])
+              [["TOLD-x", None, None, None, None, None, None, None, "Booked or handled"]])
     assert len(sheet[RS.FOLLOW_UPS]) == 1
 
 
@@ -260,3 +281,151 @@ def test_the_board_uses_the_evosys_login_when_it_is_set(monkeypatch):
     assert RS.sync_account_email() == "old@x.iam.gserviceaccount.com"
     monkeypatch.setenv("EVOSYS_SHEETS_SERVICE_ACCOUNT_JSON", json.dumps({"client_email": "evosys-sync@x.iam.gserviceaccount.com"}))
     assert RS.sync_account_email() == "evosys-sync@x.iam.gserviceaccount.com"
+
+
+
+# ── the team's side ─────────────────────────────────────────────────────────
+
+def test_no_links_into_the_app_and_no_system_words():
+    assert "Family File" not in RS.APPT_COLUMNS and "Family File" not in RS.FU_COLUMNS
+    why = RS._plain_why("Needs a human - the AI could not move this to an appointment, so nothing was sent "
+                        "(Cathy asked about the meeting format.). Contact them personally.")
+    assert why == "Needs a person: Cathy asked about the meeting format." and "AI" not in why
+
+
+def _c(r, i):
+    return r[i] if len(r) > i else ""
+
+
+def _pad(r, n=17):
+    while len(r) < n:
+        r.append("")
+    return r
+
+
+def _board(team):
+    sheet = _sheet()
+    sheet["Team"] = [["Name", "Phone", "Email", "Role", "Active?", "Status"]] + [
+        [n, "", "", "", a, ""] for n, a in team]
+    return sheet
+
+
+def _appt(rid, day_serial, status="Booked"):
+    return [rid, 46000.0, day_serial, 0.4, "Monday", "Fam " + rid, "", "", "At Restland", "", status, ""]
+
+
+def _fu(rid, status="Open"):
+    return [rid, 46000.0, "Fam " + rid, "", "", "Asked for a call back", "", "", status]
+
+
+def _prog(setter):
+    from app.models.program_models import OutreachProgram
+    db, org = setter["db"], setter["org"]
+    prog = db.query(OutreachProgram).filter_by(organization_id=org.id).first()
+    prog.booking_policy_json = json.dumps({"handoff_sheet": {"id": "x" * 30, "formatted": True}})
+    db.commit()
+    return prog
+
+
+def _run_team(db, prog, sheet, appts, fus, now):
+    c = _Client(sheet)
+    RS.upsert(c, "sid", RS.APPOINTMENTS, appts)
+    RS.upsert(c, "sid", RS.FOLLOW_UPS, fus)
+    return RS.team_pass(db, prog, c, "sid", {RS.APPOINTMENTS: appts, RS.FOLLOW_UPS: fus}, now=now)
+
+
+def test_round_robin_skips_placeholders_and_unchecked_people(setter):
+    db = setter["db"]
+    prog = _prog(setter)
+    now = datetime(2026, 11, 23, 15, 0)
+    today = int(__import__("app.services.volt.sheets_export", fromlist=["x"]).central_serial(now))
+    sheet = _board([("Ann", "TRUE"), ("Person 2", "TRUE"), ("Bob", "TRUE"), ("Cal", "FALSE")])
+    appts = [_appt("a1", today + 1), _appt("a2", today + 2), _appt("a3", today + 3), _appt("old", today - 3)]
+    fus = [_fu("FU-1"), _fu("FU-2", status="Closed")]
+    out = _run_team(db, prog, sheet, appts, fus, now)
+    got = {r[0]: _c(r, 12) for r in sheet[RS.APPOINTMENTS][1:]}
+    assert [got["a1"], got["a2"], got["a3"]] == ["Ann", "Bob", "Ann"]
+    assert got.get("old", "") == ""                                   # past: not assigned
+    fu = {r[0]: _c(r, 9) for r in sheet[RS.FOLLOW_UPS][1:]}
+    assert fu["FU-1"] == "Bob" and fu.get("FU-2", "") == ""          # continues the turn; closed skipped
+    assert out["assigned"] == 4
+    status = {r[0]: _c(r, 5) for r in sheet["Team"][1:]}
+    assert status["Ann"] == "In the rotation" and "name here" in status["Person 2"] and "unchecked" in status["Cal"]
+    # the next run carries on from where it left off, and assigns nothing twice
+    appts.append(_appt("a4", today + 4))
+    out = _run_team(db, prog, sheet, appts, fus, now + timedelta(minutes=5))
+    got = {r[0]: _c(r, 12) for r in sheet[RS.APPOINTMENTS][1:]}
+    assert out["assigned"] == 1 and got["a4"] == "Ann"
+
+
+def test_what_the_team_types_goes_into_the_app(setter, sample_advisor):
+    from app.models.models import BookingLink
+    from app.models.work_models import LeadNote
+    db, org = setter["db"], setter["org"]
+    prog = _prog(setter)
+    lead = _lead_for(db, org, sample_advisor, "L001", first="Hal")
+    b = BookingLink(lead_id=lead.id, user_id=sample_advisor.id, status="booked",
+                    booked_time=datetime(2026, 11, 20, 10, 0), meeting_type=BP.OFFICE, appt_duration=45)
+    db.add(b)
+    db.commit()
+    now = datetime(2026, 11, 23, 15, 0)
+    sheet = _board([("Ann", "TRUE")])
+    appts = [_appt(b.id, 46000)]
+    _run_team(db, prog, sheet, appts, [], now)
+    # the team fills in their columns
+    row = _pad(sheet[RS.APPOINTMENTS][1])
+    row[12:17] = ["Ann", "TRUE", "", "Showed", "Met with Hal and his wife; bought a marker."]
+    out = _run_team(db, prog, sheet, appts, [], now + timedelta(minutes=5))
+    assert out["changes"] == 1
+    db.refresh(b)
+    assert b.status == "completed" and b.confirmed_at is not None
+    notes = [n.body for n in db.query(LeadNote).filter_by(lead_id=lead.id).all()]
+    assert any("Showed" in n and "bought a marker" in n and "Ann" in n for n in notes)
+
+
+def test_done_on_a_follow_up_closes_it_in_the_app(setter, sample_advisor):
+    db, org = setter["db"], setter["org"]
+    prog = _prog(setter)
+    lead = _lead_for(db, org, sample_advisor, "L001", first="Ivy")
+    _, conv = _run(db, lead, "call me please", _Fake([_d("callback", "Sure, I'll call you.", callback_window="today")]))
+    assert conv.state == "callback_requested"
+    now = datetime(2026, 11, 23, 15, 0)
+    sheet = _board([("Ann", "TRUE")])
+    fus = [_fu("FU-" + conv.id)]
+    _run_team(db, prog, sheet, [], fus, now)
+    row = sheet[RS.FOLLOW_UPS][1]
+    while len(row) < 12:
+        row.append("")
+    row[10], row[11] = "TRUE", "Called her back, booking next week."
+    _run_team(db, prog, sheet, [], fus, now + timedelta(minutes=5))
+    db.refresh(conv)
+    assert conv.state == "closed" and conv.next_followup_at is None
+
+
+def test_a_week_without_updates_pauses_the_person_and_alerts_once(setter, monkeypatch):
+    db = setter["db"]
+    prog = _prog(setter)
+    pages = []
+    monkeypatch.setattr(RS, "_pause_alert", lambda db_, prog_, name, since, now: pages.append(name))
+    now = datetime(2026, 11, 23, 15, 0)
+    today = int(__import__("app.services.volt.sheets_export", fromlist=["x"]).central_serial(now))
+    sheet = _board([("Ann", "TRUE"), ("Bob", "TRUE")])
+    appts = [_appt("a1", today + 20), _appt("a2", today + 20)]
+    _run_team(db, prog, sheet, appts, [], now)                         # a1 -> Ann, a2 -> Bob
+    later = now + timedelta(days=8)
+    row_b = _pad([r for r in sheet[RS.APPOINTMENTS][1:] if r[0] == "a2"][0])
+    row_b[16] = "Left a voicemail"                                     # Bob kept working; Ann did nothing
+    appts.append(_appt("a3", today + 20))
+    out = _run_team(db, prog, sheet, appts, [], later)
+    assert pages == ["Ann"] and out["paused"] == ["Ann"]
+    got = {r[0]: _c(r, 12) for r in sheet[RS.APPOINTMENTS][1:]}
+    assert got["a3"] == "Bob"                                          # paused people get nobody new
+    status = {r[0]: _c(r, 5) for r in sheet["Team"][1:]}
+    assert status["Ann"].startswith("Paused")
+    _run_team(db, prog, sheet, appts, [], later + timedelta(minutes=5))
+    assert pages == ["Ann"]                                            # one alert per pause
+    row_a = _pad([r for r in sheet[RS.APPOINTMENTS][1:] if r[0] == "a1"][0])
+    row_a[16] = "Called, no answer"                                    # Ann is back
+    _run_team(db, prog, sheet, appts, [], later + timedelta(minutes=10))
+    status = {r[0]: _c(r, 5) for r in sheet["Team"][1:]}
+    assert status["Ann"] == "In the rotation"
