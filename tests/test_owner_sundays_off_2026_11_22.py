@@ -3,6 +3,8 @@ everything to stop on Sundays, only on Sundays." Sunday is a closed day for
 Restland: no slots, no texts, no emails, no daily batch. Everything already
 reserved for a Sunday moves to Monday in the same order. Synthetic data only."""
 import json
+from tests.test_sci_appointment_setter import setter  # noqa: F401,E402
+from tests.test_outreach_program import program  # noqa: F401,E402
 from datetime import date, datetime, timedelta
 
 from app.models.models import CadenceState, Lead
@@ -223,3 +225,39 @@ def test_the_four_after_holiday_families_move_to_the_first_monday_after_new_year
     db.refresh(c)
     assert c.next_followup_at == datetime(2027, 1, 4, 15, 0) and c.followups_sent == 0
     assert datetime(2027, 1, 4).weekday() == 0                                               # a Monday
+
+
+# ── Owner, Nov 23 4:55 PM: emailed replies that never reached the system ────
+
+def test_emailed_replies_are_entered_and_outreach_stops(setter, sample_advisor, monkeypatch):
+    from app.models.models import Lead
+    from app.models.program_models import OutreachProgram, ProgramConversation
+    from app.services.programs import owner_changes as OC
+    from tests.test_outreach_program import _lead_for
+    db, org = setter["db"], setter["org"]
+    prog = db.query(OutreachProgram).filter_by(organization_id=org.id).first()
+    a = _lead_for(db, org, sample_advisor, "L001", phone="2145550111", first="Paula", email="p@x.com")
+    b = _lead_for(db, org, sample_advisor, "L002", phone="2145550112", first="Marci", email="m@x.com")
+    c = _lead_for(db, org, sample_advisor, "L003", phone="2145550113", first="Carm", email="c@x.com")
+    monkeypatch.setattr(OC, "EMAILED", [
+        (a.id, "waiting_future", "after Thanksgiving", OC._NOV30, "I'll get in touch after Thanksgiving.", "email", None),
+        (b.id, "human", "Asked what the file items are about", None, "What kind of things?", "email", "extra"),
+        ("missing-id", "human", "x", None, "y", "email", None)])
+    monkeypatch.setattr(OC, "EMAILED_NOTES", [])
+    monkeypatch.setattr(OC, "CARMELITA_FU", (c.id, OC._DEC7, "Team follow-up Mon Dec 7"))
+    out = OC.restland_emailed_replies(db, prog, datetime(2026, 11, 23, 23, 0))
+    assert out["added"] == 2 and out["missing"] == ["missing-id"] and out["carmelita"] == "Dec 7"
+    ca = db.query(ProgramConversation).filter_by(lead_id=a.id).one()
+    assert ca.state == "waiting_future" and ca.next_followup_at == OC._NOV30
+    cb = db.query(ProgramConversation).filter_by(lead_id=b.id).one()
+    assert cb.state == "human" and "file items" in cb.handoff_reason
+    cc = db.query(ProgramConversation).filter_by(lead_id=c.id).one()
+    assert cc.state == "human" and cc.next_followup_at == OC._DEC7
+    assert db.get(Lead, a.id).status == "replied"
+    from app.services.programs import restland_sheet as RS
+    rows = {r[0]: r for r in RS.follow_up_rows(db, org.id)}
+    assert rows["FU-" + cc.id][6] != "" and "What kind of things?" in rows["FU-" + cb.id][7]
+    # replies now come back into the system
+    from app.models.models import Organization
+    assert db.get(Organization, org.id).reply_to_email == OC.REPLY_TO_SYSTEM
+    assert out["reply_to"]["after"] == "support@evosyspro.live"
