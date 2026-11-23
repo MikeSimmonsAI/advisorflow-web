@@ -286,8 +286,9 @@ def follow_up_rows(db: Session, org_id: str, known_ids=()) -> List[List[Any]]:
 # recorded ("formatted": true) so a person's later changes are left alone.
 
 PERSON_TABS = ("Person 1", "Person 2", "Person 3", "Person 4", "Person 5")
+NEW_FAMILIES = "New Families"
 TAB_IDS = {"Dashboard": 0, APPOINTMENTS: 1, FOLLOW_UPS: 2, "Person 1": 3, "Person 2": 4, "Team": 5,
-           "Person 3": 7, "Person 4": 8, "Person 5": 9}
+           "Person 3": 7, "Person 4": 8, "Person 5": 9, NEW_FAMILIES: 10}
 GREEN, IVORY, BRASS, GOLD, TEXT, GREY, LINE = ("#193C32", "#F7F5ED", "#C3A66A", "#F6EDD9", "#24392F",
                                                "#5B6B63", "#E2DDCD")
 
@@ -487,6 +488,23 @@ def layout_requests() -> List[Dict]:
               _fmt(sid, "I5:I500", wrap=True), _height(sid, 4, 36)]
         r += _widths(sid, {"A": 130, "B": 80, "C": 85, "D": 160, "E": 110, "F": 130, "G": 180, "H": 110, "I": 200,
                            "J": 24, "K": 130, "L": 160, "M": 110, "N": 220, "O": 260, "P": 60})
+    # New Families: the team's entries A-L, the system's answer M-O
+    N = TAB_IDS[NEW_FAMILIES]
+    r += [{"updateSheetProperties": {"properties": {"sheetId": N, "tabColorStyle": {"rgbColor": _rgb(BRASS)}},
+                                     "fields": "tabColorStyle"}},
+          _fmt(N, "A2:O2000", size=10, fg=TEXT, valign="TOP"),
+          _fmt(N, "A1:L1", bold=True, fg="#FFFFFF", bg=BRASS, valign="MIDDLE", wrap=True),
+          _fmt(N, "M1:O1", bold=True, fg="#FFFFFF", bg=GREEN, valign="MIDDLE", wrap=True),
+          _fmt(N, "A2:L2000", bg=GOLD), _fmt(N, "N2:N2000", number="m/d/yyyy h:mm am/pm"),
+          _fmt(N, "L2:M2000", wrap=True), _borders(N, "A1:O2000"), _height(N, 1, 40),
+          _team_list(N, "A2:A2000"),
+          {"setDataValidation": {"range": _grid(N, "B2:B2000"), "rule": {
+              "condition": {"type": "ONE_OF_RANGE", "values": [{"userEnteredValue": "=Appointments!$F$2:$F"}]},
+              "strict": False, "showCustomUi": True}}},
+          _when(N, "M2:M2000", '=LEFT($M2,5)="Added"', "#DCEFE3"),
+          _when(N, "M2:M2000", '=OR(LEFT($M2,7)="Missing",LEFT($M2,7)="Already")', "#FBE3DF")]
+    r += _widths(N, {"A": 140, "B": 170, "C": 120, "D": 130, "E": 200, "F": 120, "G": 60, "H": 70,
+                     "I": 120, "J": 200, "K": 140, "L": 220, "M": 240, "N": 135, "O": 110})
     # Team (Active? is the team's switch; Status is written by the system)
     r += [_fmt(T, "A1:F1", bold=True, fg="#FFFFFF", bg=GREEN), _fmt(T, "A2:E30", size=10, bg=GOLD),
           _fmt(T, "F2:F30", size=10), _checkbox(T, "E2:E30"), _borders(T, "A1:F30")]
@@ -872,7 +890,15 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
             rec0 = known.get(rid)
             if tab == APPOINTMENTS and rec0 is not None and rec0.lead_id:
                 owner = next((r.assigned_to for r in known.values()
-                              if r.tab == FOLLOW_UPS and r.lead_id == rec0.lead_id and r.assigned_to), None)
+                              if r.tab in (FOLLOW_UPS, NEW_FAMILIES) and r.lead_id == rec0.lead_id
+                              and r.assigned_to), None)
+            # A family the team entered (New Families) stays with whoever entered it -
+            # its follow-ups and its appointments (owner, Nov 23).
+            if tab == FOLLOW_UPS and not owner:
+                lid = rec0.lead_id if rec0 is not None else _lead_for(db, tab, rid)
+                if lid:
+                    owner = next((r.assigned_to for r in known.values()
+                                  if r.tab == NEW_FAMILIES and r.lead_id == lid and r.assigned_to), None)
             if owner:
                 name = owner
             elif rotation:
@@ -920,6 +946,164 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
     return out
 
 
+# ── New Families: the people a family names on its Permission to Access form ─
+#
+# Owner, Nov 23 3:45 PM: at a file review the family's Permission to Access
+# form names about six people (first, last, address, phone, email). The team
+# member types them on the New Families tab; each becomes a Restland contact,
+# tagged (source "permission_to_access", status "referral"), tied to the family
+# they came from and to the person who entered them - who keeps them: their
+# follow-ups and appointments go to that person, not the rotation. They are
+# NOT texted or emailed: status "referral" keeps them out of every campaign
+# and batch until the owner starts a campaign for them ("utilize that when
+# the time is right").
+
+NF_COLUMNS = ("Entered By", "Came From (Family)", "First Name", "Last Name", "Street Address", "City", "State",
+              "ZIP", "Phone", "Email", "Relationship", "Notes", "Status", "Added On (CT)", "Ref #")
+NF_FIELDS = ("entered_by", "came_from", "first", "last", "street", "city", "state", "zip", "phone", "email",
+             "relationship", "notes")
+NF_STATUS_COL = len(NF_FIELDS)                       # M (0-based 12)
+REFERRAL_SOURCE, REFERRAL_STATUS = "permission_to_access", "referral"
+_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
+
+
+def _referrer(db, org_id: str, name: str) -> Optional[Any]:
+    """The family a referral came from, by the name on the Appointments tab
+    (a booked family). None when no single family matches."""
+    from app.models.models import BookingLink, Lead
+    parts = (name or "").strip().split()
+    if len(parts) < 2:
+        return None
+    first, last = parts[0], " ".join(parts[1:])
+    rows = (db.query(Lead).join(BookingLink, BookingLink.lead_id == Lead.id)
+            .filter(Lead.organization_id == org_id, Lead.first_name.ilike(first), Lead.last_name.ilike(last))
+            .distinct().all())
+    return rows[0] if len(rows) == 1 else None
+
+
+def _existing(db, org_id: str, phone: Optional[str], email: Optional[str]):
+    from app.models.models import Lead
+    if phone:
+        forms = {phone, phone.lstrip("+"), phone[2:]}       # +1214..., 1214... (Restland's form), 214...
+        hit = db.query(Lead).filter(Lead.organization_id == org_id, Lead.phone.in_(forms)).first()
+        if hit is not None:
+            return hit
+    if email:
+        return db.query(Lead).filter(Lead.organization_id == org_id, Lead.email.ilike(email)).first()
+    return None
+
+
+def new_families_pass(db: Session, prog, client, sid: str, team_names: List[str],
+                      now: Optional[datetime] = None) -> Dict[str, Any]:
+    """Read the New Families tab; add each complete new row as a tagged
+    Restland contact; say on the row what happened. A row already added (it
+    has a Ref #) is never added twice; edits to it update the contact."""
+    from app.models.models import Lead
+    from app.models.program_models import HandoffSheetRow as R
+    from app.services.volt.sheets_export import central_serial
+    from app.services.wholesale_sms import normalize_e164
+    now = now or datetime.utcnow()
+    org = prog.organization_id
+    width = len(NF_COLUMNS)
+    got = client.spreadsheets().values().get(spreadsheetId=sid, range=_rng(NEW_FAMILIES, "A1:O%d" % (MAX_ROWS + 1))
+                                             ).execute()
+    values = got.get("values") or []
+    if not values or [str(c).strip() for c in values[0][:width]] != list(NF_COLUMNS):
+        return {"skipped": "no New Families tab"}
+    names = {n.lower(): n for n in team_names}
+    out = {"added": 0, "updated": 0, "duplicates": 0, "incomplete": 0}
+    writes: List[Dict] = []
+    for i, cells in enumerate(values[1:]):
+        n = i + 2
+        cells = [str(c).strip() for c in list(cells) + [""] * (width - len(cells))]
+        vals = dict(zip(NF_FIELDS, cells[:len(NF_FIELDS)]))
+        status, ref = cells[NF_STATUS_COL], cells[NF_STATUS_COL + 2]
+        if not any(vals[k] for k in NF_FIELDS if k != "entered_by"):
+            continue                                     # an empty row (perhaps just a name picked)
+        e164 = normalize_e164(vals["phone"]) if vals["phone"] else None
+        phone = e164.lstrip("+") if e164 else None          # Restland stores 1XXXXXXXXXX
+        email = vals["email"].lower() if _EMAIL.match(vals["email"] or "") else None
+        who = names.get(vals["entered_by"].lower())
+
+        def say(text, added=None, rid=None):
+            row = [text, added if added is not None else cells[NF_STATUS_COL + 1], rid if rid is not None else ref]
+            if row != cells[NF_STATUS_COL:NF_STATUS_COL + 3]:
+                writes.append({"range": _rng(NEW_FAMILIES, "M%d:O%d" % (n, n)), "values": [row]})
+
+        if ref.startswith("NF-"):
+            rec = db.query(R).filter(R.organization_id == org, R.row_id == ref).first()
+            lead = db.query(Lead).filter(Lead.id == rec.lead_id).first() if rec is not None else None
+            if rec is None or lead is None:
+                continue
+            snap = {k: vals[k] for k in NF_FIELDS}
+            if json.loads(rec.staff_json or "{}") != snap:
+                changed = []
+                for f, attr, v in (("first", "first_name", vals["first"]), ("last", "last_name", vals["last"]),
+                                   ("street", "street_address", vals["street"]), ("city", "city", vals["city"]),
+                                   ("state", "state", vals["state"]), ("zip", "zip_code", vals["zip"]),
+                                   ("email", "email", email), ("phone", "phone", phone)):
+                    if v and getattr(lead, attr) != v:
+                        setattr(lead, attr, v)
+                        changed.append(f)
+                if vals["phone"] and phone:
+                    lead.phone_raw = vals["phone"]
+                if who and who != rec.assigned_to:
+                    rec.assigned_to, rec.assigned_at = who, now
+                    changed.append("entered by")
+                if changed or vals["notes"] != (json.loads(rec.staff_json or "{}").get("notes") or ""):
+                    _note(db, org, lead.id, "Restland sheet (%s): New Families row updated (%s)%s"
+                          % (rec.assigned_to or "the team", ", ".join(changed) or "notes",
+                             "; notes: %s" % vals["notes"] if vals["notes"] else ""))
+                    out["updated"] += 1
+                rec.staff_json, rec.staff_changed_at = json.dumps(snap), now
+            continue
+        if ref.startswith("DUP-"):
+            continue
+        missing = [label for label, ok in (("Entered By (pick a name from the Team tab)", who),
+                                           ("First Name", vals["first"]), ("Last Name", vals["last"]),
+                                           ("a Phone or an Email", phone or email)) if not ok]
+        if vals["phone"] and not phone:
+            missing.append("a phone number with 10 digits")
+        if missing:
+            say("Missing: " + ", ".join(missing))
+            out["incomplete"] += 1
+            continue
+        src = _referrer(db, org, vals["came_from"])
+        dup = _existing(db, org, e164, email)
+        if dup is not None:
+            _note(db, org, dup.id, "Restland sheet (%s): also named on %s's Permission to Access form%s"
+                  % (who, vals["came_from"] or "a family", " (%s)" % vals["relationship"] if vals["relationship"] else ""))
+            say("Already in the system as %s %s - noted, not added twice"
+                % (dup.first_name or "", dup.last_name or ""), "", "DUP-%s" % dup.id[:8])
+            out["duplicates"] += 1
+            continue
+        detail = "Permission to Access - from %s%s; entered by %s" % (
+            vals["came_from"] or "a family", " (%s)" % vals["relationship"] if vals["relationship"] else "", who)
+        lead = Lead(organization_id=org, first_name=vals["first"], last_name=vals["last"], phone=phone,
+                    phone_raw=vals["phone"] or None, email=email, street_address=vals["street"] or None,
+                    city=vals["city"] or None, state=vals["state"] or None, zip_code=vals["zip"] or None,
+                    status=REFERRAL_STATUS, source=REFERRAL_SOURCE, source_detail=detail[:250],
+                    contact_channel="sms" if phone else "email_only")
+        db.add(lead)
+        db.flush()
+        rid = "NF-%s" % lead.id
+        db.add(R(organization_id=org, row_id=rid, tab=NEW_FAMILIES, lead_id=lead.id, assigned_to=who,
+                 auto_assigned=False, assigned_at=now, staff_json=json.dumps({k: vals[k] for k in NF_FIELDS}),
+                 staff_changed_at=now))
+        _note(db, org, lead.id, "Restland sheet: added by %s - %s%s" % (
+            who, detail, "; notes: %s" % vals["notes"] if vals["notes"] else ""))
+        if src is not None:
+            _note(db, org, src.id, "Restland sheet (%s): named %s %s on their Permission to Access form%s"
+                  % (who, vals["first"], vals["last"], " (%s)" % vals["relationship"] if vals["relationship"] else ""))
+        say("Added - %s's family to work" % who, central_serial(now), rid)
+        out["added"] += 1
+    db.commit()
+    for k in range(0, len(writes), 500):
+        client.spreadsheets().values().batchUpdate(
+            spreadsheetId=sid, body={"valueInputOption": "RAW", "data": writes[k:k + 500]}).execute()
+    return out
+
+
 def sync(db: Session, prog, client=None) -> Dict[str, Any]:
     from app.services.volt import sheets_export as X
     sid = sheet_id(prog)
@@ -937,7 +1121,14 @@ def sync(db: Session, prog, client=None) -> Dict[str, Any]:
     a = upsert(client, sid, APPOINTMENTS, appts)
     f = upsert(client, sid, FOLLOW_UPS, fus)
     t = team_pass(db, prog, client, sid, {APPOINTMENTS: appts, FOLLOW_UPS: [r for r in fus if r[1] is not None]})
-    return {"appointments": a, "follow_ups": f, "team": t}
+    try:
+        nf = new_families_pass(db, prog, client, sid,
+                               [p["name"] for p in read_team(client, sid) if not p["placeholder"]])
+    except Exception as exc:                             # noqa: BLE001 - the rest of the board still syncs
+        db.rollback()
+        nf = {"error": X.categorize(exc)}
+        log.warning("handoff sheet New Families not read: %s", X.categorize(exc))
+    return {"appointments": a, "follow_ups": f, "team": t, "new_families": nf}
 
 
 def fingerprint(db: Session, org_id: str):

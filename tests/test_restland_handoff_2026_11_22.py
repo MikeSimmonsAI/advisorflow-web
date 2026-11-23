@@ -582,3 +582,85 @@ def test_the_fingerprint_moves_when_a_booking_is_made(setter, sample_advisor):
                                    version="v"))
     db.commit()
     assert RS.fingerprint(db, org.id) != before
+
+
+# ── Owner, Nov 23 3:45 PM: Permission to Access names -> tagged Restland contacts ─
+
+def _nf_board():
+    sheet = _board([("Ann", "TRUE"), ("Bob", "TRUE")])
+    sheet[RS.NEW_FAMILIES] = [list(RS.NF_COLUMNS)]
+    return sheet
+
+
+def test_new_families_become_tagged_contacts_kept_by_whoever_entered_them(setter, sample_advisor):
+    from app.models.models import BookingLink, Lead
+    from app.models.program_models import HandoffSheetRow
+    from app.models.work_models import LeadNote
+    db, org = setter["db"], setter["org"]
+    prog = _prog(setter)
+    src = _lead_for(db, org, sample_advisor, "L001", first="Hal")
+    src.last_name = "Moore"
+    db.add(BookingLink(lead_id=src.id, user_id=sample_advisor.id, status="booked",
+                       booked_time=datetime(2026, 11, 24, 10, 0), meeting_type=BP.OFFICE, appt_duration=45))
+    db.commit()
+    sheet = _nf_board()
+    sheet[RS.NEW_FAMILIES] += [
+        ["Bob", "Hal Moore", "Jo", "Moore", "1 Elm St", "Dallas", "TX", "75238", "(214) 555-0161", "jo@x.com",
+         "Daughter", "", "", "", ""],
+        ["", "", "Kim", "", "", "", "", "", "", "", "", "", "", "", ""],                     # incomplete
+    ]
+    c = _Client(sheet)
+    out = RS.new_families_pass(db, prog, c, "sid", ["Ann", "Bob"], now=datetime(2026, 11, 23, 22, 0))
+    assert out["added"] == 1 and out["incomplete"] == 1, (out, sheet[RS.NEW_FAMILIES])
+    row1, row2 = sheet[RS.NEW_FAMILIES][1], sheet[RS.NEW_FAMILIES][2]
+    assert row1[12].startswith("Added") and row1[14].startswith("NF-")
+    assert row2[12].startswith("Missing:") and "Entered By" in row2[12] and "Last Name" in row2[12]
+    lead = db.query(Lead).filter(Lead.first_name == "Jo").one()
+    assert (lead.status, lead.source, lead.phone, lead.city) == ("referral", "permission_to_access",
+                                                                  "12145550161", "Dallas")
+    assert "Hal Moore" in lead.source_detail and "Bob" in lead.source_detail
+    rec = db.query(HandoffSheetRow).filter_by(row_id=row1[14]).one()
+    assert rec.assigned_to == "Bob" and rec.tab == RS.NEW_FAMILIES       # kept by who entered it
+    assert any("named Jo Moore" in n.body for n in db.query(LeadNote).filter_by(lead_id=src.id))
+    # the next pass never adds the same row twice; the same phone on a new row is a duplicate
+    sheet[RS.NEW_FAMILIES].append(["Ann", "", "Joanne", "Moore", "", "", "", "", "214-555-0161", "", "", "", "",
+                                   "", ""])
+    out = RS.new_families_pass(db, prog, c, "sid", ["Ann", "Bob"], now=datetime(2026, 11, 23, 22, 5))
+    assert out["added"] == 0 and out["duplicates"] == 1
+    assert db.query(Lead).filter(Lead.last_name == "Moore", Lead.first_name.in_(["Jo", "Joanne"])).count() == 1
+    assert sheet[RS.NEW_FAMILIES][3][12].startswith("Already in the system")
+    # an edit to an added row updates the contact
+    row1[7] = "75240"
+    RS.new_families_pass(db, prog, c, "sid", ["Ann", "Bob"], now=datetime(2026, 11, 23, 22, 10))
+    db.refresh(lead)
+    assert lead.zip_code == "75240"
+
+
+def test_a_referral_is_never_in_the_daily_batch_pool(setter, sample_advisor):
+    from app.models.models import Lead
+    from app.services.programs import daily_batch
+    db, org = setter["db"], setter["org"]
+    prog = _prog(setter)
+    sheet = _nf_board()
+    sheet[RS.NEW_FAMILIES].append(["Ann", "", "Lee", "Park", "", "", "", "", "(214) 555-0199", "", "", "", "", "",
+                                   ""])
+    RS.new_families_pass(db, prog, _Client(sheet), "sid", ["Ann"], now=datetime(2026, 11, 23, 22, 0))
+    lead = db.query(Lead).filter(Lead.first_name == "Lee").one()
+    assert lead.id not in [e["lead_id"] for e in daily_batch.pool(db, prog)["entries"]]
+
+
+def test_a_follow_up_for_an_entered_family_goes_to_whoever_entered_it(setter, sample_advisor):
+    db = setter["db"]
+    prog = _prog(setter)
+    from app.models.models import Lead
+    sheet = _nf_board()
+    sheet[RS.NEW_FAMILIES].append(["Bob", "", "Max", "Ray", "", "", "", "", "(214) 555-0177", "", "", "", "", "",
+                                   ""])
+    RS.new_families_pass(db, prog, _Client(sheet), "sid", ["Ann", "Bob"], now=datetime(2026, 11, 23, 22, 0))
+    lead = db.query(Lead).filter(Lead.first_name == "Max").one()
+    _, conv = _run(db, lead, "call me please", _Fake([_d("callback", "Sure.", callback_window="today")]))
+    now = datetime(2026, 11, 23, 22, 5)
+    fus = [_fu("FU-" + conv.id), _fu("FU-other")]
+    _run_team(db, prog, sheet, [], fus, now)
+    got = {r[0]: _c(r, 9) for r in sheet[RS.FOLLOW_UPS][1:]}
+    assert got["FU-" + conv.id] == "Bob"            # not the rotation's next person
