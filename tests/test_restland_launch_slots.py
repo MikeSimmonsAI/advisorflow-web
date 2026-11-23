@@ -374,3 +374,82 @@ def test_pause_stops_every_restland_send_and_nothing_goes_at_830(rl, sender):
     assert ET.plan(db, prog_of(rl), now=utc(2026, 11, 16, 13, 0), with_skip=False) == []
     again = RL.pause(db, rl["org"], "pause-1")
     assert again["text_journeys_paused"] == 0
+
+
+# ── a missed FIRST text goes in the next open minute (owner, Nov 23) ─────────
+# Production runs "full blast": a new family every 3 minutes and follow-ups in
+# every other minute. One skipped minute used to push a first text behind the
+# whole follow-up line (Charles Dooley: 9:03 slot, rescheduled to 11:05).
+
+FULL = OS.config_from_policy({"outreach": {"slots": True, "open": "08:30", "close": "19:00",
+                                           "new_every_minutes": 3, "followup_fill": True}})
+
+
+def _first_state(db):
+    return db.query(CadenceState).order_by(CadenceState.cadence_started_at).first()
+
+
+def _hold(db, org_id, at, state_id, touch, kind="followup"):
+    db.add(OutreachTextSlot(organization_id=org_id, slot_at=at, kind=kind, cadence_state_id=state_id,
+                            touch_number=touch))
+    db.flush()
+
+
+def test_missed_first_text_takes_an_open_new_family_minute_before_the_followup_line(rl):
+    db = rl["db"]
+    _launch(rl)
+    org = rl["org"].id
+    st = _first_state(db)
+    others = [s for s in db.query(CadenceState).all() if s.id != st.id]
+    now = utc(2026, 11, 17, 9, 0)
+    # every follow-up minute for the next 15 minutes is held by text-2 follow-ups
+    fol = [t for t in OS.slots_from(now, FULL, "followup")][:10]
+    for i, t in enumerate(fol):
+        _hold(db, org, t, others[i % len(others)].id, 2)
+    s = OS.place_first_late(db, org, st, now, FULL)
+    db.commit()
+    assert s is not None and now <= s < now + timedelta(minutes=15)
+    assert s not in fol                                   # an open new-family minute, not a held one
+    assert db.query(OutreachTextSlot).filter_by(cadence_state_id=st.id, touch_number=1).one().slot_at == s
+
+
+def test_missed_first_text_moves_one_followup_when_every_near_minute_is_held(rl):
+    db = rl["db"]
+    _launch(rl)
+    org = rl["org"].id
+    st = _first_state(db)
+    others = [s for s in db.query(CadenceState).all() if s.id != st.id]
+    now = utc(2026, 11, 17, 9, 0)
+    end = now + timedelta(minutes=15)
+    minutes = sorted({t for t in OS.slots_from(now, FULL, "new") if t < end} |
+                     {t for t in OS.slots_from(now, FULL, "followup") if t < end})
+    # first minute held by ANOTHER family's first text (must never be moved),
+    # the rest by text-2 follow-ups
+    _hold(db, org, minutes[0], others[0].id, 1, kind="new")
+    for i, t in enumerate(minutes[1:]):
+        _hold(db, org, t, others[1 + i % (len(others) - 1)].id, 2)
+    bumped_state = db.query(OutreachTextSlot).filter_by(organization_id=org, slot_at=minutes[1]).one().cadence_state_id
+    s = OS.place_first_late(db, org, st, now, FULL)
+    db.commit()
+    assert s == minutes[1]                                # earliest follow-up minute, not the first text's
+    assert db.query(OutreachTextSlot).filter_by(organization_id=org, slot_at=minutes[0]).one().cadence_state_id \
+        == others[0].id
+    # the moved follow-up still holds a slot, later on
+    moved = db.query(OutreachTextSlot).filter_by(cadence_state_id=bumped_state, touch_number=2,
+                                                 status="reserved").all()
+    assert len(moved) >= 1 and all(m.slot_at > minutes[1] for m in moved if m.slot_at != minutes[1])
+    # one text per minute still holds: no duplicate slot times
+    from sqlalchemy import func
+    dup = (db.query(OutreachTextSlot.slot_at, func.count()).filter_by(organization_id=org)
+           .group_by(OutreachTextSlot.slot_at).having(func.count() > 1).all())
+    assert dup == []
+
+
+def test_gate_sends_a_missed_first_text_via_the_new_rule(rl, sender):
+    db = rl["db"]
+    _launch(rl)
+    st = _first_state(db)
+    # 8:30 slot missed by 4 minutes
+    _run(db, utc(2026, 11, 16, 8, 34))
+    r = OS.reservation(db, st.id, 1)
+    assert r is not None and r.slot_at > utc(2026, 11, 16, 8, 34)

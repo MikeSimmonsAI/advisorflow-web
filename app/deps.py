@@ -48,9 +48,15 @@ def build_pool_kwargs(database_url: str) -> dict:
     if "sqlite" in database_url:
         return {"connect_args": {"check_same_thread": False}}
     return {
-        "pool_size": 5,
-        "max_overflow": 10,
-        "pool_timeout": 30,
+        # Nov 23 outage: 5 + 10 = 15 connections ran out when a few slow
+        # screens held them for 30-80 s; every request and background loop
+        # queued behind them and Render restarted the server. The database
+        # allows 103; two web workers' worth of headroom stays free for the
+        # cron jobs and migrations. A shorter wait means a request that cannot
+        # get a connection fails in 15 s instead of tying up a worker for 30.
+        "pool_size": 10,
+        "max_overflow": 20,
+        "pool_timeout": 15,
         "pool_recycle": 1800,
         "pool_pre_ping": True,
         # ══ AN ABANDONED TRANSACTION MUST NOT LIVE FOREVER ═══════════════
