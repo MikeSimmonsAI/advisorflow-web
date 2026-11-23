@@ -1171,14 +1171,36 @@ def _opt_out(token: str, db: Session) -> bool:
     return True
 
 
+# Nov 23 outage follow-up: the outreach list loads ~40 logos at once, and each
+# one took a database connection from the shared pool for ~5 s while the rest
+# of the app waited. Logos change rarely, so the bytes are kept in memory for
+# a few minutes and repeat loads never touch the database.
+_LOGO_CACHE: dict = {}
+_LOGO_TTL_S = 600
+_LOGO_CACHE_MAX = 600
+
+
+def _logo_bytes(token: str, opp_id: str, db: Session):
+    import time as _time
+    hit = _LOGO_CACHE.get(token)
+    if hit is not None and _time.monotonic() - hit[0] < _LOGO_TTL_S:
+        return hit[1]
+    o = db.get(Opportunity, opp_id)
+    data = o.logo_png if o is not None and _logos.has_logo(o) else None
+    if data:
+        if len(_LOGO_CACHE) >= _LOGO_CACHE_MAX:
+            _LOGO_CACHE.clear()
+        _LOGO_CACHE[token] = (_time.monotonic(), data)
+    return data
+
+
 @public_router.get("/logo/{token}.png")
 def logo_png(token: str, db: Session = Depends(get_db)):
     """The lead's logo, for the emails we send them. No login: the token names
     one lead and cannot be forged."""
     from fastapi.responses import Response
     opp_id = _logos.read_token(token)
-    o = db.get(Opportunity, opp_id) if opp_id else None
-    data = o.logo_png if o is not None and _logos.has_logo(o) else None
+    data = _logo_bytes(token, opp_id, db) if opp_id else None
     if not data:
         raise HTTPException(404, "Not found.")
     return Response(content=data, media_type="image/png",

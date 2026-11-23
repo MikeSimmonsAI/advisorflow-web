@@ -323,6 +323,63 @@ def place_followup(db: Session, org_id: str, state, touch: int, earliest: dateti
     return None
 
 
+FIRST_LATE_WINDOW = timedelta(minutes=15)
+
+
+def place_first_late(db: Session, org_id: str, state, now: datetime,
+                     cfg: Optional[Dict] = None) -> Optional[datetime]:
+    """A first text whose own slot was missed takes the next OPEN minute of
+    either kind - still one text per minute, never a burst. If every minute in
+    the next FIRST_LATE_WINDOW is held, it takes the earliest one held by a
+    follow-up (text 2 or later) and that follow-up moves to the next free
+    follow-up slot. Another family's first text is never moved. With nothing
+    to take, it falls back to the follow-up queue as before."""
+    cfg = cfg or config_for_org(db, org_id)
+    if cfg is None:
+        return None
+    release(db, state.id, 1)
+    S = _model()
+    horizon = now + FIRST_LATE_WINDOW
+    taken = {t for (t,) in db.query(S.slot_at).filter(S.organization_id == org_id, S.slot_at >= now,
+                                                         S.slot_at < horizon).all()}
+    news = set()
+    for s in slots_from(now, cfg, "new"):
+        if s >= horizon:
+            break
+        news.add(s)
+    fols = []
+    for s in slots_from(now, cfg, "followup"):
+        if s >= horizon:
+            break
+        fols.append(s)
+    for s in sorted(news | set(fols)):
+        if s in taken:
+            continue
+        if reserve(db, org_id, state, 1, s, "new" if s in news else "followup"):
+            state.next_touch_due_at = s
+            return s
+    # Every near minute is held: take the earliest one a follow-up holds.
+    from app.models.models import CadenceState
+    rows = (db.query(S).filter(S.organization_id == org_id, S.status == "reserved", S.kind == "followup",
+                               S.touch_number > 1, S.slot_at >= now, S.slot_at < horizon,
+                               S.cadence_state_id != state.id)
+            .order_by(S.slot_at).all())
+    for row in rows:
+        other = db.query(CadenceState).filter(CadenceState.id == row.cadence_state_id).first()
+        at, other_touch = row.slot_at, row.touch_number
+        db.delete(row)
+        db.flush()
+        won = reserve(db, org_id, state, 1, at, "followup")
+        if other is not None:
+            # The follow-up always gets a slot back, whether or not we won this one.
+            place_followup(db, org_id, other, other_touch, at + timedelta(minutes=1), cfg)
+        if won:
+            state.next_touch_due_at = at
+            log.info("first text for state %s took follow-up slot %s; follow-up re-queued", state.id, at)
+            return at
+    return place_followup(db, org_id, state, 1, now, cfg)
+
+
 def assign_new(db: Session, org_id: str, state, at: datetime) -> bool:
     """A new family's first text in its new-family slot (journey start)."""
     release(db, state.id, 1)
@@ -347,7 +404,13 @@ def gate(db: Session, state, lead, touch: int, now: datetime) -> Optional[str]:
         if now - r.slot_at <= GRACE:
             return None
         # Missed (late pass / downtime): never caught up in a burst.
-        s = place_followup(db, org_id, state, touch, now, cfg)
+        if touch == 1:
+            # A new family's FIRST text goes in the next open minute, ahead of
+            # the follow-up line (owner, Nov 23: Charles Dooley's 9:03 first
+            # text was missed by one skipped minute and pushed to 11:05).
+            s = place_first_late(db, org_id, state, now, cfg)
+        else:
+            s = place_followup(db, org_id, state, touch, now, cfg)
         return "slot %s missed - moved to %s" % (_local(r.slot_at).strftime("%-I:%M %p"),
                                                 _local(s).strftime("%-I:%M %p %b %-d") if s else "-")
     s = place_followup(db, org_id, state, touch, max(due, now), cfg)

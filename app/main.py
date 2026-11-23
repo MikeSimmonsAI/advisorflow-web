@@ -1712,7 +1712,10 @@ async def _cadence_loop():
 
 
 
-TEXT_SLOT_PASS_SECONDS = 30
+# 15 s (was 30): a pass takes up to ~30 s on the current database, so a
+# 30 s sleep meant one pass a minute and an occasional skipped minute - which
+# is how a first text missed its slot on Nov 23.
+TEXT_SLOT_PASS_SECONDS = 15
 
 
 async def _program_text_slot_loop():
@@ -3025,7 +3028,13 @@ def _build_metadata() -> dict:
 # has to be said. `api_route` with both methods is the whole fix; the body is
 # suppressed for HEAD by the protocol layer, so this function is unchanged.
 @app.api_route("/health", methods=["GET", "HEAD"])
-def health_check():
+async def health_check():
+    # ASYNC ON PURPOSE (Nov 23 outage): a plain `def` runs in the same worker
+    # thread pool as every database-backed route, so when those threads were
+    # all waiting on the database this probe waited too, timed out after 5 s,
+    # and Render restarted a server that was busy, not dead - killing texts
+    # mid-send. It touches nothing but the deploy environment, so it answers
+    # from the event loop. /health/ready still checks the database.
     # `status` and `phase` are unchanged so nothing consuming this breaks;
     # `build` is added alongside them.
     return {"status": "ok", "phase": "1", "build": _build_metadata()}
