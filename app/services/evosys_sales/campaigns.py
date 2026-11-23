@@ -98,11 +98,13 @@ def all_for(db: Session, settings) -> List[EvoSysCampaign]:
             .order_by(EvoSysCampaign.is_default.desc(), EvoSysCampaign.created_at).all())
 
 
-def campaign_for(db: Session, settings, lead: Optional[EvoSysLead]) -> Optional[EvoSysCampaign]:
+def campaign_for(db: Session, settings, lead: Optional[EvoSysLead],
+                 camps: Optional[List[EvoSysCampaign]] = None) -> Optional[EvoSysCampaign]:
     """The most specific campaign whose audience fits this lead: industry and
-    market > industry only / market only > the default. Ties go to the oldest."""
+    market > industry only / market only > the default. Ties go to the oldest.
+    Pass `camps` (from all_for) when checking many leads, to load them once."""
     best, score = None, -1
-    for c in all_for(db, settings):
+    for c in (camps if camps is not None else all_for(db, settings)):
         if (c.kind or "group") != "group" or c.archived_at is not None:
             continue          # picked campaigns only email their own audience
         if c.industry_key and (lead is None or lead.industry_key != c.industry_key):
