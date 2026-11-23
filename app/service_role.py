@@ -117,6 +117,9 @@ SCHEDULER_OWNER: Dict[str, str] = {
     # Program HOT-response SLA re-alerts. Once, so a breach alerts once.
     JobName.PROGRAM_SLA: ROLE_BACKEND,
     JobName.PROGRAM_TEXT_SLOTS: ROLE_BACKEND,
+    # Restland handoff sheet. Once, so a row is written and a family assigned
+    # by one process.
+    JobName.HANDOFF_SHEET: ROLE_BACKEND,
     # Phone alerts. Once, so an alert buzzes a phone once.
     JobName.WEB_PUSH: ROLE_BACKEND,
     # VOLT development relay watch. Once, so a missed start is re-sent once.

@@ -78,7 +78,13 @@ APPT_STATUS = {"booked": "Booked", "confirmed": "Confirmed", "completed": "Showe
 OPEN_STATES = {"waiting_future": "Follow up later", "callback_requested": "Call back",
                "human": "Needs a person"}
 DONE_STATES = {"booked": "Booked", "stopped": "Closed", "closed": "Closed"}
-EVERY = timedelta(minutes=5)
+# Owner, Nov 23 2:33 PM: the sheet must follow a booking promptly. A change in
+# the app (a booking, cancellation or move; a family's conversation) is written
+# within seconds - at most one write every MIN_GAP; the team's own edits are
+# read back at least every EVERY.
+EVERY = timedelta(minutes=2)
+MIN_GAP = timedelta(seconds=20)
+_last_seen: Dict[str, Any] = {}
 MAX_ROWS = 20000
 _last_run: Dict[str, datetime] = {}
 
@@ -934,8 +940,38 @@ def sync(db: Session, prog, client=None) -> Dict[str, Any]:
     return {"appointments": a, "follow_ups": f, "team": t}
 
 
+def fingerprint(db: Session, org_id: str):
+    """A cheap marker that moves whenever something on the board would change:
+    a booking, cancellation or move (each one writes appointment
+    notifications) or a family's conversation."""
+    from sqlalchemy import func
+    from app.models.program_models import ProgramConversation
+    from app.models.reset_models import AppointmentNotification as N
+    conv = db.query(func.max(ProgramConversation.updated_at), func.count(ProgramConversation.id)) \
+        .filter(ProgramConversation.organization_id == org_id).one()
+    notes = db.query(func.max(N.updated_at), func.count(N.id)).filter(N.organization_id == org_id).one()
+    return (str(conv[0]), conv[1], str(notes[0]), notes[1])
+
+
+def due(db: Session, prog, now: datetime) -> bool:
+    last = _last_run.get(prog.id)
+    if last is None or now - last >= EVERY:
+        return True
+    if now - last < MIN_GAP:
+        return False
+    return fingerprint(db, prog.organization_id) != _last_seen.get(prog.id)
+
+
+def pending(db: Session, now: Optional[datetime] = None) -> bool:
+    """Is any board due for a write? (the loop asks before taking its lease)"""
+    from app.models.program_models import OutreachProgram
+    now = now or datetime.utcnow()
+    return any(sheet_id(p) and due(db, p, now) for p in db.query(OutreachProgram).all())
+
+
 def run(db: Session, now: Optional[datetime] = None, force: bool = False) -> Dict[str, Any]:
-    """Every program with a handoff sheet, at most every five minutes."""
+    """Every program with a handoff sheet: right after something changes, and
+    at least every two minutes for the team's own edits."""
     from app.models.program_models import OutreachProgram
     from app.services.volt import sheets_export as X
     now = now or datetime.utcnow()
@@ -943,10 +979,14 @@ def run(db: Session, now: Optional[datetime] = None, force: bool = False) -> Dic
     for prog in db.query(OutreachProgram).all():
         if not sheet_id(prog):
             continue
-        last = _last_run.get(prog.id)
-        if not force and last is not None and now - last < EVERY:
+        if not force and not due(db, prog, now):
             continue
         _last_run[prog.id] = now
+        try:
+            _last_seen[prog.id] = fingerprint(db, prog.organization_id)
+        except Exception:                                # noqa: BLE001 - the timer still applies
+            db.rollback()
+            _last_seen.pop(prog.id, None)
         try:
             out[prog.organization_id] = sync(db, prog)
         except Exception as exc:                         # noqa: BLE001 - category only, never cell text
