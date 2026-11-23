@@ -770,3 +770,17 @@ def test_person_tab_layout_is_valid_and_applied_once(setter):
             return _Exec({})
     assert RS.ensure_person_tabs(db, prog, C(), "sid") is True
     assert RS.ensure_person_tabs(db, prog, C(), "sid") is False and len(calls) == 1
+
+
+
+def test_new_families_tab_is_found_by_id_after_a_rename(setter, sample_advisor):
+    from app.models.models import Lead
+    db = setter["db"]
+    prog = _prog(setter)
+    sheet = _board([("Ann", "TRUE")])
+    sheet["6 Block"] = [list(RS.NF_COLUMNS),
+                        ["Ann", "", "Rae", "Lin", "", "", "", "", "(214) 555-0188", "", "", "", "", "", ""]]
+    sheet["__titles__"] = {RS.TAB_IDS[RS.NEW_FAMILIES]: "6 Block"}
+    out = RS.new_families_pass(db, prog, _Client(sheet), "sid", ["Ann"], now=datetime(2026, 11, 23, 23, 0))
+    assert out["added"] == 1 and sheet["6 Block"][1][12].startswith("Added")
+    assert db.query(Lead).filter(Lead.first_name == "Rae").count() == 1
