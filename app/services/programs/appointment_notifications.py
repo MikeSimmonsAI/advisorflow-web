@@ -538,8 +538,19 @@ def run(db: Session, organization_id: Optional[str] = None, *, now: Optional[dat
             out["held_off"] += len(rows)          # left exactly as they are: sending is off
             continue
         from app.services.programs import outreach_slots as _os
+        from app.services import no_contact_days as _ncd
         closed_today = _os.closed_for_org(db, prog.organization_id, now)
+        holding = _ncd.holding_reminders(now)
         for row in rows:
+            if holding:
+                # No-contact day (Thanksgiving): nothing goes out. A reminder
+                # whose moment passes during the day is skipped, not sent late;
+                # anything else waits until 8:30 AM the next morning.
+                if row.purpose.startswith("reminder") and _ncd.quiet_now(now):
+                    row.status, row.reason = "skipped", "no-contact day (no messages sent)"
+                    db.commit()
+                    out["skipped"] += 1
+                continue
             if closed_today and row.purpose == "survey":
                 continue                           # closed day (Sundays): the survey waits for Monday
             if row.status == "retry" and row.next_attempt_at and row.next_attempt_at > now:

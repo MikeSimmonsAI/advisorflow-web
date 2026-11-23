@@ -997,6 +997,11 @@ def process_scheduled_touches(db: Session, org_id: str = None) -> dict:
     if not ai_gateway.check_background("ai_conversation_loop"):
         return {"processed": 0, "sent": 0, "skipped": 0, "errors": 0,
                 "disabled": True}
+    # No-contact day (Thanksgiving, app/services/no_contact_days.py): nothing
+    # moves; due conversations stay due until the day is over.
+    from app.services import no_contact_days as _ncd
+    if _ncd.quiet_now():
+        return {"processed": 0, "sent": 0, "skipped": 0, "errors": 0, "no_contact_day": True}
 
     with ai_gateway.background_pass("ai_conversation_loop"):
         return _process_scheduled_touches(db, org_id)

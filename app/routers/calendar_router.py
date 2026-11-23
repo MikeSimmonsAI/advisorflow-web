@@ -1483,6 +1483,9 @@ def compute_day_slots(db: Session, advisor, target_date, *, program_visit: bool,
         return {"date": date, "advisor_id": advisor_id, "slots": [], "reason": "Date is more than 14 days out"}
     if target_date.weekday() >= 5:
         return {"date": date, "advisor_id": advisor_id, "slots": [], "reason": "Weekend — no appointments"}
+    from app.services import no_contact_days as _ncd
+    if _ncd.quiet_on(target_date):
+        return {"date": date, "advisor_id": advisor_id, "slots": [], "reason": "Closed that day (holiday)"}
 
     # ── Build all candidate 30-min slots 9am-5pm Central ─────────────────────
     # We work in UTC internally; Chicago is UTC-5 (CST) / UTC-6 (CDT).

@@ -84,12 +84,19 @@ DAY_NAMES = {"1": "Monday", "2": "Tuesday", "3": "Wednesday", "4": "Thursday", "
 
 
 def closed_on(day, cfg: Optional[Dict]) -> bool:
-    """Is this local date one of the program's closed days?"""
+    """Is this local date one of the program's closed days (or a no-contact
+    day for the whole system, e.g. Thanksgiving)?"""
+    from app.services import no_contact_days as NCD
+    if NCD.quiet_on(day):
+        return True
     return bool(cfg) and str(day.isoweekday()) in (cfg.get("closed_days") or "")
 
 
 def closed_now(now_utc: Optional[datetime], cfg: Optional[Dict]) -> bool:
     """Is it (Central) a closed day for this program right now?"""
+    from app.services import no_contact_days as NCD
+    if NCD.quiet_now(now_utc):
+        return True
     if not cfg or not cfg.get("closed_days"):
         return False
     return closed_on(_local(now_utc or datetime.utcnow()).date(), cfg)
@@ -100,6 +107,9 @@ def closed_for_org(db: Optional[Session], org_id: Optional[str], now_utc: Option
     or for a workspace without a text schedule (SCI and the rest)."""
     if not org_id:
         return False
+    from app.services import no_contact_days as NCD
+    if NCD.quiet_now(now_utc):
+        return True                                      # no-contact day: every workspace
     try:
         if db is None:
             from app.deps import SessionLocal
