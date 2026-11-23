@@ -1184,9 +1184,31 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
             paused.pop(name, None)
             status_lines[name] = "In the rotation"
     rotation = [p["name"] for p in team if status_lines.get(p["name"]) == "In the rotation"]
-    # 3. round robin: every row that needs a person and has nobody
-    last_name = cfg.get("rr_last")
-    idx = rotation.index(last_name) if last_name in rotation else -1
+    # 3. every row that needs a person and has nobody. Owner, Nov 23 5:53 PM
+    # ("Kitty Arnold is sitting appointmentless"): appointments and follow-ups
+    # are balanced SEPARATELY - a new appointment goes to whoever has the
+    # fewest upcoming appointments, a new follow-up to whoever has the fewest
+    # open follow-ups (ties: in turn). A newcomer catches up first.
+    load = {t: {n: 0 for n in rotation} for t in (APPOINTMENTS, FOLLOW_UPS)}
+    appt_owner_by_lead: Dict[str, str] = {}
+    for t in (APPOINTMENTS, FOLLOW_UPS):
+        for row in rows[t]:
+            rid0 = str(row[0])
+            a = (staff[t].get(rid0) or {}).get("assigned") or ""
+            if a and _eligible(t, row, today_serial):
+                if a in load[t]:
+                    load[t][a] += 1
+                if t == APPOINTMENTS and known.get(rid0) is not None and known[rid0].lead_id:
+                    appt_owner_by_lead[known[rid0].lead_id] = a
+    turn_key = {APPOINTMENTS: "rr_last_appt", FOLLOW_UPS: "rr_last_fu"}
+
+    def _pick(t: str) -> Optional[str]:
+        if not rotation:
+            return None
+        last = cfg.get(turn_key[t]) or cfg.get("rr_last")
+        start = (rotation.index(last) + 1) if last in rotation else 0
+        order = rotation[start:] + rotation[:start]
+        return min(order, key=lambda n: load[t][n])
     writes = []
     for tab in (APPOINTMENTS, FOLLOW_UPS):
         first_staff = len(COLUMNS[tab]) + 1
@@ -1209,13 +1231,14 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
                 if lid:
                     owner = next((r.assigned_to for r in known.values()
                                   if r.tab == NEW_FAMILIES and r.lead_id == lid and r.assigned_to), None)
+                    # a family with an upcoming appointment: its follow-up goes to that person
+                    owner = owner or appt_owner_by_lead.get(lid)
             if owner:
                 name = owner
-            elif rotation:
-                idx = (idx + 1) % len(rotation)
-                name = rotation[idx]
             else:
-                continue
+                name = _pick(tab)
+                if name is None:
+                    continue
             writes.append({"range": _rng(tab, "%s%d" % (column(first_staff), cur["row"])), "values": [[name]]})
             cur["assigned"] = name
             rec = known[rid]
@@ -1223,9 +1246,13 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
             vals["assigned"] = name
             rec.staff_json, rec.assigned_to, rec.auto_assigned, rec.assigned_at = json.dumps(vals), name, True, now
             _note(db, org, rec.lead_id, "Restland sheet: assigned to %s (%s)"
-                  % (name, "booked from their follow-up" if owner else "automatic, in turn"))
+                  % (name, "same person as the family's other work" if owner else "automatic, fewest open"))
             if not owner:
-                cfg["rr_last"] = name
+                cfg[turn_key[tab]] = name
+            if name in load[tab]:
+                load[tab][name] += 1
+            if tab == APPOINTMENTS and rec.lead_id:
+                appt_owner_by_lead[rec.lead_id] = name
             out["assigned"] += 1
     # what happened to appointments the team filled in on Follow-Ups
     res_col = column(len(COLUMNS[FOLLOW_UPS]) + len(STAFF_COLUMNS[FOLLOW_UPS]) + 1)
