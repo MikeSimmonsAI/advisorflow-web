@@ -834,6 +834,274 @@ def _pause_alert(db, prog, name: str, since: datetime, now: datetime) -> None:
            html="<p>%s</p>" % sms, management=True, coalesce=False, audit_message=sms)
 
 
+# ── each person's own tab: a working list they update (owner, Nov 23 4:55 PM) ─
+#
+# "they need to be able to update that on their sheet, and then ultimately when
+# they update that sheet, it needs to [update everything]". A person tab is
+# written by the system: that person's appointments (left) and open follow-ups
+# (right), each with the same gold columns as the main tabs. What they type on
+# their own tab is copied to the main tab and into the app on the next pass;
+# if the same field was changed on both, their own tab wins.
+
+PERSON_TAB_IDS = (3, 4, 7, 8, 9)                     # Team rows 2-6, in order
+PT_FIRST_ROW = 5
+PT_APPT = (("ref", "Ref"), ("date", "Date"), ("time", "Time (CT)"), ("family", "Family"), ("phone", "Phone"),
+           ("how", "How"), ("address", "Home Address"), ("status", "Status"),
+           ("link", "Remote Call Link / Details"), ("outcome", "Outcome"), ("sold", "Sold?"),
+           ("sold_what", "What Was Sold"), ("notes", "Team Notes"), ("updated", "Last Update (CT)"))
+PT_FU = (("ref", "Ref"), ("due", "Follow Up On"), ("family", "Family"), ("phone", "Phone"), ("why", "Why"),
+         ("said", "What They Said"), ("done", "Done?"), ("fu_date", "Followed Up On"),
+         ("fu_result", "What Happened"), ("appt_date", "Appointment Date"), ("appt_time", "Appointment Time"),
+         ("appt_how", "How"), ("appt_address", "Home Address"), ("notes", "Team Notes"),
+         ("updated", "Last Update (CT)"))
+PT_APPT_EDIT = ("link", "outcome", "sold", "sold_what", "notes")
+PT_FU_EDIT = ("done", "fu_date", "fu_result", "appt_date", "appt_time", "appt_how", "appt_address", "notes")
+PT_FU_COL0 = len(PT_APPT) + 2                        # 1-based: one empty column (O), follow-ups start at P
+PT_WIDTH = PT_FU_COL0 - 1 + len(PT_FU)               # A..AD
+
+
+def _person_tabs(client, sid: str, team: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """[{"name", "title", "sheet_id"}] for the person tabs whose Team row has a real name."""
+    try:
+        meta = client.spreadsheets().get(spreadsheetId=sid, fields="sheets.properties").execute()
+    except Exception:                                    # noqa: BLE001
+        return []
+    titles = {s_["properties"]["sheetId"]: s_["properties"]["title"] for s_ in meta.get("sheets") or []}
+    by_row = {p["row"]: p for p in team}
+    out = []
+    for i, tid in enumerate(PERSON_TAB_IDS):
+        p = by_row.get(i + 2)
+        if p is None or p.get("placeholder") or tid not in titles:
+            continue
+        out.append({"name": p["name"], "title": titles[tid], "sheet_id": tid})
+    return out
+
+
+def _cell(v) -> str:
+    return str(v).strip() if v is not None else ""
+
+
+def person_tabs_read(client, sid: str, tabs: List[Dict[str, Any]], staff: Dict[str, Dict[str, Dict[str, Any]]],
+                     known: Dict[str, Any]) -> Dict[str, Any]:
+    """Edits typed on person tabs -> merged into `staff` (as if typed on the
+    main tab). Returns {"grids": {title: rows read}, "edits": n, "copy": [(tab, rid, key, value)]}."""
+    from app.services.volt.sheets_export import column
+    grids, copy, edits = {}, [], 0
+    for t in tabs:
+        try:
+            got = client.spreadsheets().values().get(
+                spreadsheetId=sid, range=_rng(t["title"], "A%d:%s%d" % (PT_FIRST_ROW, column(PT_WIDTH), 1000))
+            ).execute()
+        except Exception:                                # noqa: BLE001 - a person tab that can't be read changes nothing
+            continue
+        rows = [list(r) + [""] * (PT_WIDTH - len(r)) for r in (got.get("values") or [])]
+        grids[t["title"]] = rows
+        for r in rows:
+            for block, cols, editable, tab in ((r[:len(PT_APPT)], PT_APPT, PT_APPT_EDIT, APPOINTMENTS),
+                                               (r[PT_FU_COL0 - 1:PT_WIDTH], PT_FU, PT_FU_EDIT, FOLLOW_UPS)):
+                vals = dict(zip([k for k, _ in cols], [_cell(v) for v in block]))
+                rid = vals.get("ref")
+                cur = staff[tab].get(rid) if rid else None
+                rec = known.get(rid) if rid else None
+                if cur is None:
+                    continue
+                snap = json.loads(rec.staff_json or "{}") if rec is not None else {}
+                for k in editable:
+                    mine, before, now_main = vals.get(k, ""), snap.get(k) or "", cur.get(k) or ""
+                    if k == "done":                       # unticked == blank
+                        mine, before, now_main = ("TRUE" if str(x).upper() == "TRUE" else ""
+                                                  for x in (mine, before, now_main))
+                    if mine != before and mine != now_main:
+                        cur[k] = mine
+                        copy.append((tab, rid, k, mine))
+                        edits += 1
+    return {"grids": grids, "edits": edits, "copy": copy}
+
+
+def copy_to_main(client, sid: str, staff, copy) -> int:
+    """Write person-tab edits into the main tabs' team columns (by header)."""
+    from app.services.volt.sheets_export import column
+    if not copy:
+        return 0
+    labels = {APPOINTMENTS: dict(zip(KEYS[APPOINTMENTS], STAFF_COLUMNS[APPOINTMENTS])),
+              FOLLOW_UPS: dict(zip(KEYS[FOLLOW_UPS], list(STAFF_COLUMNS[FOLLOW_UPS]) + list(FU_WORK_COLUMNS)))}
+    data = []
+    for tab in (APPOINTMENTS, FOLLOW_UPS):
+        mine = [c for c in copy if c[0] == tab]
+        if not mine:
+            continue
+        head = client.spreadsheets().values().get(spreadsheetId=sid, range=_rng(tab, "A1:AN1")).execute()
+        header = [str(c).strip() for c in ((head.get("values") or [[]])[0])]
+        for _tab, rid, k, v in mine:
+            lbl = labels[tab].get(k)
+            row = staff[tab].get(rid, {}).get("row")
+            if lbl in header and row:
+                val = (v == "TRUE") if k == "done" else v
+                data.append({"range": _rng(tab, "%s%d" % (column(header.index(lbl) + 1), row)), "values": [[val]]})
+    if data:
+        client.spreadsheets().values().batchUpdate(
+            spreadsheetId=sid, body={"valueInputOption": "USER_ENTERED", "data": data}).execute()
+    return len(data)
+
+
+def person_tabs_write(client, sid: str, tabs: List[Dict[str, Any]], rows: Dict[str, List[List[Any]]],
+                      staff, known, grids: Dict[str, List[List[Any]]], today_serial: float) -> int:
+    """Rewrite each person tab from the main tabs - only the rows that differ."""
+    from app.services.volt.sheets_export import central_serial, column
+    appt_rows = {str(r[0]): r for r in rows.get(APPOINTMENTS) or []}
+    fu_rows = {str(r[0]): r for r in rows.get(FOLLOW_UPS) or []}
+    writes = 0
+    for t in tabs:
+        name = t["name"]
+
+        def mine(tab, rid):
+            cur = staff[tab].get(rid) or {}
+            rec = known.get(rid)
+            return (cur.get("assigned") or (rec.assigned_to if rec is not None else "") or "") == name
+
+        appts = []
+        for rid, r in appt_rows.items():
+            if not mine(APPOINTMENTS, rid) or str(r[10] or "").startswith("Cancel"):
+                continue
+            cur, rec = staff[APPOINTMENTS].get(rid) or {}, known.get(rid)
+            appts.append([rid, r[2], r[3], r[5], r[6], r[8], r[9], cur.get("outcome") or r[10],
+                          cur.get("link", ""), cur.get("outcome", ""), cur.get("sold", ""), cur.get("sold_what", ""),
+                          cur.get("notes", ""),
+                          central_serial(rec.staff_changed_at) if rec is not None and rec.staff_changed_at else ""])
+        appts.sort(key=lambda x: (x[1] if isinstance(x[1], (int, float)) else 1e9,
+                                  x[2] if isinstance(x[2], (int, float)) else 0))
+        fus = []
+        for rid, r in fu_rows.items():
+            cur, rec = staff[FOLLOW_UPS].get(rid) or {}, known.get(rid)
+            if not mine(FOLLOW_UPS, rid) or str(r[8] or "") != "Open" or (cur.get("done") or "").upper() == "TRUE":
+                continue
+            fus.append([rid, r[6], r[2], r[3], r[5], r[7], False, cur.get("fu_date", ""), cur.get("fu_result", ""),
+                        cur.get("appt_date", ""), cur.get("appt_time", ""), cur.get("appt_how", ""),
+                        cur.get("appt_address", ""), cur.get("notes", ""),
+                        central_serial(rec.staff_changed_at) if rec is not None and rec.staff_changed_at else ""])
+        fus.sort(key=lambda x: (x[1] if isinstance(x[1], (int, float)) and x[1] else 0, str(x[0])))
+        n = max(len(appts), len(fus))
+        old = grids.get(t["title"]) or []
+        data = []
+        for i in range(max(n, len(old))):
+            a = appts[i] if i < len(appts) else [""] * len(PT_APPT)
+            f = fus[i] if i < len(fus) else [""] * len(PT_FU)
+            new = list(a) + [""] + list(f)
+            was = [_cell(v) for v in (old[i] if i < len(old) else [""] * PT_WIDTH)]
+            shown = [_cell(v) for v in new]
+            # a value the sheet shows as a date/number reads back formatted: compare the ids and text fields
+            if i < len(old) and _same_row(was, shown):
+                continue
+            data.append({"range": _rng(t["title"], "A%d:%s%d" % (PT_FIRST_ROW + i, column(PT_WIDTH), PT_FIRST_ROW + i)),
+                         "values": [new]})
+        if data:
+            client.spreadsheets().values().batchUpdate(
+                spreadsheetId=sid, body={"valueInputOption": "RAW", "data": data}).execute()
+            writes += len(data)
+    return writes
+
+
+def person_tab_layout_requests() -> List[Dict]:
+    """The person tabs' working-list layout (applied once by sync)."""
+    F0 = PT_FU_COL0 - 1
+    r: List[Dict] = []
+    appt_edit = [i for i, (k, _) in enumerate(PT_APPT) if k in PT_APPT_EDIT]
+    fu_edit = [F0 + i for i, (k, _) in enumerate(PT_FU) if k in PT_FU_EDIT]
+
+    def g(sid, r0, r1, c0, c1):
+        return {"sheetId": sid, "startRowIndex": r0, "endRowIndex": r1, "startColumnIndex": c0, "endColumnIndex": c1}
+
+    def sv(v):
+        return {"userEnteredValue": {"stringValue": v}}
+
+    def hdr(sid, c0, c1, color):
+        return {"repeatCell": {"range": g(sid, 3, 4, c0, c1), "cell": {"userEnteredFormat": {
+            "textFormat": {"bold": True, "foregroundColor": _rgb("#FFFFFF")}, "backgroundColor": _rgb(color),
+            "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP"}},
+            "fields": "userEnteredFormat.textFormat.bold,userEnteredFormat.textFormat.foregroundColor,"
+                      "userEnteredFormat.backgroundColor,userEnteredFormat.verticalAlignment,"
+                      "userEnteredFormat.wrapStrategy"}}
+
+    def num(sid, c, pat, typ):
+        return {"repeatCell": {"range": g(sid, 4, 500, c, c + 1), "cell": {"userEnteredFormat": {
+            "numberFormat": {"type": typ, "pattern": pat}}}, "fields": "userEnteredFormat.numberFormat"}}
+
+    def lst(sid, c, vals):
+        return {"setDataValidation": {"range": g(sid, 4, 500, c, c + 1), "rule": {"condition": {
+            "type": "ONE_OF_LIST", "values": [{"userEnteredValue": v} for v in vals]},
+            "strict": False, "showCustomUi": True}}}
+
+    widths = {0: 20, 1: 120, 2: 75, 3: 150, 4: 110, 5: 110, 6: 150, 7: 90, 8: 160, 9: 100, 10: 60, 11: 170,
+              12: 220, 13: 125, 14: 20, 15: 20, 16: 120, 17: 150, 18: 110, 19: 220, 20: 240, 21: 60, 22: 110,
+              23: 170, 24: 120, 25: 100, 26: 120, 27: 150, 28: 220, 29: 125}
+    for sid in PERSON_TAB_IDS:
+        r.append({"updateSheetProperties": {"properties": {"sheetId": sid, "gridProperties": {
+            "columnCount": PT_WIDTH, "frozenRowCount": 4}}, "fields": "gridProperties.columnCount,"
+                                                               "gridProperties.frozenRowCount"}})
+        r.append({"setDataValidation": {"range": g(sid, 2, 500, 0, PT_WIDTH)}})
+        r.append({"repeatCell": {"range": g(sid, 2, 500, 0, PT_WIDTH), "cell": {},
+                                 "fields": "userEnteredValue,userEnteredFormat"}})
+        r.append({"updateCells": {"range": g(sid, 1, 2, 3, 4), "rows": [{"values": [sv(
+            "Update your appointments and follow-ups right here in the gold columns - it saves to the main "
+            "tabs and the app within a couple of minutes.")]}], "fields": "userEnteredValue"}})
+        r.append({"updateCells": {"range": g(sid, 2, 4, 0, PT_WIDTH), "rows": [
+            {"values": [sv("My Appointments")] + [{}] * (F0 - 1) + [sv("My Follow-Ups")] + [{}] * (len(PT_FU) - 1)},
+            {"values": [sv(lbl) for _, lbl in PT_APPT] + [sv("")] + [sv(lbl) for _, lbl in PT_FU]}],
+            "fields": "userEnteredValue"}})
+        r.append({"repeatCell": {"range": g(sid, 2, 3, 0, PT_WIDTH), "cell": {"userEnteredFormat": {
+            "textFormat": {"bold": True, "fontSize": 12, "foregroundColor": _rgb(GREEN)}}},
+            "fields": "userEnteredFormat.textFormat"}})
+        r.append({"repeatCell": {"range": g(sid, 4, 500, 0, PT_WIDTH), "cell": {"userEnteredFormat": {
+            "textFormat": {"fontSize": 10, "foregroundColor": _rgb(TEXT)}, "verticalAlignment": "TOP",
+            "wrapStrategy": "WRAP"}}, "fields": "userEnteredFormat.textFormat,userEnteredFormat.verticalAlignment,"
+                                                "userEnteredFormat.wrapStrategy"}})
+        r += [hdr(sid, 0, len(PT_APPT), GREEN), hdr(sid, F0, PT_WIDTH, GREEN)]
+        for c in appt_edit + fu_edit:
+            r.append(hdr(sid, c, c + 1, BRASS))
+            r.append({"repeatCell": {"range": g(sid, 4, 500, c, c + 1), "cell": {"userEnteredFormat": {
+                "backgroundColor": _rgb(GOLD)}}, "fields": "userEnteredFormat.backgroundColor"}})
+        r += [num(sid, 1, "ddd, mmm d, yyyy", "DATE"), num(sid, 2, "h:mm am/pm", "TIME"),
+              num(sid, 13, "m/d/yyyy h:mm am/pm", "DATE_TIME"), num(sid, F0 + 1, "ddd, mmm d, yyyy", "DATE"),
+              num(sid, F0 + 14, "m/d/yyyy h:mm am/pm", "DATE_TIME")]
+        r += [lst(sid, 9, ["Showed", "No-Show", "Rescheduled", "Cancelled"]), lst(sid, 10, list(SOLD_CHOICES)),
+              {"setDataValidation": {"range": g(sid, 4, 500, F0 + 6, F0 + 7), "rule": {"condition": {"type": "BOOLEAN"}}}},
+              lst(sid, F0 + 8, list(WHAT_HAPPENED)), lst(sid, F0 + 10, list(TIME_CHOICES)),
+              lst(sid, F0 + 11, list(HOW_CHOICES))]
+        for c, px in widths.items():
+            r.append({"updateDimensionProperties": {"range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": c,
+                                                              "endIndex": c + 1}, "properties": {"pixelSize": px},
+                                                    "fields": "pixelSize"}})
+        for c in (0, F0):                                # the row ids: kept, out of the way
+            r.append({"updateDimensionProperties": {"range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": c,
+                                                              "endIndex": c + 1}, "properties": {"hiddenByUser": True},
+                                                    "fields": "hiddenByUser"}})
+    return r
+
+
+def ensure_person_tabs(db: Session, prog, client, sid: str) -> bool:
+    """Switch the person tabs to the working-list layout, once."""
+    pol = json.loads(prog.booking_policy_json or "{}")
+    cfg = pol.get("handoff_sheet") or {}
+    if cfg.get("person_tabs_v2"):
+        return False
+    client.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": person_tab_layout_requests()}).execute()
+    cfg["person_tabs_v2"] = True
+    pol["handoff_sheet"] = cfg
+    prog.booking_policy_json = json.dumps(pol)
+    db.commit()
+    return True
+
+
+_PT_TEXT_COLS = [i for i, (k, _) in enumerate(PT_APPT) if k not in ("date", "time", "updated")] + \
+                [PT_FU_COL0 - 1 + i for i, (k, _) in enumerate(PT_FU) if k not in ("due", "updated", "done")]
+
+
+def _same_row(was: List[str], shown: List[str]) -> bool:
+    """Equal in every text field (dates/times are written as numbers and read
+    back formatted, so they're compared through the row id instead)."""
+    return all((was[i] if i < len(was) else "") == (shown[i] if i < len(shown) else "") for i in _PT_TEXT_COLS)
+
+
 def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any]]],
               now: Optional[datetime] = None) -> Dict[str, Any]:
     """Read the team's columns back into the app, pause anyone with no
@@ -848,6 +1116,11 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
     team = read_team(client, sid)
     known = {r.row_id: r for r in db.query(R).filter(R.organization_id == org).all()}
     staff = {tab: read_staff(client, sid, tab) for tab in (APPOINTMENTS, FOLLOW_UPS)}
+    # 0. what people typed on their own tabs -> as if typed on the main tabs
+    ptabs = _person_tabs(client, sid, team)
+    pt = person_tabs_read(client, sid, ptabs, staff, known) if ptabs else {"grids": {}, "edits": 0, "copy": []}
+    if pt["copy"]:
+        out["person_tab_edits"] = copy_to_main(client, sid, staff, pt["copy"])
     booking_results: Dict[str, str] = {}
     stamped: List[tuple] = []                            # (tab, sheet row) the team changed this pass
     # 1. what the team typed -> the app
@@ -931,6 +1204,7 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
             else:
                 continue
             writes.append({"range": _rng(tab, "%s%d" % (column(first_staff), cur["row"])), "values": [[name]]})
+            cur["assigned"] = name
             rec = known[rid]
             vals = json.loads(rec.staff_json or "{}")
             vals["assigned"] = name
@@ -967,7 +1241,15 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
     if writes:
         client.spreadsheets().values().batchUpdate(
             spreadsheetId=sid, body={"valueInputOption": "RAW", "data": writes}).execute()
-    # 4. the Team tab's Status column
+    # 4. each person's own tab, from the main tabs as they are now
+    if ptabs:
+        try:
+            out["person_tab_rows"] = person_tabs_write(client, sid, ptabs, rows, staff, known, pt["grids"],
+                                                       today_serial)
+        except Exception as exc:                         # noqa: BLE001 - the main tabs are already right
+            from app.services.volt.sheets_export import categorize
+            log.warning("person tabs not written: %s", categorize(exc))
+    # 5. the Team tab's Status column
     team_status = [["Status"]]
     if team:
         rows_needed = max(p["row"] for p in team)
@@ -1157,6 +1439,11 @@ def sync(db: Session, prog, client=None) -> Dict[str, Any]:
     except Exception as exc:                             # noqa: BLE001 - the data still goes in
         db.rollback()
         log.warning("handoff sheet layout not applied: %s", X.categorize(exc))
+    try:
+        ensure_person_tabs(db, prog, client, sid)
+    except Exception as exc:                             # noqa: BLE001 - the main tabs still sync
+        db.rollback()
+        log.warning("handoff sheet person tabs layout not applied: %s", X.categorize(exc))
     appts = appointment_rows(db, org)
     fus = follow_up_rows(db, org, known_ids(client, sid, FOLLOW_UPS))
     a = upsert(client, sid, APPOINTMENTS, appts)

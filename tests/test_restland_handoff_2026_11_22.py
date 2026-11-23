@@ -157,9 +157,14 @@ class _Exec:
 class _Sheets:
     def __init__(self, sheet):
         self.v = _Values(sheet)
+        self.sheet = sheet
 
     def values(self):
         return self.v
+
+    def get(self, spreadsheetId, fields=None):
+        titles = self.sheet.get("__titles__") or {}
+        return _Exec({"sheets": [{"properties": {"sheetId": k, "title": v}} for k, v in titles.items()]})
 
 
 class _Client:
@@ -710,3 +715,58 @@ def test_sold_goes_into_the_app_and_every_team_change_is_time_stamped(setter, sa
     assert out["stamped"] == 1 and row[18] == central_serial(now + timedelta(minutes=2))
     notes = [n.body for n in db.query(LeadNote).filter_by(lead_id=lead.id).all()]
     assert any("SOLD: Two-space lawn crypt + markers" in n for n in notes)
+
+
+
+# ── Owner, Nov 23 4:55 PM: each person updates from their own tab ──────────
+
+def test_a_person_tab_lists_their_work_and_their_edits_reach_the_main_tab_and_the_app(setter, sample_advisor):
+    from app.models.models import BookingLink
+    from app.models.work_models import LeadNote
+    db, org = setter["db"], setter["org"]
+    prog = _prog(setter)
+    lead = _lead_for(db, org, sample_advisor, "L001", first="Tia")
+    b = BookingLink(lead_id=lead.id, user_id=sample_advisor.id, status="booked",
+                    booked_time=datetime(2026, 11, 30, 10, 0), meeting_type=BP.OFFICE, appt_duration=45)
+    db.add(b)
+    db.commit()
+    now = datetime(2026, 11, 23, 23, 0)
+    today = int(__import__("app.services.volt.sheets_export", fromlist=["x"]).central_serial(now))
+    sheet = _board([("Ann", "TRUE"), ("Bob", "TRUE")])
+    sheet["__titles__"] = {3: "Ann", 4: "Bob"}
+    appts = [_appt(b.id, today + 7)]
+    fus = [_fu("FU-x1")]
+    _run_team(db, prog, sheet, appts, fus, now)                   # appointment -> Ann, follow-up -> Bob
+    ann = sheet["Ann"]
+    assert ann[4][0] == b.id and ann[4][3] == "Fam " + b.id          # Ann's list, row 5
+    assert sheet["Bob"][4][15] == "FU-x1"                            # Bob's follow-ups start at P
+    # Ann types on HER tab: outcome, sold, what was sold, notes
+    row = _pad(ann[4], 30)
+    row[9], row[10], row[11], row[12] = "Showed", "Yes", "Lawn crypt", "Great visit"
+    out = _run_team(db, prog, sheet, appts, fus, now + timedelta(minutes=2))
+    assert out["person_tab_edits"] == 4
+    main = _pad(sheet[RS.APPOINTMENTS][1], 19)
+    assert (main[14], main[16], main[17], main[15]) == ("Showed", "Yes", "Lawn crypt", "Great visit")
+    notes = " ".join(n.body for n in db.query(LeadNote).filter_by(lead_id=lead.id))
+    assert "SOLD: Lawn crypt" in notes and "Great visit" in notes
+    # a quiet pass writes nothing new to her tab and keeps her entries
+    _run_team(db, prog, sheet, appts, fus, now + timedelta(minutes=4))
+    assert sheet["Ann"][4][11] == "Lawn crypt"
+
+
+def test_person_tab_layout_is_valid_and_applied_once(setter):
+    db = setter["db"]
+    prog = _prog(setter)
+    reqs = RS.person_tab_layout_requests()
+    assert reqs and all(len(r) == 1 for r in reqs)
+    calls = []
+
+    class C:
+        def spreadsheets(self):
+            return self
+
+        def batchUpdate(self, spreadsheetId, body):
+            calls.append(len(body["requests"]))
+            return _Exec({})
+    assert RS.ensure_person_tabs(db, prog, C(), "sid") is True
+    assert RS.ensure_person_tabs(db, prog, C(), "sid") is False and len(calls) == 1
