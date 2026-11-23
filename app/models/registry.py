@@ -632,3 +632,5 @@ import app.models.evosys_sales_models  # noqa: F401,E402  (imported for side eff
 # Client Growth: discovery questionnaire templates, private invitations,
 # original submissions and proposal-preparation tasks (prospects stay opportunities).
 import app.models.client_growth_models  # noqa: F401,E402  (imported for side effects)
+# Free commercial-cleaning walkthrough requests from the public page (LinkedIn offer).
+import app.models.walkthrough_request_models  # noqa: F401,E402  (imported for side effects)
