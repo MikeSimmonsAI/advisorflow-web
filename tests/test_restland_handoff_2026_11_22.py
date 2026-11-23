@@ -72,7 +72,9 @@ def test_a_follow_up_that_is_not_due_yet_waits(setter, sample_advisor):
 
 def test_remote_call_is_a_booking_choice_with_its_own_wording():
     pol = BP.parse(json.dumps(BP.RESTLAND_POLICY))
-    assert [o["key"] for o in BP.public_options(pol)] == [BP.OFFICE, BP.HOME, BP.REMOTE]
+    # Only when the family asks: staff can book it, the family's page never shows it.
+    assert [o["key"] for o in BP.public_options(pol)] == [BP.OFFICE, BP.HOME]
+    assert [o["key"] for o in BP.public_options(pol, staff=True)] == [BP.OFFICE, BP.HOME, BP.REMOTE]
     choice = BP.meeting_choice(pol, BP.REMOTE, None)
     assert choice["key"] == BP.REMOTE and "phone or video" in choice["appt_label"]
 
@@ -242,3 +244,11 @@ def test_phone_numbers_read_like_phone_numbers():
     assert RS._phone("+1 (214) 240-3434") == "(214) 240-3434"
     assert RS._phone("2142403434") == "(214) 240-3434"
     assert RS._phone(None) == ""
+
+
+def test_the_ai_never_suggests_a_call_and_books_one_only_on_request():
+    p = ai_setter.SYSTEM_PROMPT if hasattr(ai_setter, "SYSTEM_PROMPT") else None
+    import inspect
+    src = p or inspect.getsource(ai_setter)
+    assert "ONLY WHEN THEY ASK" in src and "never suggest one yourself" in src
+    assert "lock in a call instead of waiting" not in src
