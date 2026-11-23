@@ -253,6 +253,7 @@ const AcqOpsOutreach = lazyPage(() => import('./pages/acquisition/HubPages').the
 const AcqOpsCalendar = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.CalendarSetup })))
 const AcqOpsFollowUps = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.FollowUpsPage })))
 const AcqOpsResponses = lazyPage(() => import('./pages/acquisition/HubPages').then(m => ({ default: m.ResponsesPage })))
+const AcqOpsHarvey = lazyPage(() => import('./pages/acquisition/HarveyPage'))
 const AcqOpsSoon = lazyPage(() => import('./pages/acquisition/AcquisitionOps').then(m => ({ default: m.Soon })))
 const WholesaleCommand = lazyPage(() => import('./pages/wholesale/WholesaleCommand'))
 const DealOperationsClosing = lazyPage(() => import('./pages/wholesale/WholesaleCommand').then(m => ({ default: m.DealOperationsClosing })))
@@ -1811,6 +1812,7 @@ export default function App() {
           <Route path="settings" element={<AcqOpsSettings />} />
           <Route path="service-ops" element={<AcqOpsServiceOps />} />
           <Route path="import" element={<PlatformPoolImport />} />
+          <Route path="harvey" element={<AcqOpsHarvey />} />
           <Route path="master" element={<AcqOpsMaster />} />
           <Route path="research" element={<AcqOpsResearch />} />
           <Route path="assignments" element={<AcqOpsAssign />} />

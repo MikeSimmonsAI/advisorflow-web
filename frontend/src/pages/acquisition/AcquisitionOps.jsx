@@ -26,6 +26,7 @@ const pct = v => (v == null ? '—' : Math.round(v * 100) + '%')
 // (every /god/acquisition/* endpoint is God-checked); hiding is not security.
 const MASTER_NAV = [
   { to: OPS, label: 'Control Center', icon: 'dashboard', end: true },
+  { to: `${OPS}/harvey`, label: 'Harvey AI Workforce', icon: 'spark' },
   { to: `${OPS}/import`, label: 'Import Center', icon: 'upload' },
   { to: `${OPS}/master`, label: 'Master Prospect Pool', icon: 'database' },
   { to: `${OPS}/research`, label: 'Research & Qualification', icon: 'flask' },
