@@ -63,6 +63,11 @@ class JobName:
     # for programs on the slot schedule, so a text leaves in its own slot
     # (8:30, 8:32, 8:38 ...) instead of up to five minutes late.
     PROGRAM_TEXT_SLOTS = "program_text_slot_loop"
+    # Restland handoff sheet (owner, Nov 23: "the Google sheet isn't updating
+    # promptly after the appointment is booked"). A cheap check every 15
+    # seconds; the sheet is written within seconds of a booking or a family's
+    # change, and the team's own edits are read back every 2 minutes.
+    HANDOFF_SHEET = "handoff_sheet_loop"
     # Phone alerts (web push): sends what notifications queued in push_events.
     # Talks only to the browsers' own push services, only for people who
     # turned phone alerts on. Named so the ledger can say when it stopped.
@@ -135,6 +140,7 @@ LOOP_JOB_NAMES = (
     JobName.WHOLESALE_EXCEPTIONS,
     JobName.PROGRAM_SLA,
     JobName.PROGRAM_TEXT_SLOTS,
+    JobName.HANDOFF_SHEET,
     JobName.WEB_PUSH,
     JobName.VOLT_DEV_RELAY,
     JobName.VOLT_SHEETS,
@@ -161,6 +167,7 @@ EXPECTED_INTERVAL_MINUTES = {
     JobName.EVOSENSE_HUNT: 15,
     JobName.WHOLESALE_EXCEPTIONS: 60,
     JobName.PROGRAM_SLA: 2,
+    JobName.HANDOFF_SHEET: 2,             # team edits read back every 2 min; bookings within seconds
     JobName.WEB_PUSH: 60,                 # checks in hourly when idle; sends every 20s when busy
     JobName.VOLT_DEV_RELAY: 60,           # checks in hourly when idle; every 2 min when there is work
     JobName.VOLT_SHEETS: 60,              # checks in hourly when idle; every 15 s when there is work

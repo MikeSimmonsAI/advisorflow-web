@@ -546,3 +546,39 @@ def test_follow_up_log_columns_sit_right_of_the_booking_result():
     assert RS.FU_WORK_FIRST == 17                                  # column R
     reqs = json.dumps(RS.layout_requests())
     assert "Talked - booked appointment" in reqs
+
+
+# ── Owner, Nov 23 2:33 PM: the sheet follows a booking within seconds ───────
+
+def test_the_sheet_is_written_right_after_a_change_not_on_a_timer(setter, monkeypatch):
+    db = setter["db"]
+    prog = _prog(setter)
+    calls = []
+    monkeypatch.setattr(RS, "sync", lambda db, p, client=None: calls.append(1) or {"ok": 1})
+    RS._last_run.clear(); RS._last_seen.clear()
+    t0 = datetime(2026, 11, 23, 20, 0)
+    RS.run(db, now=t0)
+    assert len(calls) == 1
+    # nothing changed: no write until the 2-minute read-back
+    assert not RS.pending(db, now=t0 + timedelta(seconds=30))
+    RS.run(db, now=t0 + timedelta(seconds=30))
+    assert len(calls) == 1
+    # something changed (a booking writes notifications / the conversation moves)
+    monkeypatch.setattr(RS, "fingerprint", lambda db, org: ("changed",))
+    assert not RS.pending(db, now=t0 + timedelta(seconds=10))     # never twice inside 20 seconds
+    assert RS.pending(db, now=t0 + timedelta(seconds=45))
+    RS.run(db, now=t0 + timedelta(seconds=45))
+    assert len(calls) == 2
+    # and the team's edits are read back at least every two minutes
+    assert RS.pending(db, now=t0 + timedelta(seconds=45) + RS.EVERY)
+
+
+def test_the_fingerprint_moves_when_a_booking_is_made(setter, sample_advisor):
+    from app.models.reset_models import AppointmentNotification
+    db, org = setter["db"], setter["org"]
+    before = RS.fingerprint(db, org.id)
+    db.add(AppointmentNotification(organization_id=org.id, lead_id="x", booking_id="b", channel="sms",
+                                   purpose="confirmation", status="scheduled", due_at=datetime.utcnow(),
+                                   version="v"))
+    db.commit()
+    assert RS.fingerprint(db, org.id) != before

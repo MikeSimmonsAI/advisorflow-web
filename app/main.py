@@ -2291,6 +2291,48 @@ async def _volt_dev_relay_loop():
         await asyncio.sleep(120)
 
 
+async def _handoff_sheet_loop():
+    """Restland handoff sheet (owner, Nov 23 2:33 PM: "The Google sheet isn't
+    updating promptly after the appointment is booked").
+
+    Every 15 seconds a cheap database check (restland_sheet.pending): has a
+    booking, cancellation, move or family conversation changed since the last
+    write, or are the team's edits due for their 2-minute read-back? Only then
+    is the lease taken and the sheet written - one instance, one pass at a time.
+    Talks only to the Google Sheets API; contacts nobody (a booking the team
+    types in goes through the normal booking path).
+    """
+    from app.services.job_run_service import record_job_run
+    from app.models.job_models import JobName
+    from app.deps import SessionLocal
+    from app.services.programs import restland_sheet as _rs
+    import logging as _log
+    _logger = _log.getLogger("handoff_sheet_loop")
+    await asyncio.sleep(40)  # startup delay - offset from the other loops
+    while True:
+        try:
+            def _work() -> bool:
+                db = SessionLocal()
+                try:
+                    return _rs.pending(db)
+                finally:
+                    db.close()
+            if await _off_loop(_work) and await _pass_claimed(JobName.HANDOFF_SHEET, 15):
+                async with record_job_run(JobName.HANDOFF_SHEET, db_factory=SessionLocal) as _m:
+                    def _one_pass():
+                        db = SessionLocal()
+                        try:
+                            return _rs.run(db)
+                        finally:
+                            db.close()
+                    out = await _off_loop(_one_pass)
+                    _m["result"] = {k: (v if isinstance(v, dict) and "error" in v else "ok")
+                                    for k, v in (out or {}).items()}
+        except Exception as exc:                                 # noqa: BLE001
+            _logger.error("handoff sheet loop error: %s", exc, exc_info=True)
+        await asyncio.sleep(15)
+
+
 async def _program_sla_loop():
     """Location outreach programs: re-alert HOT replies past their SLA, and
     (only when PROGRAM_EMAIL_TOUCHES_SENDING is on) send due campaign emails.
@@ -2454,16 +2496,9 @@ async def _program_sla_loop():
                         except Exception as exc:                 # noqa: BLE001
                             db.rollback()
                             _logger.error("appointment setter sweep error: %s", exc, exc_info=True)
-                        # Restland handoff sheet (owner, Nov 22): appointments
-                        # and follow-ups onto the team's Google Sheet, every 5 min.
-                        try:
-                            from app.services.programs import restland_sheet as _rs
-                            _hs = _rs.run(db)
-                            if _hs:
-                                out["handoff_sheet"] = _hs
-                        except Exception as exc:                 # noqa: BLE001
-                            db.rollback()
-                            _logger.error("handoff sheet error: %s", exc, exc_info=True)
+                        # Restland handoff sheet: its own loop now
+                        # (_handoff_sheet_loop), so a booking reaches the sheet
+                        # within seconds instead of up to 7 minutes.
                         # Daily batch: programs whose manager switched it on
                         # approve the day's new people once, on sending days.
                         try:
@@ -2923,6 +2958,7 @@ async def on_startup():
         JobName.WHOLESALE_EXCEPTIONS: _wholesale_exception_loop,
         JobName.PROGRAM_SLA:          _program_sla_loop,
         JobName.PROGRAM_TEXT_SLOTS:   _program_text_slot_loop,
+        JobName.HANDOFF_SHEET:        _handoff_sheet_loop,
         JobName.WEB_PUSH:             _web_push_loop,
         JobName.VOLT_DEV_RELAY:       _volt_dev_relay_loop,
         JobName.VOLT_SHEETS:          _volt_sheets_loop,
