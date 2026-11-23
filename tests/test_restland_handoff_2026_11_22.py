@@ -683,3 +683,30 @@ def test_team_columns_are_read_by_header_not_position():
                               ["b1"] + [""] * 11 + ["Ann", "zoom.us/j/1", "Showed", "good visit"]]
     got = RS.read_staff(_Client(sheet), "sid", RS.APPOINTMENTS)["b1"]
     assert (got["assigned"], got["link"], got["outcome"], got["notes"]) == ("Ann", "zoom.us/j/1", "Showed", "good visit")
+
+
+# ── Owner, Nov 23 4:55 PM: Sold / What Was Sold, and when the team updated a row ─
+
+def test_sold_goes_into_the_app_and_every_team_change_is_time_stamped(setter, sample_advisor):
+    from app.models.models import BookingLink
+    from app.models.work_models import LeadNote
+    from app.services.volt.sheets_export import central_serial
+    db, org = setter["db"], setter["org"]
+    prog = _prog(setter)
+    lead = _lead_for(db, org, sample_advisor, "L001", first="Sal")
+    b = BookingLink(lead_id=lead.id, user_id=sample_advisor.id, status="booked",
+                    booked_time=datetime(2026, 11, 20, 10, 0), meeting_type=BP.OFFICE, appt_duration=45)
+    db.add(b)
+    db.commit()
+    sheet = _board([("Ann", "TRUE")])
+    sheet[RS.APPOINTMENTS][0] = sheet[RS.APPOINTMENTS][0] + [RS.LAST_UPDATE_HEADER]
+    appts = [_appt(b.id, 46000)]
+    now = datetime(2026, 11, 23, 23, 0)
+    _run_team(db, prog, sheet, appts, [], now)
+    row = _pad(sheet[RS.APPOINTMENTS][1], 19)
+    assert row[18] == ""                                         # nothing typed yet: no stamp
+    row[12], row[16], row[17] = "Ann", "Yes", "Two-space lawn crypt + markers"
+    out = _run_team(db, prog, sheet, appts, [], now + timedelta(minutes=2))
+    assert out["stamped"] == 1 and row[18] == central_serial(now + timedelta(minutes=2))
+    notes = [n.body for n in db.query(LeadNote).filter_by(lead_id=lead.id).all()]
+    assert any("SOLD: Two-space lawn crypt + markers" in n for n in notes)
