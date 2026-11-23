@@ -252,3 +252,11 @@ def test_the_ai_never_suggests_a_call_and_books_one_only_on_request():
     src = p or inspect.getsource(ai_setter)
     assert "ONLY WHEN THEY ASK" in src and "never suggest one yourself" in src
     assert "lock in a call instead of waiting" not in src
+
+
+def test_the_board_uses_the_evosys_login_when_it_is_set(monkeypatch):
+    monkeypatch.setenv("VOLT_SHEETS_SERVICE_ACCOUNT_JSON", json.dumps({"client_email": "old@x.iam.gserviceaccount.com"}))
+    monkeypatch.delenv("EVOSYS_SHEETS_SERVICE_ACCOUNT_JSON", raising=False)
+    assert RS.sync_account_email() == "old@x.iam.gserviceaccount.com"
+    monkeypatch.setenv("EVOSYS_SHEETS_SERVICE_ACCOUNT_JSON", json.dumps({"client_email": "evosys-sync@x.iam.gserviceaccount.com"}))
+    assert RS.sync_account_email() == "evosys-sync@x.iam.gserviceaccount.com"
