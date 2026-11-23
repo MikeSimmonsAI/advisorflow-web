@@ -72,6 +72,14 @@ TEST_CONV_REASON = ("The family is upset due to receiving messages after Aftab's
                     "is needed to update records and stop further messages.")
 TEST_NOTE_IDS = ("ef0e99d5-4d16-4a79-9b70-1a0e1d5ee4de", "e72cc136-01e8-41c5-9fff-a4debd909136")
 TEST_SURVEY_ID = "ac5f7d15-9e3e-484f-90c0-946be2decab3"
+# Owner, Nov 23 9:09 AM: Carmelita Alcala asked "Do have any around 3 today?" -
+# "if the customer requested 3 o'clock, sure, we can do 3 o'clock ... book it
+# yourself". Booked once, through the normal booking path, only while 3 PM
+# today is still bookable (2-hour same-day notice) and she has nothing booked.
+CARMELITA_KEY = "restland-carmelita-3pm-2026-11-23"
+CARMELITA_LEAD = "4f7ef8fe-5007-4ccb-aadb-7957154eec00"
+CARMELITA_SLOT = datetime(2026, 11, 23, 15, 0)          # Central
+CARMELITA_UNTIL = datetime(2026, 11, 23, 19, 0)          # 1 PM Central, in UTC
 # Owner, Nov 22 8:18 PM: these four "after the holidays" families are followed
 # up the first Monday after New Year's - Mon Jan 4 2027, 9 AM Central.
 AFTER_NEW_YEAR = datetime(2027, 1, 4, 15, 0)
@@ -285,6 +293,47 @@ def restland_jan4_and_remote_on_request(db: Session, prog, now: datetime) -> Dic
     return summary
 
 
+def restland_book_carmelita(db: Session, prog, now: datetime) -> Dict:
+    from app.models.models import BookingLink, Lead
+    from app.models.program_models import ProgramResponse
+    from app.services.programs import ai_setter
+    from app.services.programs import appointments as A
+    from app.services.programs import responses as R
+    org_id = prog.organization_id
+    run, item = _open_run(db, org_id, CARMELITA_KEY)
+    lead = db.query(Lead).filter(Lead.id == CARMELITA_LEAD, Lead.organization_id == org_id).first()
+    out: Dict = {}
+    if lead is None:
+        out["skipped"] = "family not found"
+    elif db.query(BookingLink).filter(BookingLink.lead_id == lead.id,
+                                      BookingLink.status.in_(("booked", "confirmed"))).count():
+        out["skipped"] = "already booked"
+    else:
+        res = A.book(db, prog, lead, CARMELITA_SLOT, A.VISIT, meeting_key="office")
+        out = {"status": res.get("status"), "booking_id": res.get("booking_id"), "reason": res.get("reason")}
+        if res.get("ok") and not res.get("simulated"):
+            conv = ai_setter.conversation_for(db, lead)
+            item("program_conversation", conv.id, "booked", {"state": conv.state}, {"state": "booked"},
+                 "owner Nov 23: she asked for 3 PM today")
+            conv.state, conv.booked_time = "booked", CARMELITA_SLOT
+            if res.get("booking_id"):
+                conv.booking_link_id = res.get("booking_id")
+            newest = (db.query(ProgramResponse).filter(ProgramResponse.organization_id == org_id,
+                                                       ProgramResponse.lead_id == lead.id,
+                                                       ProgramResponse.handling_status != "closed")
+                      .order_by(ProgramResponse.received_at.desc()).first())
+            actor = A.program_advisor(db, prog)
+            if newest is not None and actor is not None:
+                R.mark(db, newest, "responded", actor)
+            try:
+                A.notify_team_booked(db, prog, lead, CARMELITA_SLOT, A.VISIT)
+            except Exception:                            # noqa: BLE001 - the booking stands
+                log.exception("Carmelita booked alert failed")
+    run.status, run.finished_at, run.summary_json = "applied", datetime.utcnow(), json.dumps(out, default=str)
+    db.commit()
+    return out
+
+
 def restland_sheet_test_undo(db: Session, prog, now: datetime) -> Dict:
     """Put both families back exactly as they were before the owner's test."""
     from app.models.models import BookingLink
@@ -454,6 +503,8 @@ def apply_pending(db: Session, now: Optional[datetime] = None) -> Dict:
                     res["jan4_remote"] = restland_jan4_and_remote_on_request(db, prog, now)
                 if now < SUNDAYS_APPLY_UNTIL and _ledger(db, prog.organization_id, RESTLAND_SHEET_TEST_UNDO_KEY) is None:
                     res["sheet_test_undo"] = restland_sheet_test_undo(db, prog, now)
+                if now < CARMELITA_UNTIL and _ledger(db, prog.organization_id, CARMELITA_KEY) is None:
+                    res["carmelita_3pm"] = restland_book_carmelita(db, prog, now)
                 if res:
                     out[prog.organization_id] = res
         except Exception as exc:                         # noqa: BLE001 - never stops a deploy

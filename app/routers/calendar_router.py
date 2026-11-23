@@ -427,7 +427,10 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
                                                  body.get("visit_address") or getattr(booking, "visit_address", None))
                 except ValueError as _e:
                     raise HTTPException(status_code=422, detail=str(_e))
-            _res = compute_day_slots(db, advisor, _prog_slot.date(), program_visit=True, minutes=_mins)
+            # A time the family or a person asked for counts, not only the set
+            # starts (owner, Nov 23) - same length, gap and calendar rules.
+            _res = compute_day_slots(db, advisor, _prog_slot.date(), program_visit=True, minutes=_mins,
+                                     any_time=15)
             if _prog_slot.strftime("%Y-%m-%dT%H:%M:00") not in set(_res.get("slots") or []):
                 logger.warning("booking-confirmed: booking=%s slot %s is not open - refusing", booking.id, slot_display)
                 raise HTTPException(status_code=409, detail="That time is no longer available. Please pick another time.")
@@ -1438,7 +1441,7 @@ def _tz_utc():
 
 
 def compute_day_slots(db: Session, advisor, target_date, *, program_visit: bool, today=None,
-                      minutes: int = 60) -> dict:
+                      minutes: int = 60, any_time: int = 0) -> dict:
     """THE ONE SLOT ENGINE for a booking day: office hours, the advisor's
     booked/confirmed BookingLinks, their connected calendar (fails closed), the
     same-day 2-hour buffer, and 60-minute on-the-hour visits for an outreach
@@ -1468,7 +1471,7 @@ def compute_day_slots(db: Session, advisor, target_date, *, program_visit: bool,
             logger.exception("booking policy lookup failed for advisor %s", advisor_id)
             _policy = None
         if _policy is not None:
-            return _bp.day_slots(db, advisor, target_date, _policy, today=today)
+            return _bp.day_slots(db, advisor, target_date, _policy, today=today, any_time=any_time)
 
     # Never a past day, a weekend, or beyond the two-week window - for EVERY
     # caller (booking page, setter offers, still_free re-checks, staff), not

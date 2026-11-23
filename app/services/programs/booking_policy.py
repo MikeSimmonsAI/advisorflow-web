@@ -218,9 +218,15 @@ def _held(start: datetime, minutes: int, gap: int) -> Tuple[datetime, datetime]:
 
 def day_slots(db: Session, advisor, target_date: date_cls, policy: Dict, *, today: Optional[date_cls] = None,
               now_local: Optional[datetime] = None, exclude_booking_id: Optional[str] = None,
-              busy_reader=None) -> Dict:
+              busy_reader=None, any_time: int = 0) -> Dict:
     """Open start times on one day for one person, under these rules.
-    Same answer shape as calendar_router.compute_day_slots."""
+    Same answer shape as calendar_router.compute_day_slots.
+
+    any_time (minutes, owner Nov 23 - "if the customer requested 3 o'clock,
+    sure, we can do 3 o'clock"): besides the set start times, every time on
+    that step between the first and the last start is a candidate - for a
+    time the family or a person ASKED for. Offers still use the set starts.
+    The same appointment length, gap, calendar and same-day notice apply."""
     from app.models.models import BookingLink
     now_local = now_local or _today_central()
     today = today or now_local.date()
@@ -236,6 +242,13 @@ def day_slots(db: Session, advisor, target_date: date_cls, policy: Dict, *, toda
     dur, gap = policy["duration"], policy["gap_after"]
     candidates = [datetime(target_date.year, target_date.month, target_date.day, h, m)
                   for h, m in policy["starts"]]
+    if any_time and candidates:
+        first, last = min(candidates), max(candidates)
+        t, extra = first, set(candidates)
+        while t <= last:
+            extra.add(t)
+            t += timedelta(minutes=int(any_time))
+        candidates = sorted(extra)
 
     # Every booked/confirmed appointment of this person that could touch the day.
     lo = datetime(target_date.year, target_date.month, target_date.day) - timedelta(days=1)
@@ -282,9 +295,11 @@ def day_slots(db: Session, advisor, target_date: date_cls, policy: Dict, *, toda
 
 
 def is_open(db: Session, advisor, slot: datetime, policy: Dict, *, exclude_booking_id: Optional[str] = None,
-            busy_reader=None) -> bool:
+            busy_reader=None, any_time: int = 15) -> bool:
+    """Is this exact time free? Any requested time counts (15-minute steps
+    between the first and last start), not only the set starts."""
     res = day_slots(db, advisor, slot.date(), policy, exclude_booking_id=exclude_booking_id,
-                    busy_reader=busy_reader)
+                    busy_reader=busy_reader, any_time=any_time)
     return not res.get("calendar_error") and slot.strftime("%Y-%m-%dT%H:%M:00") in set(res.get("slots") or [])
 
 
