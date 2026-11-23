@@ -63,9 +63,11 @@ def test_low_confidence_goes_to_a_person_with_the_draft(setter, sample_advisor):
     assert _ai_turns(db, conv)[-1].delivery == "blocked"
 
 
-def test_follow_up_later_goes_to_a_person_and_nothing_is_sent(setter, sample_advisor):
+def test_follow_up_later_goes_on_the_follow_up_list_and_nothing_is_sent(setter, sample_advisor):
     """THE RULE (Oct 22): "maybe after the holidays" is not an appointment -
-    nothing goes out automatically, now or later; a person takes it."""
+    nothing goes out now. Owner, Nov 22: the date goes on the follow-up list
+    (waiting_future); on that date the AI may only send real times, and when
+    it can't, a person is told to reach out - the follow-up is never lost."""
     db, org = setter["db"], setter["org"]
     lead = _lead_for(db, org, sample_advisor, "L001", first="Cy")
     soon = (A._today_central().date() + timedelta(days=10)).isoformat()
@@ -73,12 +75,15 @@ def test_follow_up_later_goes_to_a_person_and_nothing_is_sent(setter, sample_adv
                      follow_up_date=soon, follow_up_about="they wanted to wait until after the holidays",
                      memory_update={"concerns": ["busy season"]})])
     resp, conv = _run(db, lead, "Maybe after the holidays", fake)
-    assert conv.state == "human" and _ai_turns(db, conv)[-1].delivery == "blocked"
+    assert conv.state == "waiting_future" and _ai_turns(db, conv)[-1].delivery == "blocked"
+    assert conv.next_followup_at is not None
     assert resp.suggested_reply.startswith("Of course")
     fu = _Fake([_d("answer", "Hi Cy, checking back as promised.")])
     with patch.object(ai_setter, "_get_client", return_value=fu):
         out = ai_setter.followup_sweep(db, now=datetime.utcnow() + timedelta(days=30))
-    assert out["sent"] == 0 and out["drafted"] == 0 and fu.calls == []
+    assert out["sent"] == 0 and out["drafted"] == 0
+    db.refresh(conv)
+    assert conv.state == "human" and "follow-up due today" in (conv.handoff_reason or "")
 
 
 def test_a_follow_up_without_real_times_is_not_sent(setter, sample_advisor):

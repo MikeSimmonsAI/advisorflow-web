@@ -375,13 +375,14 @@ def _fields(db: Session, booking, lead, policy) -> Dict:
     who = (adv.full_name if adv and adv.full_name else policy.get("host_name")) or "your advisor"
     bt = booking.booked_time.replace(tzinfo=None) if getattr(booking.booked_time, "tzinfo", None) else booking.booked_time
     home = getattr(booking, "meeting_type", None) == BP.HOME
+    remote = getattr(booking, "meeting_type", None) == BP.REMOTE
     addr = (booking.visit_address or "").strip()
     office = (BP.option(policy, BP.OFFICE) or {}).get("address") or ""
     phone = _office_phone(db, lead)
     return {"first_name": (lead.first_name or "").strip().title() or "there", "advisor": who,
             "advisor_first": who.split(" ")[0], "date": bt.strftime("%A, %B %-d"),
             "time": bt.strftime("%-I:%M %p").replace(":00 ", " "), "minutes": int(booking.appt_duration or 45),
-            "home": home, "address": addr if home else (addr or office), "office_phone": phone,
+            "home": home, "remote": remote, "address": addr if home else (addr or office), "office_phone": phone,
             "title": policy.get("label") or "appointment"}
 
 
@@ -402,6 +403,8 @@ def _lead_in(sent: Optional[datetime], start: datetime) -> str:
 
 
 def _where(f: Dict) -> str:
+    if f.get("remote"):
+        return "by phone or video call - %s will send you the call details" % f["advisor_first"]
     if f["home"]:
         return "%s will come to you at %s" % (f["advisor_first"], f["address"])
     return "at Restland, %s - ask for %s" % (f["address"], f["advisor"])
@@ -439,7 +442,7 @@ def compose(db: Session, row: AppointmentNotification, booking, lead, policy) ->
         link = survey_url(db, lead.organization_id, sv.token) if sv else ""
         # "at Restland" only when the visit was there - a home visit was not.
         text = ("Hi %s, thank you for meeting with %s%s for your %s. Would you share how it went? "
-                "It takes about a minute: %s" % (f["first_name"], f["advisor"], "" if f["home"] else " at Restland",
+                "It takes about a minute: %s" % (f["first_name"], f["advisor"], "" if (f["home"] or f.get("remote")) else " at Restland",
                                                 f["title"], link))
         subj = "Thank you for meeting with %s" % f["advisor"]
     else:

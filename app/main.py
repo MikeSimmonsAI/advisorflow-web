@@ -2449,6 +2449,16 @@ async def _program_sla_loop():
                         except Exception as exc:                 # noqa: BLE001
                             db.rollback()
                             _logger.error("appointment setter sweep error: %s", exc, exc_info=True)
+                        # Restland handoff sheet (owner, Nov 22): appointments
+                        # and follow-ups onto the team's Google Sheet, every 5 min.
+                        try:
+                            from app.services.programs import restland_sheet as _rs
+                            _hs = _rs.run(db)
+                            if _hs:
+                                out["handoff_sheet"] = _hs
+                        except Exception as exc:                 # noqa: BLE001
+                            db.rollback()
+                            _logger.error("handoff sheet error: %s", exc, exc_info=True)
                         # Daily batch: programs whose manager switched it on
                         # approve the day's new people once, on sending days.
                         try:

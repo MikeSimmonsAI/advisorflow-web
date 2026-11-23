@@ -253,6 +253,8 @@ def book(db: Session, prog, lead, slot: datetime, kind: str, *, family_text: boo
         # Issue #507: the program's own length and a place (office, or the
         # family's home with a complete address).
         from app.services.programs import booking_policy
+        if meeting_key is None and kind == PHONE and booking_policy.option(pol, booking_policy.REMOTE):
+            meeting_key = booking_policy.REMOTE          # a call, not a visit at the office (owner, Nov 22)
         try:
             choice = booking_policy.meeting_choice(pol, meeting_key or booking_policy.OFFICE, visit_address)
         except ValueError as e:

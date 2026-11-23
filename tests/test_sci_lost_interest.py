@@ -131,7 +131,8 @@ def test_held_reply_keeps_the_agreed_follow_up_date(setter, sample_advisor, monk
     # THE RULE (Oct 22): "check back next month" is not an appointment - a
     # person takes it; nothing is held to go out later.
     assert [t.delivery for t in turns] == ["blocked"]
-    assert conv.state == "human" and resp.suggested_reply.startswith("Of course")
+    # Owner, Nov 22: the agreed date goes on the follow-up list, not to "needs a person".
+    assert conv.state == "waiting_future" and resp.suggested_reply.startswith("Of course")
 
 
 def test_held_reply_with_no_date_still_waits_for_open_hours(setter, sample_advisor, monkeypatch):
@@ -299,12 +300,13 @@ def test_im_in_agreement_is_interest(text):
 def test_follow_up_beyond_90_days_is_clamped_to_90():
     today = A._today_central().date()
     now = datetime.utcnow()
+    from app.services.programs.holidays import next_working_day as nwd   # never a holiday or Sunday (Nov 22)
     far = ai_setter._parse_follow_up((today + timedelta(days=200)).isoformat(), now)
-    assert far.date() == today + timedelta(days=90) and far.hour == 15
+    assert far.date() == nwd(today + timedelta(days=90)) and far.hour == 15
     mid = ai_setter._parse_follow_up((today + timedelta(days=35)).isoformat(), now)
-    assert mid.date() == today + timedelta(days=35)
-    assert ai_setter._parse_follow_up("soon", now).date() == today + timedelta(days=14)
-    assert ai_setter._parse_follow_up((today - timedelta(days=3)).isoformat(), now).date() == today + timedelta(days=14)
+    assert mid.date() == nwd(today + timedelta(days=35))
+    assert ai_setter._parse_follow_up("soon", now).date() == nwd(today + timedelta(days=14))
+    assert ai_setter._parse_follow_up((today - timedelta(days=3)).isoformat(), now).date() == nwd(today + timedelta(days=14))
 
 
 # --- independent-review follow-ups (Oct 20) --------------------------------

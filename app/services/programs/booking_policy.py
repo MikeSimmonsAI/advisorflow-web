@@ -50,7 +50,14 @@ HORIZON_DAYS = 14              # same as every program booking page
 SAME_DAY_NOTICE = timedelta(hours=2)
 LEGACY_MINUTES = 60            # a booking with no recorded length
 
-OFFICE, HOME = "office", "home"
+OFFICE, HOME, REMOTE = "office", "home", "remote"
+# Owner, Nov 22: a family who is out of town gets a REMOTE call (phone or
+# video) at a real date and time; the person assigned to the family sets the
+# call up and sends the details. Same times, same calendar, counted as an
+# appointment like the other two.
+REMOTE_OPTION = {"key": REMOTE, "label": "By phone or video call",
+                 "appt_label": "Family File Review by phone or video call",
+                 "note": "If you're out of town - we'll send you the call details"}
 
 RESTLAND_ORG_ID = "01fed629-9a95-412b-895a-c8b09f37a98c"
 RESTLAND_ADDRESS = "13005 Greenville Ave, Dallas, TX 75243"
@@ -69,6 +76,7 @@ RESTLAND_POLICY = {
          "note": RESTLAND_ADDRESS, "address": RESTLAND_ADDRESS},
         {"key": HOME, "label": "At your home", "appt_label": "Family File Review at your home",
          "note": "Mike comes to you, if that's more convenient", "needs_address": True},
+        REMOTE_OPTION,
     ],
 }
 
@@ -184,6 +192,8 @@ def place_text(booking, policy: Optional[Dict] = None) -> str:
     addr = (getattr(booking, "visit_address", None) or "").strip()
     if getattr(booking, "meeting_type", None) == HOME:
         return "at your home (%s)" % addr if addr else "at your home"
+    if getattr(booking, "meeting_type", None) == REMOTE:
+        return "by phone or video call (we'll send you the call details)"
     if addr:
         return "at Restland, %s" % addr if addr == RESTLAND_ADDRESS else "at %s" % addr
     return ""
