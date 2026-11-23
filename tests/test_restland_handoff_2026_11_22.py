@@ -483,3 +483,36 @@ def test_a_bad_booking_says_why_on_the_sheet(setter, sample_advisor):
     row[12], row[13] = "11/1/2026", "10:00 AM"                    # in the past
     _run_team(db, prog, sheet, [], fus, now + timedelta(minutes=10))
     assert row[16] == "Not booked: that date and time has already passed"
+
+
+# ── Owner, Nov 23: any time a family asks for is bookable when free ─────────
+
+def test_requested_off_grid_time_is_open_when_free():
+    from datetime import date, datetime, timedelta
+    from types import SimpleNamespace
+    from app.services.programs import booking_policy as BP
+
+    class Q:
+        def __init__(self, rows): self.rows = rows
+        def filter(self, *a, **k): return self
+        def all(self): return self.rows
+
+    class DB:
+        def __init__(self, rows): self.rows = rows
+        def query(self, *a): return Q(self.rows)
+
+    pol = BP.parse({"starts": ["10:00", "11:30", "13:00", "14:30", "16:00"], "duration": 45, "gap_after": 45, "days": "0123456"})
+    day = date.today() + timedelta(days=2)
+    pol = dict(pol, days="0123456")
+    adv = SimpleNamespace(id="adv")
+    free = lambda *a, **k: ([], None)
+    # Set starts only: 3:00 PM is not offered.
+    res = BP.day_slots(DB([]), adv, day, pol, busy_reader=free)
+    assert "%sT15:00:00" % day.isoformat() not in res["slots"]
+    # A requested time: 3:00 PM is open when nothing is booked around it.
+    assert BP.is_open(DB([]), adv, datetime(day.year, day.month, day.day, 15, 0), pol, busy_reader=free)
+    # But not when it would run into a 2:30 appointment (45 min + 45 gap).
+    held = SimpleNamespace(booked_time=datetime(day.year, day.month, day.day, 14, 30), appt_duration=45, id="b1")
+    assert not BP.is_open(DB([held]), adv, datetime(day.year, day.month, day.day, 15, 0), pol, busy_reader=free)
+    # Never outside the day's first/last start.
+    assert not BP.is_open(DB([]), adv, datetime(day.year, day.month, day.day, 18, 0), pol, busy_reader=free)

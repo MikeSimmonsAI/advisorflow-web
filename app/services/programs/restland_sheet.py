@@ -56,6 +56,12 @@ STAFF_COLUMNS = {
 # happened when the team filled in an appointment (owner, Nov 22 9:16 PM).
 FU_RESULT_HEADER = "Booking Result"
 START_TIMES = ("10:00 AM", "11:30 AM", "1:00 PM", "2:30 PM", "4:00 PM")
+# The time picker on the sheet: every half hour from the first to the last
+# start (owner, Nov 23 - any time the family asks for). Any other time can be
+# typed in; the booking checks the calendar either way.
+TIME_CHOICES = tuple(
+    "%d:%02d %s" % ((h - 1) % 12 + 1, m, "AM" if h < 12 else "PM")
+    for h in range(10, 17) for m in (0, 30) if (h, m) <= (16, 0))
 HOW_CHOICES = {"At Restland": ("office", "visit"), "At Their Home": ("home", "visit"),
                "Phone / Video Call": ("remote", "phone")}
 HOW = {"office": "At Restland", "home": "At Their Home", "remote": "Phone / Video Call"}
@@ -413,7 +419,7 @@ def layout_requests() -> List[Dict]:
           _team_list(F, "J2:J2000"), _checkbox(F, "K2:K2000"),
           {"setDataValidation": {"range": _grid(F, "M2:M2000"), "rule": {
               "condition": {"type": "DATE_IS_VALID"}, "strict": False, "showCustomUi": True}}},
-          _list(F, "N2:N2000", list(START_TIMES)), _list(F, "O2:O2000", list(HOW_CHOICES)),
+          _list(F, "N2:N2000", list(TIME_CHOICES)), _list(F, "O2:O2000", list(HOW_CHOICES)),
           _when(F, "A2:Q2000", '=OR($K2=TRUE,$I2<>"Open")', "#EEEEEE", GREY),
           _when(F, "A2:Q2000", '=AND($I2="Open",$K2<>TRUE,OR($G2="",$G2<TODAY()+1))', "#FBE3DF"),
           _when(F, "Q2:Q2000", '=LEFT($Q2,6)="Booked"', "#DCEFE3"),
