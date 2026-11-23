@@ -429,3 +429,57 @@ def test_a_week_without_updates_pauses_the_person_and_alerts_once(setter, monkey
     _run_team(db, prog, sheet, appts, [], later + timedelta(minutes=10))
     status = {r[0]: _c(r, 5) for r in sheet["Team"][1:]}
     assert status["Ann"] == "In the rotation"
+
+
+# ── booking from a follow-up (owner, Nov 22 9:16 PM) ────────────────────────
+
+def test_the_team_books_an_appointment_from_a_follow_up(setter, sample_advisor):
+    from app.models.models import BookingLink
+    from tests.test_sci_appointment_setter import SLOTS
+    db, org = setter["db"], setter["org"]
+    prog = _prog(setter)
+    prog.booking_user_id = sample_advisor.id
+    db.commit()
+    lead = _lead_for(db, org, sample_advisor, "L001", first="Joy")
+    _, conv = _run(db, lead, "call me please", _Fake([_d("callback", "Sure, I'll call you.", callback_window="today")]))
+    now = datetime(2026, 11, 23, 15, 0)
+    sheet = _board([("Ann", "TRUE")])
+    fus = [_fu("FU-" + conv.id)]
+    _run_team(db, prog, sheet, [], fus, now)
+    row = _pad(sheet[RS.FOLLOW_UPS][1], 18)
+    assert row[9] == "Ann"
+    row[12], row[13], row[14] = "1/8/2030", "10:00 AM", "At Restland"
+    with patch("app.services.programs.alert_ledger.page", return_value=[]):
+        out = _run_team(db, prog, sheet, [], fus, now + timedelta(minutes=5))
+    assert out["booked"] == 1
+    assert row[16].startswith("Booked for Tue Jan 8")
+    b = db.query(BookingLink).filter_by(lead_id=lead.id).one()
+    assert b.booked_time == SLOTS[0] and b.status in ("booked", "confirmed")
+    db.refresh(conv)
+    assert conv.state == "booked"
+    # the appointment then goes to the same person, not the next in line
+    appts = [[b.id, 46000.0, 50000.0, 0.4, "Tuesday", "Joy", "", "", "At Restland", "", "Booked", ""]]
+    sheet["Team"].append(["Bob", "", "", "", "TRUE", ""])
+    _run_team(db, prog, sheet, appts, fus, now + timedelta(minutes=10))
+    got = {r[0]: _c(r, 12) for r in sheet[RS.APPOINTMENTS][1:]}
+    assert got[b.id] == "Ann"
+
+
+def test_a_bad_booking_says_why_on_the_sheet(setter, sample_advisor):
+    db, org = setter["db"], setter["org"]
+    prog = _prog(setter)
+    prog.booking_user_id = sample_advisor.id
+    db.commit()
+    lead = _lead_for(db, org, sample_advisor, "L001", first="Kay")
+    _, conv = _run(db, lead, "call me please", _Fake([_d("callback", "Sure.", callback_window="today")]))
+    now = datetime(2026, 11, 23, 15, 0)
+    sheet = _board([("Ann", "TRUE")])
+    fus = [_fu("FU-" + conv.id)]
+    _run_team(db, prog, sheet, [], fus, now)
+    row = _pad(sheet[RS.FOLLOW_UPS][1], 18)
+    row[12], row[13] = "1/8/2030", "3:15 PM"                      # not an open time
+    _run_team(db, prog, sheet, [], fus, now + timedelta(minutes=5))
+    assert row[16].startswith("Not booked: that time is already taken")
+    row[12], row[13] = "11/1/2026", "10:00 AM"                    # in the past
+    _run_team(db, prog, sheet, [], fus, now + timedelta(minutes=10))
+    assert row[16] == "Not booked: that date and time has already passed"

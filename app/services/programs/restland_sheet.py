@@ -49,8 +49,15 @@ COLUMNS = {APPOINTMENTS: APPT_COLUMNS, FOLLOW_UPS: FU_COLUMNS}
 # header, by the sheet's setup - never by the sync).
 STAFF_COLUMNS = {
     APPOINTMENTS: ("Assigned To", "Confirmed With Family?", "Remote Call Link / Details", "Outcome", "Team Notes"),
-    FOLLOW_UPS: ("Assigned To", "Done?", "Team Notes"),
+    FOLLOW_UPS: ("Assigned To", "Done?", "Team Notes", "Appointment Date", "Appointment Time", "How",
+                 "Home Address"),
 }
+# Written by the system to the right of the team's Follow-Ups columns: what
+# happened when the team filled in an appointment (owner, Nov 22 9:16 PM).
+FU_RESULT_HEADER = "Booking Result"
+START_TIMES = ("10:00 AM", "11:30 AM", "1:00 PM", "2:30 PM", "4:00 PM")
+HOW_CHOICES = {"At Restland": ("office", "visit"), "At Their Home": ("home", "visit"),
+               "Phone / Video Call": ("remote", "phone")}
 HOW = {"office": "At Restland", "home": "At Their Home", "remote": "Phone / Video Call"}
 APPT_STATUS = {"booked": "Booked", "confirmed": "Confirmed", "completed": "Showed", "no_show": "No-Show",
                "cancelled": "Cancelled"}
@@ -393,19 +400,26 @@ def layout_requests() -> List[Dict]:
           _when(A, "M2:M2000", '=AND($A2<>"",$M2="",$C2>=TODAY())', "#FBE3DF")]
     r += _widths(A, {"A": 90, "B": 135, "C": 130, "D": 80, "E": 85, "F": 170, "G": 115, "H": 190, "I": 135,
                      "J": 200, "K": 120, "L": 260, "M": 140, "N": 110, "O": 200, "P": 110, "Q": 240})
-    # Follow-Ups: system A-I, the team's J-L
-    r += [_fmt(F, "A2:L2000", size=10, fg=TEXT, valign="TOP"),
+    # Follow-Ups: system A-I, the team's J-P, the booking result Q
+    r += [_fmt(F, "A2:Q2000", size=10, fg=TEXT, valign="TOP"),
           _fmt(F, "A1:I1", bold=True, fg="#FFFFFF", bg=GREEN, valign="MIDDLE", wrap=True),
-          _fmt(F, "J1:L1", bold=True, fg="#FFFFFF", bg=BRASS, valign="MIDDLE", wrap=True),
-          _fmt(F, "J2:L2000", bg=GOLD), _fmt(F, "B2:B2000", number="m/d/yyyy h:mm am/pm"),
-          _fmt(F, "G2:G2000", number="ddd, mmm d, yyyy"),
+          _fmt(F, "J1:P1", bold=True, fg="#FFFFFF", bg=BRASS, valign="MIDDLE", wrap=True),
+          _fmt(F, "Q1", bold=True, fg="#FFFFFF", bg=GREEN, valign="MIDDLE", wrap=True),
+          _fmt(F, "J2:P2000", bg=GOLD), _fmt(F, "B2:B2000", number="m/d/yyyy h:mm am/pm"),
+          _fmt(F, "G2:G2000", number="ddd, mmm d, yyyy"), _fmt(F, "M2:M2000", number="ddd, mmm d, yyyy"),
           _fmt(F, "F2:F2000", wrap=True), _fmt(F, "H2:H2000", wrap=True), _fmt(F, "L2:L2000", wrap=True),
-          _borders(F, "A1:L2000"), _height(F, 1, 40),
+          _fmt(F, "P2:P2000", wrap=True), _fmt(F, "Q2:Q2000", wrap=True, bold=True),
+          _borders(F, "A1:Q2000"), _height(F, 1, 40),
           _team_list(F, "J2:J2000"), _checkbox(F, "K2:K2000"),
-          _when(F, "A2:L2000", '=OR($K2=TRUE,$I2<>"Open")', "#EEEEEE", GREY),
-          _when(F, "A2:L2000", '=AND($I2="Open",$K2<>TRUE,OR($G2="",$G2<TODAY()+1))', "#FBE3DF")]
+          {"setDataValidation": {"range": _grid(F, "M2:M2000"), "rule": {
+              "condition": {"type": "DATE_IS_VALID"}, "strict": False, "showCustomUi": True}}},
+          _list(F, "N2:N2000", list(START_TIMES)), _list(F, "O2:O2000", list(HOW_CHOICES)),
+          _when(F, "A2:Q2000", '=OR($K2=TRUE,$I2<>"Open")', "#EEEEEE", GREY),
+          _when(F, "A2:Q2000", '=AND($I2="Open",$K2<>TRUE,OR($G2="",$G2<TODAY()+1))', "#FBE3DF"),
+          _when(F, "Q2:Q2000", '=LEFT($Q2,6)="Booked"', "#DCEFE3"),
+          _when(F, "Q2:Q2000", '=LEFT($Q2,10)="Not booked"', "#FBE3DF")]
     r += _widths(F, {"A": 90, "B": 135, "C": 170, "D": 115, "E": 190, "F": 260, "G": 130, "H": 280, "I": 110,
-                     "J": 140, "K": 70, "L": 260})
+                     "J": 140, "K": 70, "L": 260, "M": 140, "N": 110, "O": 150, "P": 220, "Q": 260})
     # Dashboard
     r += [_fmt(D, "A1:H31", size=10, fg=TEXT),
           _fmt(D, "A1", bold=True, size=18, fg=GREEN), _fmt(D, "A2", italic=True, fg=GREY),
@@ -528,7 +542,8 @@ PAUSE_AFTER = timedelta(days=7)
 PLACEHOLDER = re.compile(r"^\s*Person\s+\d+\s*$", re.I)
 TEAM_RANGE = "'Team'!A2:E30"
 APPT_KEYS = ("assigned", "confirmed", "link", "outcome", "notes")
-FU_KEYS = ("assigned", "done", "notes")
+FU_KEYS = ("assigned", "done", "notes", "appt_date", "appt_time", "appt_how", "appt_address")
+APPT_FIELDS = ("appt_date", "appt_time", "appt_how", "appt_address")
 KEYS = {APPOINTMENTS: APPT_KEYS, FOLLOW_UPS: FU_KEYS}
 
 
@@ -593,8 +608,69 @@ def _note(db, org_id: str, lead_id: Optional[str], body: str) -> None:
     db.add(LeadNote(organization_id=org_id, lead_id=lead_id, body=body[:4000], kind="internal"))
 
 
+def _parse_slot(date_text: str, time_text: str, now: datetime) -> Optional[datetime]:
+    """'Tue, Dec 1, 2026' / '12/1' + '10:00 AM' -> naive Central datetime."""
+    from dateutil import parser as P
+    from zoneinfo import ZoneInfo
+    from datetime import timezone
+    if not (date_text or "").strip() or not (time_text or "").strip():
+        return None
+    today = now.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("America/Chicago")).replace(tzinfo=None)
+    try:
+        d = P.parse(date_text, default=datetime(today.year, 1, 1))
+        t = P.parse(time_text, default=datetime(today.year, 1, 1))
+    except (ValueError, OverflowError):
+        return None
+    if not re.search(r"\b\d{4}\b", date_text) and d.date() < today.date():
+        d = d.replace(year=d.year + 1)                 # "1/4" typed in December means next year
+    return datetime(d.year, d.month, d.day, t.hour, t.minute)
+
+
+def _book_from_sheet(db, prog, rid: str, lead_id: Optional[str], new: Dict, who: str,
+                     now: datetime) -> str:
+    """The team filled in an appointment on a follow-up: book it for real (same
+    path as every booking - the real calendar, the family's confirmation) and
+    say what happened in plain words."""
+    from zoneinfo import ZoneInfo
+    from datetime import timezone
+    from app.models.models import Lead
+    from app.models.program_models import ProgramConversation
+    from app.services.programs import appointments as A
+    slot = _parse_slot(new.get("appt_date", ""), new.get("appt_time", ""), now)
+    if slot is None:
+        return "Not booked: fill in both the date and the time (e.g. 12/1 and 10:00 AM)"
+    local_now = now.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("America/Chicago")).replace(tzinfo=None)
+    if slot <= local_now:
+        return "Not booked: that date and time has already passed"
+    lead = db.query(Lead).filter(Lead.id == lead_id).first() if lead_id else None
+    if lead is None:
+        return "Not booked: this family wasn't found"
+    key, kind = HOW_CHOICES.get((new.get("appt_how") or "").strip(), HOW_CHOICES["At Restland"])
+    addr = (new.get("appt_address") or "").strip() or None
+    res = A.book(db, prog, lead, slot, kind, meeting_key=key, visit_address=addr if key == "home" else None)
+    when = slot.strftime("%a %b %-d, %-I:%M %p")
+    if res.get("ok"):
+        if rid.startswith("FU-"):
+            c = db.query(ProgramConversation).filter(ProgramConversation.id == rid[3:]).first()
+            if c is not None:
+                c.state, c.booked_time, c.booking_link_id = "booked", slot, res.get("booking_id")
+                c.next_followup_at = None
+        try:
+            A.notify_team_booked(db, prog, lead, slot, kind)
+        except Exception:                                # noqa: BLE001 - the booking stands either way
+            log.exception("booked-from-sheet alert failed")
+        return "Booked for %s%s" % (when, " (simulated - test family)" if res.get("simulated") else "")
+    why = {"taken": "that time is already taken - pick another time",
+           "already_booked": "this family already has an appointment (%s)" % (res.get("booked_time") or ""),
+           "opted_out": "this family asked us to stop contacting them",
+           "no_calendar": "no booking calendar is set up"}.get(res.get("status"), res.get("reason") or "it didn't go through")
+    if res.get("status") == "needs_place":
+        why = "for a home visit, put the full home address (street, city, state, ZIP)"
+    return "Not booked: %s" % why
+
+
 def _apply(db, prog, tab: str, rid: str, lead_id: Optional[str], old: Dict, new: Dict,
-           now: datetime) -> List[str]:
+           now: datetime, results: Optional[Dict[str, str]] = None) -> List[str]:
     """What the team changed on the sheet, put into the app. Returns the
     changes in plain words (also written to the family's notes)."""
     from app.models.models import BookingLink
@@ -632,6 +708,11 @@ def _apply(db, prog, tab: str, rid: str, lead_id: Optional[str], old: Dict, new:
         if "link" in changed and new.get("link"):
             said.append("call details: %s" % new["link"])
     else:
+        if any(k in changed for k in APPT_FIELDS) and (new.get("appt_date") or new.get("appt_time")):
+            result = _book_from_sheet(db, prog, rid, lead_id, new, who, now)
+            said.append(result)
+            if results is not None:
+                results[rid] = result
         if "done" in changed and _truthy(new.get("done")):
             said.append("follow-up done")
             if rid.startswith("FU-"):
@@ -689,6 +770,7 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
     team = read_team(client, sid)
     known = {r.row_id: r for r in db.query(R).filter(R.organization_id == org).all()}
     staff = {tab: read_staff(client, sid, tab) for tab in (APPOINTMENTS, FOLLOW_UPS)}
+    booking_results: Dict[str, str] = {}
     # 1. what the team typed -> the app
     for tab, by_id in staff.items():
         for rid, cur in by_id.items():
@@ -701,7 +783,7 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
                 known[rid] = rec
             old = json.loads(rec.staff_json or "{}")
             if old != vals:
-                if _apply(db, prog, tab, rid, rec.lead_id, old, vals, now):
+                if _apply(db, prog, tab, rid, rec.lead_id, old, vals, now, results=booking_results):
                     out["changes"] += 1
                 rec.staff_json = json.dumps(vals)
                 rec.staff_changed_at = now
@@ -745,18 +827,38 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
         for row in rows[tab]:
             rid = str(row[0])
             cur = staff[tab].get(rid)
-            if not rotation or cur is None or cur.get("assigned") or not _eligible(tab, row, today_serial):
+            if cur is None or cur.get("assigned") or not _eligible(tab, row, today_serial):
                 continue
-            idx = (idx + 1) % len(rotation)
-            name = rotation[idx]
+            # An appointment booked from a follow-up stays with whoever had the follow-up.
+            owner = None
+            rec0 = known.get(rid)
+            if tab == APPOINTMENTS and rec0 is not None and rec0.lead_id:
+                owner = next((r.assigned_to for r in known.values()
+                              if r.tab == FOLLOW_UPS and r.lead_id == rec0.lead_id and r.assigned_to), None)
+            if owner:
+                name = owner
+            elif rotation:
+                idx = (idx + 1) % len(rotation)
+                name = rotation[idx]
+            else:
+                continue
             writes.append({"range": _rng(tab, "%s%d" % (column(first_staff), cur["row"])), "values": [[name]]})
             rec = known[rid]
             vals = json.loads(rec.staff_json or "{}")
             vals["assigned"] = name
             rec.staff_json, rec.assigned_to, rec.auto_assigned, rec.assigned_at = json.dumps(vals), name, True, now
-            _note(db, org, rec.lead_id, "Restland sheet: assigned to %s (automatic, in turn)" % name)
-            cfg["rr_last"] = name
+            _note(db, org, rec.lead_id, "Restland sheet: assigned to %s (%s)"
+                  % (name, "booked from their follow-up" if owner else "automatic, in turn"))
+            if not owner:
+                cfg["rr_last"] = name
             out["assigned"] += 1
+    # what happened to appointments the team filled in on Follow-Ups
+    res_col = column(len(COLUMNS[FOLLOW_UPS]) + len(STAFF_COLUMNS[FOLLOW_UPS]) + 1)
+    for rid, text in booking_results.items():
+        cur = staff[FOLLOW_UPS].get(rid)
+        if cur is not None:
+            writes.append({"range": _rng(FOLLOW_UPS, "%s%d" % (res_col, cur["row"])), "values": [[text]]})
+    out["booked"] = sum(1 for t in booking_results.values() if t.startswith("Booked"))
     if writes:
         client.spreadsheets().values().batchUpdate(
             spreadsheetId=sid, body={"valueInputOption": "RAW", "data": writes}).execute()
