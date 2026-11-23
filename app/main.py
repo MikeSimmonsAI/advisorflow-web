@@ -1293,6 +1293,8 @@ from app.routers.evosys_open_booking_router import router as evosys_open_booking
 from app.routers.evosys_open_booking_router import public_router as evosys_open_booking_public_router  # noqa: E402
 app.include_router(evosys_open_booking_router)         # /sales/evosys/open-booking - Mike's one booking link (team)
 app.include_router(evosys_open_booking_public_router)  # /evosys-sales-public/meet - book a call with Mike, no lead needed
+from app.routers.evosys_open_booking_router import short_router as evosys_walkthrough_short_router  # noqa: E402
+app.include_router(evosys_walkthrough_short_router)    # /walkthrough - short link to the walkthrough request page
 # VOLT Google Sheets mirror: queue every lead/application change in its own
 # transaction (no Google call in any request; see sheets_outbox).
 from app.services.volt import sheets_outbox as _volt_sheets_outbox  # noqa: E402
