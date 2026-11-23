@@ -151,3 +151,28 @@ def test_viability_endpoints_owner_only(pilot):
     assert q["rows"][1]["status"] == "needs_google_places" and "daily_report" in q
     r = c.get("/god/acquisition/workforce/search-queue?organization_id=%s" % p["shine"].id, headers=_h(db, god))
     assert r.status_code == 200, r.text
+
+
+def test_auto_score_new_then_stale(db):
+    a = _p(db, industry="apartments", phone_raw="1")
+    b = _p(db, industry="office")
+    out = V.auto_score(db, batch=1)
+    assert out == {"scored_new": 1, "rescored": 0}
+    out = V.auto_score(db)
+    assert out["scored_new"] == 1
+    db.refresh(a); db.refresh(b)
+    assert a.viability_group and b.viability_group
+    a.viability_at = datetime.utcnow() - timedelta(days=2)
+    db.commit()
+    assert V.auto_score(db)["rescored"] == 1
+
+
+def test_workforce_pass_scores_the_pool(db):
+    from app.services.acquisition import workforce as WF
+    p = _p(db, industry="apartments", phone_raw="1")
+    s = WF.state(db)
+    s.status = "running"
+    db.commit()
+    out = WF.run_pass(db, practice_only=True)
+    db.refresh(p)
+    assert out["viability"]["scored_new"] >= 1 and p.viability_group == "B"

@@ -358,6 +358,12 @@ def run_pass(db: Session, now: Optional[datetime] = None, *, practice_only: bool
         return {"ran": 0, "skipped": "workforce is %s" % s.status}
     recovered = recover_leases(db, now)
     planned = plan(db, now)
+    try:                                   # viability score upkeep (#452) - never blocks the pass
+        from app.services.acquisition import viability as V
+        scored = V.auto_score(db, now)
+    except Exception:                      # noqa: BLE001
+        db.rollback()
+        scored = {"error": "viability scoring failed"}
     _PASS_AI["n"] = 0
     ran, results = 0, {}
     clients = set(enabled_client_ids(db))
@@ -390,7 +396,8 @@ def run_pass(db: Session, now: Optional[datetime] = None, *, practice_only: bool
     s = state(db)
     s.last_pass_at = now
     s.next_pass_at = now + timedelta(seconds=PASS_SECONDS) if s.status == "running" else None
-    summary = {"ran": ran, "recovered": recovered, "queued_now": planned, "by_worker": results}
+    summary = {"ran": ran, "recovered": recovered, "queued_now": planned, "by_worker": results,
+               "viability": scored}
     s.last_pass_summary = json.dumps(summary, default=str)
     db.commit()
     return summary

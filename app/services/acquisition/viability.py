@@ -290,3 +290,20 @@ def daily_report(db: Session, now: Optional[datetime] = None) -> Dict[str, Any]:
             "groups": group_counts(db), "group_c_due_recheck": due_for_recheck(db, now),
             "interested_24h": db.query(O).filter(O.interested_at >= since).count(),
             "booked_24h": db.query(O).filter(O.booked_at >= since).count()}
+
+
+def auto_score(db: Session, now: Optional[datetime] = None, batch: int = 100) -> Dict[str, int]:
+    """Called on every Harvey pass (#452): score records never scored, then
+    re-score records last scored over a day ago (research may have found a
+    phone or a verified email since). Bounded per pass; viability columns only."""
+    from app.models.lead_intel_models import LeadIntelProspect as P
+    now = now or datetime.utcnow()
+    new = db.query(P).filter(P.viability_at.is_(None)).limit(batch).all()
+    left = max(0, batch - len(new))
+    stale = (db.query(P).filter(P.viability_at < now - timedelta(days=1))
+             .order_by(P.viability_at).limit(left).all()) if left else []
+    for p in new + stale:
+        store(p, score_prospect(p), now)
+    if new or stale:
+        db.commit()
+    return {"scored_new": len(new), "rescored": len(stale)}
