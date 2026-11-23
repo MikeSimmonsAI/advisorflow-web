@@ -516,3 +516,33 @@ def test_requested_off_grid_time_is_open_when_free():
     assert not BP.is_open(DB([held]), adv, datetime(day.year, day.month, day.day, 15, 0), pol, busy_reader=free)
     # Never outside the day's first/last start.
     assert not BP.is_open(DB([]), adv, datetime(day.year, day.month, day.day, 18, 0), pol, busy_reader=free)
+
+
+# ── Owner, Nov 23 1:34 PM: the team logs each follow-up on the sheet ────────
+
+def test_the_follow_up_log_goes_into_the_app_and_asks_for_a_date(setter, sample_advisor):
+    from app.models.work_models import LeadNote
+    db, org = setter["db"], setter["org"]
+    prog = _prog(setter)
+    lead = _lead_for(db, org, sample_advisor, "L001", first="Lou")
+    _, conv = _run(db, lead, "call me please", _Fake([_d("callback", "Sure.", callback_window="today")]))
+    now = datetime(2026, 11, 23, 15, 0)
+    sheet = _board([("Ann", "TRUE")])
+    fus = [_fu("FU-" + conv.id)]
+    _run_team(db, prog, sheet, [], fus, now)
+    row = _pad(sheet[RS.FOLLOW_UPS][1], 19)
+    row[17], row[18] = "11/23/2026", "Left voicemail"
+    out = _run_team(db, prog, sheet, [], fus, now + timedelta(minutes=5))
+    assert out["changes"] == 1
+    notes = [n.body for n in db.query(LeadNote).filter_by(lead_id=lead.id).all()]
+    assert any("followed up on 11/23/2026: Left voicemail" in n and "Ann" in n for n in notes)
+    # "booked" without a date and time: the sheet says what's missing
+    row[18] = RS.WHAT_HAPPENED[0]
+    _run_team(db, prog, sheet, [], fus, now + timedelta(minutes=10))
+    assert row[16].startswith("Not booked yet: fill in Appointment Date")
+
+
+def test_follow_up_log_columns_sit_right_of_the_booking_result():
+    assert RS.FU_WORK_FIRST == 17                                  # column R
+    reqs = json.dumps(RS.layout_requests())
+    assert "Talked - booked appointment" in reqs

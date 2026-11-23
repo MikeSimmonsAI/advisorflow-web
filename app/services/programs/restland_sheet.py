@@ -55,6 +55,14 @@ STAFF_COLUMNS = {
 # Written by the system to the right of the team's Follow-Ups columns: what
 # happened when the team filled in an appointment (owner, Nov 22 9:16 PM).
 FU_RESULT_HEADER = "Booking Result"
+# The team's follow-up log, to the right of the Booking Result (owner, Nov 23:
+# "annotate what we followed up, what date do we get an appointment"). Read
+# back like the other team columns; each change goes into the family's notes.
+FU_WORK_COLUMNS = ("Followed Up On", "What Happened")
+FU_WORK_FIRST = len(FU_COLUMNS) + len(STAFF_COLUMNS[FOLLOW_UPS]) + 1      # R (0-based 17)
+WHAT_HAPPENED = ("Talked - booked appointment", "Talked - call back later", "Left voicemail", "Sent a text",
+                 "No answer", "Not interested", "Already done - nothing needed", "Wrong number")
+_BOOKED_RESULT = WHAT_HAPPENED[0]
 START_TIMES = ("10:00 AM", "11:30 AM", "1:00 PM", "2:30 PM", "4:00 PM")
 # The time picker on the sheet: every half hour from the first to the last
 # start (owner, Nov 23 - any time the family asks for). Any other time can be
@@ -406,8 +414,14 @@ def layout_requests() -> List[Dict]:
           _when(A, "M2:M2000", '=AND($A2<>"",$M2="",$C2>=TODAY())', "#FBE3DF")]
     r += _widths(A, {"A": 90, "B": 135, "C": 130, "D": 80, "E": 85, "F": 170, "G": 115, "H": 190, "I": 135,
                      "J": 200, "K": 120, "L": 260, "M": 140, "N": 110, "O": 200, "P": 110, "Q": 240})
-    # Follow-Ups: system A-I, the team's J-P, the booking result Q
-    r += [_fmt(F, "A2:Q2000", size=10, fg=TEXT, valign="TOP"),
+    # Follow-Ups: system A-I, the team's J-P, the booking result Q, the team's
+    # follow-up log R-S
+    r += [_fmt(F, "A2:S2000", size=10, fg=TEXT, valign="TOP"),
+          _fmt(F, "R1:S1", bold=True, fg="#FFFFFF", bg=BRASS, valign="MIDDLE", wrap=True),
+          _fmt(F, "R2:S2000", bg=GOLD), _fmt(F, "R2:R2000", number="ddd, mmm d, yyyy"),
+          {"setDataValidation": {"range": _grid(F, "R2:R2000"), "rule": {
+              "condition": {"type": "DATE_IS_VALID"}, "strict": False, "showCustomUi": True}}},
+          _list(F, "S2:S2000", list(WHAT_HAPPENED)),
           _fmt(F, "A1:I1", bold=True, fg="#FFFFFF", bg=GREEN, valign="MIDDLE", wrap=True),
           _fmt(F, "J1:P1", bold=True, fg="#FFFFFF", bg=BRASS, valign="MIDDLE", wrap=True),
           _fmt(F, "Q1", bold=True, fg="#FFFFFF", bg=GREEN, valign="MIDDLE", wrap=True),
@@ -415,17 +429,18 @@ def layout_requests() -> List[Dict]:
           _fmt(F, "G2:G2000", number="ddd, mmm d, yyyy"), _fmt(F, "M2:M2000", number="ddd, mmm d, yyyy"),
           _fmt(F, "F2:F2000", wrap=True), _fmt(F, "H2:H2000", wrap=True), _fmt(F, "L2:L2000", wrap=True),
           _fmt(F, "P2:P2000", wrap=True), _fmt(F, "Q2:Q2000", wrap=True, bold=True),
-          _borders(F, "A1:Q2000"), _height(F, 1, 40),
+          _borders(F, "A1:S2000"), _height(F, 1, 40),
           _team_list(F, "J2:J2000"), _checkbox(F, "K2:K2000"),
           {"setDataValidation": {"range": _grid(F, "M2:M2000"), "rule": {
               "condition": {"type": "DATE_IS_VALID"}, "strict": False, "showCustomUi": True}}},
           _list(F, "N2:N2000", list(TIME_CHOICES)), _list(F, "O2:O2000", list(HOW_CHOICES)),
-          _when(F, "A2:Q2000", '=OR($K2=TRUE,$I2<>"Open")', "#EEEEEE", GREY),
-          _when(F, "A2:Q2000", '=AND($I2="Open",$K2<>TRUE,OR($G2="",$G2<TODAY()+1))', "#FBE3DF"),
+          _when(F, "A2:S2000", '=OR($K2=TRUE,$I2<>"Open")', "#EEEEEE", GREY),
+          _when(F, "A2:S2000", '=AND($I2="Open",$K2<>TRUE,OR($G2="",$G2<TODAY()+1))', "#FBE3DF"),
           _when(F, "Q2:Q2000", '=LEFT($Q2,6)="Booked"', "#DCEFE3"),
           _when(F, "Q2:Q2000", '=LEFT($Q2,10)="Not booked"', "#FBE3DF")]
     r += _widths(F, {"A": 90, "B": 135, "C": 170, "D": 115, "E": 190, "F": 260, "G": 130, "H": 280, "I": 110,
-                     "J": 140, "K": 70, "L": 260, "M": 140, "N": 110, "O": 150, "P": 220, "Q": 260})
+                     "J": 140, "K": 70, "L": 260, "M": 140, "N": 110, "O": 150, "P": 220, "Q": 260,
+                     "R": 130, "S": 200})
     # Dashboard
     r += [_fmt(D, "A1:H31", size=10, fg=TEXT),
           _fmt(D, "A1", bold=True, size=18, fg=GREEN), _fmt(D, "A2", italic=True, fg=GREY),
@@ -548,7 +563,9 @@ PAUSE_AFTER = timedelta(days=7)
 PLACEHOLDER = re.compile(r"^\s*Person\s+\d+\s*$", re.I)
 TEAM_RANGE = "'Team'!A2:E30"
 APPT_KEYS = ("assigned", "confirmed", "link", "outcome", "notes")
-FU_KEYS = ("assigned", "done", "notes", "appt_date", "appt_time", "appt_how", "appt_address")
+FU_KEYS = ("assigned", "done", "notes", "appt_date", "appt_time", "appt_how", "appt_address",
+           "fu_date", "fu_result")
+FU_WORK_KEYS = ("fu_date", "fu_result")
 APPT_FIELDS = ("appt_date", "appt_time", "appt_how", "appt_address")
 KEYS = {APPOINTMENTS: APPT_KEYS, FOLLOW_UPS: FU_KEYS}
 
@@ -562,15 +579,18 @@ def read_staff(client, sid: str, tab: str) -> Dict[str, Dict[str, Any]]:
     from app.services.volt.sheets_export import column
     first = len(COLUMNS[tab])
     width = first + len(STAFF_COLUMNS[tab])
+    last = FU_WORK_FIRST + len(FU_WORK_COLUMNS) if tab == FOLLOW_UPS else width
     got = client.spreadsheets().values().get(
-        spreadsheetId=sid, range=_rng(tab, "A2:%s%d" % (column(width), MAX_ROWS + 1))).execute()
+        spreadsheetId=sid, range=_rng(tab, "A2:%s%d" % (column(last), MAX_ROWS + 1))).execute()
     out: Dict[str, Dict[str, Any]] = {}
     for i, cells in enumerate(got.get("values") or []):
         rid = str(cells[0]).strip() if cells else ""
         if not rid or rid in out:
             continue
-        cells = list(cells) + [""] * (width - len(cells))
+        cells = list(cells) + [""] * (last - len(cells))
         vals = [str(c).strip() for c in cells[first:width]]
+        if tab == FOLLOW_UPS:
+            vals += [str(c).strip() for c in cells[FU_WORK_FIRST:last]]
         out[rid] = dict(zip(KEYS[tab], vals), row=i + 2)
     return out
 
@@ -719,6 +739,12 @@ def _apply(db, prog, tab: str, rid: str, lead_id: Optional[str], old: Dict, new:
             said.append(result)
             if results is not None:
                 results[rid] = result
+        if any(k in changed for k in FU_WORK_KEYS) and (new.get("fu_date") or new.get("fu_result")):
+            said.append("followed up%s%s" % (" on %s" % new["fu_date"] if new.get("fu_date") else "",
+                                              ": %s" % new["fu_result"] if new.get("fu_result") else ""))
+            if ((new.get("fu_result") or "").strip() == _BOOKED_RESULT and results is not None
+                    and rid not in results and not (new.get("appt_date") and new.get("appt_time"))):
+                results[rid] = "Not booked yet: fill in Appointment Date and Appointment Time to book it"
         if "done" in changed and _truthy(new.get("done")):
             said.append("follow-up done")
             if rid.startswith("FU-"):
