@@ -265,8 +265,11 @@ TEXT_REPLY_SYSTEM = (
     "Never repeat a pitch or sentence we already sent them; if they already heard the offer, don't explain it "
     "again - only answer what is new. "
     "The draft: plain and friendly, from Mike, written ONLY in facts.reply_language, answers each thing they asked "
-    "directly. Only if facts.booked is empty and we don't know their areas yet: end by asking which areas they serve "
-    "/ what properties they want; offer the short call with facts.booking_link only if facts.booked is empty. If "
+    "directly. ONE TEXT TO A BOOKING (Mike's rule, 2026-11-23): when they say yes / ok / interested and facts.booked "
+    "is empty, do NOT pitch again and do NOT ask them questions - reply in one or two short sentences telling them "
+    "to grab a time on Mike's calendar to lock in their free appointments, with facts.booking_link right there. "
+    "Where they serve and what they want gets covered on the call. For any other question with facts.booked empty: "
+    "answer it, then always point them to facts.booking_link to book the call. If "
     "facts.booked is set, they already have a call at that time - never offer another one. facts.style_examples are answers Mike wrote himself - follow their tone, structure "
     "and length closely. Keep the words (not counting the link) under 600 characters. Never invent prices, numbers of contracts, results, guarantees, dates or anything not in "
     "the facts; say 'our goal is' rather than promising. simple=true ONLY when they said yes / are interested, or "
@@ -452,6 +455,10 @@ def text_reply(db: Session, settings, campaign, opp, reply_msg, conversation: li
             needs.append("The draft is long for a text - trim it.")
         if draft and (looks_spanish(draft) != (lang == "Spanish")):
             needs.append("The draft is not in %s - check it." % lang)
+        link = facts.get("booking_link") or ""
+        if draft and link and not booked and cat in AUTO_CATEGORIES and link not in draft:
+            # Never let a yes go out without the booking link (2026-11-23).
+            draft = draft.rstrip() + " " + link
         auto_ok = (bool(raw.get("simple")) and cat in AUTO_CATEGORIES and not needs and bool(draft))
         out = {"category": cat, "summary": str(raw.get("summary") or "")[:400], "draft": draft,
                "needs_person": needs, "auto_ok": auto_ok, "used_offer": True,
