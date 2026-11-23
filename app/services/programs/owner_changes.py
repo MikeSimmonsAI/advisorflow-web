@@ -80,6 +80,11 @@ CARMELITA_KEY = "restland-carmelita-3pm-2026-11-23"
 CARMELITA_LEAD = "4f7ef8fe-5007-4ccb-aadb-7957154eec00"
 CARMELITA_SLOT = datetime(2026, 11, 23, 15, 0)          # Central
 CARMELITA_UNTIL = datetime(2026, 11, 23, 19, 0)          # 1 PM Central, in UTC
+# 3:00 was refused: the shared appointment calendar already has a 3:00-3:30
+# entry. Owner, 9:36 AM: "Book her at 3:30 PM".
+CARMELITA_330_KEY = "restland-carmelita-330pm-2026-11-23"
+CARMELITA_330_SLOT = datetime(2026, 11, 23, 15, 30)      # Central
+CARMELITA_330_UNTIL = datetime(2026, 11, 23, 19, 30)     # 1:30 PM Central, in UTC
 # Owner, Nov 22 8:18 PM: these four "after the holidays" families are followed
 # up the first Monday after New Year's - Mon Jan 4 2027, 9 AM Central.
 AFTER_NEW_YEAR = datetime(2027, 1, 4, 15, 0)
@@ -293,14 +298,15 @@ def restland_jan4_and_remote_on_request(db: Session, prog, now: datetime) -> Dic
     return summary
 
 
-def restland_book_carmelita(db: Session, prog, now: datetime) -> Dict:
+def restland_book_carmelita(db: Session, prog, now: datetime, key: str = CARMELITA_KEY,
+                            slot: datetime = CARMELITA_SLOT) -> Dict:
     from app.models.models import BookingLink, Lead
     from app.models.program_models import ProgramResponse
     from app.services.programs import ai_setter
     from app.services.programs import appointments as A
     from app.services.programs import responses as R
     org_id = prog.organization_id
-    run, item = _open_run(db, org_id, CARMELITA_KEY)
+    run, item = _open_run(db, org_id, key)
     lead = db.query(Lead).filter(Lead.id == CARMELITA_LEAD, Lead.organization_id == org_id).first()
     out: Dict = {}
     if lead is None:
@@ -309,13 +315,13 @@ def restland_book_carmelita(db: Session, prog, now: datetime) -> Dict:
                                       BookingLink.status.in_(("booked", "confirmed"))).count():
         out["skipped"] = "already booked"
     else:
-        res = A.book(db, prog, lead, CARMELITA_SLOT, A.VISIT, meeting_key="office")
+        res = A.book(db, prog, lead, slot, A.VISIT, meeting_key="office")
         out = {"status": res.get("status"), "booking_id": res.get("booking_id"), "reason": res.get("reason")}
         if res.get("ok") and not res.get("simulated"):
             conv = ai_setter.conversation_for(db, lead)
             item("program_conversation", conv.id, "booked", {"state": conv.state}, {"state": "booked"},
-                 "owner Nov 23: she asked for 3 PM today")
-            conv.state, conv.booked_time = "booked", CARMELITA_SLOT
+                 "owner Nov 23: she asked for around 3 PM today")
+            conv.state, conv.booked_time = "booked", slot
             if res.get("booking_id"):
                 conv.booking_link_id = res.get("booking_id")
             newest = (db.query(ProgramResponse).filter(ProgramResponse.organization_id == org_id,
@@ -326,7 +332,7 @@ def restland_book_carmelita(db: Session, prog, now: datetime) -> Dict:
             if newest is not None and actor is not None:
                 R.mark(db, newest, "responded", actor)
             try:
-                A.notify_team_booked(db, prog, lead, CARMELITA_SLOT, A.VISIT)
+                A.notify_team_booked(db, prog, lead, slot, A.VISIT)
             except Exception:                            # noqa: BLE001 - the booking stands
                 log.exception("Carmelita booked alert failed")
     run.status, run.finished_at, run.summary_json = "applied", datetime.utcnow(), json.dumps(out, default=str)
@@ -505,6 +511,9 @@ def apply_pending(db: Session, now: Optional[datetime] = None) -> Dict:
                     res["sheet_test_undo"] = restland_sheet_test_undo(db, prog, now)
                 if now < CARMELITA_UNTIL and _ledger(db, prog.organization_id, CARMELITA_KEY) is None:
                     res["carmelita_3pm"] = restland_book_carmelita(db, prog, now)
+                if now < CARMELITA_330_UNTIL and _ledger(db, prog.organization_id, CARMELITA_330_KEY) is None:
+                    res["carmelita_330pm"] = restland_book_carmelita(db, prog, now, CARMELITA_330_KEY,
+                                                                     CARMELITA_330_SLOT)
                 if res:
                     out[prog.organization_id] = res
         except Exception as exc:                         # noqa: BLE001 - never stops a deploy
