@@ -91,6 +91,15 @@ def _skip(lead) -> bool:
     return lead is None or bool(getattr(lead, "is_test", False)) or is_demo_lead(lead) or is_owner_test_lead(lead)
 
 
+def _phone(raw) -> str:
+    """US numbers as (214) 240-3434; anything else as given (kept as text)."""
+    from app.services.volt.sheets_export import safe_phone
+    d = re.sub(r"\D", "", str(raw or ""))
+    if len(d) == 11 and d.startswith("1"):
+        d = d[1:]
+    return "(%s) %s-%s" % (d[:3], d[3:6], d[6:]) if len(d) == 10 else safe_phone(raw)
+
+
 def _name(lead) -> str:
     from app.services.programs.alert_ledger import first_last
     return first_last(lead)
@@ -135,7 +144,7 @@ def appointment_rows(db: Session, org_id: str) -> List[List[Any]]:
             status += " (moved)"
         out.append([b.id, central_serial(booked_on), _local_serial(datetime(bt.year, bt.month, bt.day)),
                     round((bt.hour * 60 + bt.minute) / 1440.0, 8), bt.strftime("%A"), safe(_name(lead)),
-                    safe_phone(lead.phone), safe(lead.email), HOW.get(b.meeting_type or "office", "At Restland"),
+                    _phone(lead.phone), safe(lead.email), HOW.get(b.meeting_type or "office", "At Restland"),
                     safe(b.visit_address if b.meeting_type == "home" else ""), status,
                     safe(_last_family_words(db, lead.id)), safe(_file_link(lead.id))])
     return out
@@ -152,7 +161,7 @@ def _conv_row(db, conv, lead) -> List[Any]:
         why = re.sub(r"\s*Contact them personally\.?\s*$", "", conv.handoff_reason or "Needs a person")
     status = ("Open" if state in OPEN_STATES else DONE_STATES.get(state, "AI working on it"))
     fu_on = central_serial(conv.next_followup_at) if state == "waiting_future" and conv.next_followup_at else ""
-    return ["FU-" + conv.id, central_serial(conv.created_at), safe(_name(lead)), safe_phone(lead.phone),
+    return ["FU-" + conv.id, central_serial(conv.created_at), safe(_name(lead)), _phone(lead.phone),
             safe(lead.email), safe(why[:300]), fu_on, safe(_last_family_words(db, lead.id)), status,
             safe(_file_link(lead.id))]
 
@@ -189,7 +198,7 @@ def follow_up_rows(db: Session, org_id: str, known_ids=()) -> List[List[Any]]:
         if _skip(lead):
             continue
         seen.add(t["message_id"])
-        out.append(["TOLD-" + t["message_id"], central_serial(t["at"]), safe(t["name"]), safe_phone(lead.phone),
+        out.append(["TOLD-" + t["message_id"], central_serial(t["at"]), safe(t["name"]), _phone(lead.phone),
                     safe(lead.email), "Told a time - not on the calendar yet. Book it.", "",
                     safe(t["said"][:300]), "Open", safe(_file_link(lead.id))])
     for mid in told_known - seen:

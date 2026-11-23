@@ -235,3 +235,10 @@ def test_rows_are_built_from_the_system(setter, sample_advisor):
     db.commit()
     again = [r for r in RS.follow_up_rows(db, org.id, ["FU-" + conv.id]) if r[0] == "FU-" + conv.id]
     assert again and again[0][8] == "Booked"
+
+
+def test_phone_numbers_read_like_phone_numbers():
+    assert RS._phone("12142403434") == "(214) 240-3434"
+    assert RS._phone("+1 (214) 240-3434") == "(214) 240-3434"
+    assert RS._phone("2142403434") == "(214) 240-3434"
+    assert RS._phone(None) == ""

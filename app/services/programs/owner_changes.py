@@ -35,6 +35,7 @@ Sundays ... I want everything to stop on Sundays, only on Sundays"):
     choices and the location offers phone appointments.
 """
 import json
+import re
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Optional
@@ -59,6 +60,10 @@ RESTLAND_HANDOFF_KEY = "restland-followups-remote-2026-11-22"
 # The team's handoff board (Google Sheet, owner's Drive; shared with the
 # sync service account as Editor). Not a secret.
 RESTLAND_HANDOFF_SHEET_ID = "1o8gPHz0-tLcrN_IxSQsSQE3Mt6IUX0bQ1U4jlmDfPgo"
+RESTLAND_HANDOFF_2_KEY = "restland-followups-acks-2026-11-22"
+# A reply that only acknowledges what was agreed ("👍", "ok", "thanks") is not
+# a new message: the later follow-up still stands.
+_ACK = re.compile(r"^\W*(ok(ay)?|k|thanks?( you)?|thx|ty|sounds good|great|perfect|will do|yes|yep|sure|cool)?\W*$", re.I)
 
 
 def _ledger(db: Session, org_id: str, key: str):
@@ -215,6 +220,40 @@ def restland_sundays_off(db: Session, prog, now: datetime) -> Dict:
     return summary
 
 
+def restland_followups_acks(db: Session, prog, now: datetime) -> Dict:
+    """Second pass of the Nov 22 restore: families whose only later reply was
+    an acknowledgement ("👍") also go back on the follow-up list."""
+    from app.models.program_models import ProgramConversation, ProgramConversationTurn
+    from app.services.programs import holidays as H
+    org_id = prog.organization_id
+    run, item = _open_run(db, org_id, RESTLAND_HANDOFF_2_KEY)
+    back = []
+    for c in (db.query(ProgramConversation)
+              .filter(ProgramConversation.organization_id == org_id,
+                      ProgramConversation.next_followup_at.isnot(None),
+                      ProgramConversation.next_followup_at > now,
+                      ProgramConversation.state.in_(("human", "ai_active"))).all()):
+        turns = (db.query(ProgramConversationTurn).filter(ProgramConversationTurn.conversation_id == c.id)
+                 .order_by(ProgramConversationTurn.created_at).all())
+        fu = [t for t in turns if t.role == "ai" and t.action == "follow_up_later"]
+        if not fu:
+            continue
+        later = [t for t in turns if t.role == "family" and t.created_at > fu[-1].created_at]
+        if not later or not all(_ACK.match(t.text or "") for t in later):
+            continue
+        when = c.next_followup_at
+        new_when = datetime.combine(H.next_working_day(when.date()), when.time())
+        item("program_conversation", c.id, "follow_up_list",
+             {"state": c.state, "next_followup_at": when}, {"state": "waiting_future", "next_followup_at": new_when},
+             "owner Nov 22: an acknowledgement keeps the agreed follow-up")
+        c.state, c.next_followup_at, c.followups_sent = "waiting_future", new_when, 0
+        back.append({"lead_id": c.lead_id, "follow_up_at": new_when.isoformat()})
+    summary = {"follow_ups_restored": back}
+    run.status, run.finished_at, run.summary_json = "applied", datetime.utcnow(), json.dumps(summary)
+    db.commit()
+    return summary
+
+
 def restland_followups_and_remote(db: Session, prog, now: datetime) -> Dict:
     from app.models.program_models import LocationProfile, ProgramConversation, ProgramConversationTurn
     from app.services.programs import booking_policy as BP
@@ -260,7 +299,8 @@ def restland_followups_and_remote(db: Session, prog, now: datetime) -> Dict:
         fu = [t for t in turns if t.role == "ai" and t.action == "follow_up_later"]
         if not fu:
             continue
-        if any(t.role == "family" and t.created_at > fu[-1].created_at for t in turns):
+        if any(t.role == "family" and t.created_at > fu[-1].created_at and not _ACK.match(t.text or "")
+               for t in turns):
             continue                                   # they wrote again since: that reply rules
         when = c.next_followup_at
         day = H.next_working_day(when.date())
@@ -307,6 +347,8 @@ def apply_pending(db: Session, now: Optional[datetime] = None) -> Dict:
                     res["sundays_off"] = restland_sundays_off(db, prog, now)
                 if now < SUNDAYS_APPLY_UNTIL and _ledger(db, prog.organization_id, RESTLAND_HANDOFF_KEY) is None:
                     res["handoff"] = restland_followups_and_remote(db, prog, now)
+                if now < SUNDAYS_APPLY_UNTIL and _ledger(db, prog.organization_id, RESTLAND_HANDOFF_2_KEY) is None:
+                    res["handoff_acks"] = restland_followups_acks(db, prog, now)
                 if res:
                     out[prog.organization_id] = res
         except Exception as exc:                         # noqa: BLE001 - never stops a deploy
