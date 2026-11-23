@@ -507,7 +507,7 @@ def test_booking_page_context_and_weekend_slots_route(rl, client):
     assert ctx.get("program_location") is not None, ctx                # location resolves for program leads
     if True:
         assert ctx["appt_duration"] == 45 and ctx["booking_days"] == [0, 1, 2, 3, 4, 5, 6]
-        assert {o["key"] for o in ctx["meeting_options"]} == {"office", "home"}
+        assert {o["key"] for o in ctx["meeting_options"]} == {"office", "home", "remote"}   # remote: owner, Nov 22
         assert ctx["program_location"]["contact_name"] == "Mike Simmons"
     sat = _next(5)
     res = client.get("/calendar/slots", params={"advisor_id": rl["mike"].id, "date": sat.isoformat(),

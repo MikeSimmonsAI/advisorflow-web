@@ -23,6 +23,16 @@ Sundays ... I want everything to stop on Sundays, only on Sundays"):
     Every text already reserved for a Sunday slot moves to the next open
     day in the same order - first texts to the next new-family slots,
     follow-ups to the next free follow-up slots. SCI is not touched.
+
+2026-11-22 evening, owner (Restland handoff):
+  * RESTLAND: families who asked us to follow up later ("after the
+    holidays", "late January") go back on the follow-up list with their date
+    (state waiting_future; a holiday or Sunday moves to the next working
+    day). They had been parked as "needs a person", where the date was
+    never acted on.
+  * RESTLAND: out-of-town families can book a remote call (phone or video)
+    - the "By phone or video call" choice is added to Restland's booking
+    choices and the location offers phone appointments.
 """
 import json
 import logging
@@ -45,6 +55,10 @@ RESTLAND_CLOSED_DAYS = "7"
 # applies a stale order. Nov 21 changes: Mon Nov 23 midnight Central.
 APPLY_UNTIL = datetime(2026, 11, 23, 6, 0)
 SUNDAYS_APPLY_UNTIL = datetime(2026, 12, 6, 6, 0)
+RESTLAND_HANDOFF_KEY = "restland-followups-remote-2026-11-22"
+# The team's handoff board (Google Sheet, owner's Drive; shared with the
+# sync service account as Editor). Not a secret.
+RESTLAND_HANDOFF_SHEET_ID = "1o8gPHz0-tLcrN_IxSQsSQE3Mt6IUX0bQ1U4jlmDfPgo"
 
 
 def _ledger(db: Session, org_id: str, key: str):
@@ -201,6 +215,67 @@ def restland_sundays_off(db: Session, prog, now: datetime) -> Dict:
     return summary
 
 
+def restland_followups_and_remote(db: Session, prog, now: datetime) -> Dict:
+    from app.models.program_models import LocationProfile, ProgramConversation, ProgramConversationTurn
+    from app.services.programs import booking_policy as BP
+    from app.services.programs import holidays as H
+    org_id = prog.organization_id
+    run, item = _open_run(db, org_id, RESTLAND_HANDOFF_KEY)
+    # 1. the remote-call booking choice
+    pol = json.loads(prog.booking_policy_json or "{}")
+    opts = pol.get("meeting_options")
+    added_remote = False
+    if isinstance(opts, list) and opts and not any(o.get("key") == BP.REMOTE for o in opts):
+        item("outreach_program", prog.id, "meeting_options", list(opts), None, "owner Nov 22: remote calls")
+        pol["meeting_options"] = list(opts) + [dict(BP.REMOTE_OPTION)]
+        prog.booking_policy_json = json.dumps(pol)
+        added_remote = True
+    if not (pol.get("handoff_sheet") or {}).get("id"):
+        item("outreach_program", prog.id, "handoff_sheet", pol.get("handoff_sheet"), None, "owner Nov 22: handoff board")
+        pol["handoff_sheet"] = {"id": RESTLAND_HANDOFF_SHEET_ID}
+        prog.booking_policy_json = json.dumps(pol)
+    phone_on = 0
+    for prof in db.query(LocationProfile).filter(LocationProfile.organization_id == org_id).all():
+        bs = prof.brand_settings
+        if isinstance(bs, str):
+            try:
+                bs = json.loads(bs or "{}")
+            except ValueError:
+                bs = {}
+        bs = dict(bs or {})
+        if not bs.get("offer_phone_alternative"):
+            item("location_profile", prof.id, "brand_settings", dict(bs), None, "owner Nov 22: remote calls")
+            bs["offer_phone_alternative"] = True
+            prof.brand_settings = json.dumps(bs)
+            phone_on += 1
+    # 2. later follow-ups back on the follow-up list
+    back = []
+    convs = (db.query(ProgramConversation)
+             .filter(ProgramConversation.organization_id == org_id,
+                     ProgramConversation.next_followup_at.isnot(None),
+                     ProgramConversation.state.in_(("human", "ai_active"))).all())
+    for c in convs:
+        turns = (db.query(ProgramConversationTurn).filter(ProgramConversationTurn.conversation_id == c.id)
+                 .order_by(ProgramConversationTurn.created_at).all())
+        fu = [t for t in turns if t.role == "ai" and t.action == "follow_up_later"]
+        if not fu:
+            continue
+        if any(t.role == "family" and t.created_at > fu[-1].created_at for t in turns):
+            continue                                   # they wrote again since: that reply rules
+        when = c.next_followup_at
+        day = H.next_working_day(when.date())
+        new_when = datetime.combine(day, when.time())
+        item("program_conversation", c.id, "follow_up_list",
+             {"state": c.state, "next_followup_at": when}, {"state": "waiting_future", "next_followup_at": new_when},
+             "owner Nov 22: never lose 'after the holidays'")
+        c.state, c.next_followup_at, c.followups_sent = "waiting_future", new_when, 0
+        back.append({"lead_id": c.lead_id, "follow_up_at": new_when.isoformat()})
+    summary = {"remote_choice_added": added_remote, "locations_phone_on": phone_on, "follow_ups_restored": back}
+    run.status, run.finished_at, run.summary_json = "applied", datetime.utcnow(), json.dumps(summary)
+    db.commit()
+    return summary
+
+
 def sci_full_speed(db: Session, prog) -> Dict:
     run, item = _open_run(db, prog.organization_id, SCI_KEY)
     _batch(prog, item, SCI_DAILY, SCI_SPACING, "owner Nov 21: SCI full blast")
@@ -230,6 +305,8 @@ def apply_pending(db: Session, now: Optional[datetime] = None) -> Dict:
                     res["full_speed"] = restland_full_speed(db, prog, now)
                 if now < SUNDAYS_APPLY_UNTIL and _ledger(db, prog.organization_id, RESTLAND_SUNDAYS_KEY) is None:
                     res["sundays_off"] = restland_sundays_off(db, prog, now)
+                if now < SUNDAYS_APPLY_UNTIL and _ledger(db, prog.organization_id, RESTLAND_HANDOFF_KEY) is None:
+                    res["handoff"] = restland_followups_and_remote(db, prog, now)
                 if res:
                     out[prog.organization_id] = res
         except Exception as exc:                         # noqa: BLE001 - never stops a deploy

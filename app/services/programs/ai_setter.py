@@ -408,6 +408,7 @@ MOVING TOWARD AN APPOINTMENT - without pressure:
 
 HONOUR THEIR TIMING:
 - Busy right now / will get back to us / call me later: acknowledge warmly and still work toward a time that suits them - busy is not a no. If they gave a time to be called -> "callback" with callback_window in their words. Busy this week, or "next week is better" -> "offer_times" for a later day (put "next week" or the day in best_times; the system finds real times then). Only a long horizon ("after the holidays", "next month", "in a few weeks") -> "follow_up_later" with follow_up_date (YYYY-MM-DD, Central) and follow_up_about. Never end with a vague "reach out whenever".
+- OUT OF TOWN (owner, Nov 22): they live away or will be away for a long stretch ("I'm in Houston", "I live out of state", "I'm traveling for work until spring") and the list of ways we meet has a phone appointment: lock in a call instead of waiting - "offer_times" with appointment_kind "phone" ("We can do it by phone or video call instead - would {{TIMES}} work?"). Away only briefly and back soon ("out of town this week", "after the holiday") -> follow the timing rules here (a later day, or "follow_up_later" with the date they're back).
 - Not interested (but not STOP): thank them, leave the door open in one sentence -> "close".
 - ARRIVING NOW. They say they are on the way, will "run by", "stop in", "come by" TODAY or within a few hours (not tomorrow or a later day - see COMING IN ON A LATER DAY) ("I'll run by there in about 15 minutes"): this is a live visit - the best outcome there is. Action "handoff" (the advisor is alerted at once to greet them). Reply warmly in one or two sentences: glad they're coming, and I'll be watching for them / the team will be ready for them. Do not offer {{TIMES}}, do not ask them to pick a time, and never say an appointment is booked or confirmed.
 - COMING IN ON A LATER DAY. They say they'll come by / stop in / visit TOMORROW or on another day, without a clock time ("I can come by tomorrow if that is ok"): that is a yes to a visit - lock in the time. Action "offer_times": glad they're coming, then {{TIMES}} as your one question ("Wonderful, I'd be glad to see you tomorrow. Would {{TIMES}} work?"). Put the day in best_times. If they also gave a clock time, use requested_time. NEVER just agree to "see you tomorrow" without a time - nobody would be ready for them.
@@ -896,6 +897,9 @@ def _parse_follow_up(raw, now) -> datetime:
         day = datetime.combine(today + timedelta(days=90), datetime.min.time())
     if day is None or not (1 <= (day.date() - today).days <= 90):
         day = datetime.combine(today + timedelta(days=14), datetime.min.time())
+    # Owner, Nov 22: never on a holiday or a Sunday - the next ordinary day.
+    from app.services.programs import holidays as _hol
+    day = datetime.combine(_hol.next_working_day(day.date()), datetime.min.time())
     return day.replace(hour=15, minute=0)
 
 
@@ -1372,6 +1376,15 @@ def _handoff(db, prog, lead, conv, reason, *, notify: bool):
             log.exception("handoff alert failed for lead %s", lead.id)
 
 
+def _due_person(db, prog, lead, conv, reason) -> None:
+    """A family on the follow-up list came due and the AI could not send
+    real times: a person picks it up today (owner, Nov 22 - never lose it)."""
+    if conv.state != "waiting_future":
+        return
+    _handoff(db, prog, lead, conv, "follow-up due today (%s) - please reach out" % (reason or "later")[:150],
+             notify=True)
+
+
 def _fill_times(text: str, slots: List[datetime]) -> str:
     if len(slots) >= 2:
         times = "%s or %s" % (A.describe(slots[0]), A.describe(slots[1]))
@@ -1840,7 +1853,18 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
     if not (_moves_to_appt or _arriving):
         if resp is not None and text:
             resp.suggested_reply = text                  # the draft, for the person to use or ignore
-        if action not in ("handoff", "callback"):        # those two already paged the team above
+        if action == "follow_up_later" and conv.next_followup_at is not None:
+            # Owner, Nov 22 ("after the holidays ... we don't lose this"): the
+            # family named a later time. Nothing is sent now (THE RULE); the
+            # date goes on the follow-up list (state waiting_future) and the
+            # team is told once. On that date followup_sweep offers real
+            # times, or pages a person if it can't.
+            _fu_when, _fu_why = conv.next_followup_at, conv.followup_reason
+            _handoff(db, prog, lead, conv, "asked us to follow up later - on the follow-up list for %s"
+                     % _fu_when.strftime("%a %b %-d"), notify=True)
+            conv.state, conv.next_followup_at, conv.followup_reason = "waiting_future", _fu_when, _fu_why
+            conv.followups_sent = 0                      # they answered: the unanswered-follow-up count starts over
+        elif action not in ("handoff", "callback"):      # those two already paged the team above
             _handoff(db, prog, lead, conv, NEEDS_HUMAN_REASON % (d.get("reason") or action or "unclear")[:160],
                      notify=True)
         else:
@@ -1995,9 +2019,12 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
         from app.services.test_records import is_owner_test_lead as _owner_test
         # The owner's live test contact never gets a follow-up: a test proves
         # one exchange and is then cleaned up; it must not keep texting the owner.
+        # A family on the follow-up list (waiting_future) wrote last ON PURPOSE -
+        # "after the holidays" was their last word - so that never cancels it.
+        wrote_back = bool(conv.last_family_at and conv.last_ai_at and conv.last_family_at > conv.last_ai_at)
         stop = (lead is None or getattr(lead, "status", None) == "dnc" or _owner_test(lead)
                 or (conv.followups_sent or 0) >= MAX_FOLLOWUPS
-                or (conv.last_family_at and conv.last_ai_at and conv.last_family_at > conv.last_ai_at))
+                or (wrote_back and conv.state != "waiting_future"))
         if stop:
             conv.next_followup_at = None
             done["skipped"] += 1
@@ -2012,6 +2039,7 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
                            note="Fix: %s" % "; ".join(validate_decision(d, "", conv, prog.primary_contact_name)))
         except Exception as exc:                         # noqa: BLE001
             log.warning("follow-up AI unavailable for lead %s: %s", conv.lead_id, exc)
+            _due_person(db, prog, lead, conv, reason)
             db.commit()
             continue
         action = d.get("action")
@@ -2020,6 +2048,7 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
         if action == "wait" or not text or validate_decision(d, "", conv, prog.primary_contact_name) or action not in (
                 "answer", "offer_times", "send_guide", "mail_guide", "close"):
             _turn(db, conv, "system", None, action="wait", reason="follow-up not needed: %s" % (d.get("reason") or action))
+            _due_person(db, prog, lead, conv, reason)
             db.commit()
             done["skipped"] += 1
             continue
@@ -2027,6 +2056,7 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
         if "{TIMES}" in text or action == "offer_times":
             slots, _why = A.available_slots(db, prog)
             if not slots:
+                _due_person(db, prog, lead, conv, reason)
                 db.commit()
                 done["skipped"] += 1
                 continue
@@ -2043,10 +2073,12 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
             # THE RULE: an automatic follow-up goes out only with real times.
             _turn(db, conv, "system", None, action="wait",
                   reason="follow-up not sent: it did not offer real times (needs-a-human rule)")
+            _due_person(db, prog, lead, conv, reason)
             db.commit()
             done["skipped"] += 1
             continue
         if check_text(text, allowed_links=allowed, contact=prog.primary_contact_name):
+            _due_person(db, prog, lead, conv, reason)
             db.commit()
             done["skipped"] += 1
             continue

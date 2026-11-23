@@ -128,3 +128,40 @@ def test_sunday_change_never_applies_after_its_window(rl, monkeypatch):
     _old_launch(rl, monkeypatch)
     late = max(OC.APPLY_UNTIL, OC.SUNDAYS_APPLY_UNTIL) + timedelta(minutes=1)
     assert OC.apply_pending(rl["db"], now=late) == {}
+
+
+def test_handoff_change_restores_later_follow_ups_and_adds_remote_calls(rl, monkeypatch):
+    from app.models.program_models import LocationProfile, ProgramConversation, ProgramConversationTurn
+    from app.services.programs import booking_policy as BP
+    from app.services.programs import identity
+    db, org = rl["db"], rl["org"]
+    _launch(rl)
+    prog = db.query(OutreachProgram).filter_by(organization_id=org.id).one()
+    pol = json.loads(prog.booking_policy_json)
+    pol["meeting_options"] = [o for o in BP.RESTLAND_POLICY["meeting_options"] if o["key"] != BP.REMOTE]
+    prog.booking_policy_json = json.dumps(pol)
+    lead = _dallas(rl)
+    c = ProgramConversation(organization_id=org.id, lead_id=lead.id, state="human",
+                            next_followup_at=datetime(2026, 11, 26, 15, 0), followup_reason="after the holiday")
+    db.add(c)
+    db.flush()
+    t0 = datetime(2026, 11, 20, 18, 0)
+    db.add(ProgramConversationTurn(conversation_id=c.id, organization_id=org.id, lead_id=lead.id, role="family",
+                                   text="Out of town for holiday", created_at=t0))
+    db.add(ProgramConversationTurn(conversation_id=c.id, organization_id=org.id, lead_id=lead.id, role="ai",
+                                   action="follow_up_later", delivery="blocked",
+                                   created_at=t0 + timedelta(seconds=5)))
+    db.commit()
+    monkeypatch.setattr(OC, "APPLY_UNTIL", datetime(2026, 11, 1))
+    out = OC.apply_pending(db, now=utc(2026, 11, 22, 19, 0))
+    res = out[org.id]["handoff"]
+    assert res["remote_choice_added"] and len(res["follow_ups_restored"]) == 1
+    db.refresh(c)
+    assert c.state == "waiting_future" and c.next_followup_at == datetime(2026, 11, 28, 15, 0)   # not Thanksgiving
+    db.refresh(prog)
+    pol = json.loads(prog.booking_policy_json)
+    assert [o["key"] for o in pol["meeting_options"]][-1] == BP.REMOTE
+    assert pol["handoff_sheet"]["id"] == OC.RESTLAND_HANDOFF_SHEET_ID
+    profs = db.query(LocationProfile).filter_by(organization_id=org.id).all()
+    assert profs and all("phone" in identity.appointment_ways(p) for p in profs)
+    assert OC.apply_pending(db, now=utc(2026, 11, 22, 19, 5)) == {}                          # once
