@@ -39,10 +39,11 @@ from sqlalchemy.orm import Session
 log = logging.getLogger(__name__)
 
 APPOINTMENTS, FOLLOW_UPS = "Appointments", "Follow-Ups"
+# Owner, Nov 22 8:45 PM: no "Family File" column - no links into the app.
 APPT_COLUMNS = ("Appointment ID", "Booked On (CT)", "Date", "Time (CT)", "Day", "Family", "Phone", "Email",
-                "How", "Home Address", "System Status", "What They Said Last", "Family File")
+                "How", "Home Address", "System Status", "What They Said Last")
 FU_COLUMNS = ("Follow-Up ID", "Added (CT)", "Family", "Phone", "Email", "Why", "Follow Up On",
-              "What They Said", "System Status", "Family File")
+              "What They Said", "System Status")
 COLUMNS = {APPOINTMENTS: APPT_COLUMNS, FOLLOW_UPS: FU_COLUMNS}
 # The team's own columns, to the right of the system's (written once, as the
 # header, by the sheet's setup - never by the sync).
@@ -117,12 +118,6 @@ def sheet_url(prog) -> Optional[str]:
 
 # ── rows ────────────────────────────────────────────────────────────────────
 
-def _file_link(lead_id: str) -> str:
-    import os
-    base = (os.environ.get("APP_BASE_URL") or "").strip().rstrip("/")
-    return "%s/program/live?f=%s" % (base, lead_id) if base else ""
-
-
 def _skip(lead) -> bool:
     from app.services.sci_staging_demo import is_demo_lead
     from app.services.test_records import is_owner_test_lead
@@ -184,8 +179,21 @@ def appointment_rows(db: Session, org_id: str) -> List[List[Any]]:
                     round((bt.hour * 60 + bt.minute) / 1440.0, 8), bt.strftime("%A"), safe(_name(lead)),
                     _phone(lead.phone), safe(lead.email), HOW.get(b.meeting_type or "office", "At Restland"),
                     safe(b.visit_address if b.meeting_type == "home" else ""), status,
-                    safe(_last_family_words(db, lead.id)), safe(_file_link(lead.id))])
+                    safe(_last_family_words(db, lead.id))])
     return out
+
+
+def _plain_why(reason: Optional[str]) -> str:
+    """The reason a person is needed, in the team's words - nothing about the
+    system or the AI."""
+    r = (reason or "").strip()
+    r = re.sub(r"\s*Contact them personally\.?\s*$", "", r)
+    m = re.match(r"^Needs a human - the AI could not move this to an appointment, so nothing was sent\s*\((.*)\)\.?$",
+                 r, re.S)
+    if m:
+        r = m.group(1).strip()
+    r = re.sub(r"\b(the )?AI\b", "we", r)
+    return ("Needs a person: " + r) if r else "Needs a person"
 
 
 def _conv_row(db, conv, lead) -> List[Any]:
@@ -196,12 +204,11 @@ def _conv_row(db, conv, lead) -> List[Any]:
     elif state == "callback_requested":
         why = "Asked for a call back" + (" (%s)" % conv.callback_window if conv.callback_window else "")
     else:
-        why = re.sub(r"\s*Contact them personally\.?\s*$", "", conv.handoff_reason or "Needs a person")
-    status = ("Open" if state in OPEN_STATES else DONE_STATES.get(state, "AI working on it"))
+        why = _plain_why(conv.handoff_reason)
+    status = ("Open" if state in OPEN_STATES else DONE_STATES.get(state, "In progress"))
     fu_on = central_serial(conv.next_followup_at) if state == "waiting_future" and conv.next_followup_at else ""
     return ["FU-" + conv.id, central_serial(conv.created_at), safe(_name(lead)), _phone(lead.phone),
-            safe(lead.email), safe(why[:300]), fu_on, safe(_last_family_words(db, lead.id)), status,
-            safe(_file_link(lead.id))]
+            safe(lead.email), safe(why[:300]), fu_on, safe(_last_family_words(db, lead.id)), status]
 
 
 def follow_up_rows(db: Session, org_id: str, known_ids=()) -> List[List[Any]]:
@@ -238,10 +245,10 @@ def follow_up_rows(db: Session, org_id: str, known_ids=()) -> List[List[Any]]:
         seen.add(t["message_id"])
         out.append(["TOLD-" + t["message_id"], central_serial(t["at"]), safe(t["name"]), _phone(lead.phone),
                     safe(lead.email), "Told a time - not on the calendar yet. Book it.", "",
-                    safe(t["said"][:300]), "Open", safe(_file_link(lead.id))])
+                    safe(t["said"][:300]), "Open"])
     for mid in told_known - seen:
         # No longer unbooked (booked since, or past the look-back): mark it done.
-        out.append(["TOLD-" + mid, None, None, None, None, None, None, None, "Booked or handled", None])
+        out.append(["TOLD-" + mid, None, None, None, None, None, None, None, "Booked or handled"])
     return out
 
 
@@ -251,8 +258,9 @@ def follow_up_rows(db: Session, org_id: str, known_ids=()) -> List[List[Any]]:
 # muted brass. Applied the first time the server writes to the sheet, then
 # recorded ("formatted": true) so a person's later changes are left alone.
 
+PERSON_TABS = ("Person 1", "Person 2", "Person 3", "Person 4", "Person 5")
 TAB_IDS = {"Dashboard": 0, APPOINTMENTS: 1, FOLLOW_UPS: 2, "Person 1": 3, "Person 2": 4, "Team": 5,
-           "How It Works": 6}
+           "Person 3": 7, "Person 4": 8, "Person 5": 9}
 GREEN, IVORY, BRASS, GOLD, TEXT, GREY, LINE = ("#193C32", "#F7F5ED", "#C3A66A", "#F6EDD9", "#24392F",
                                                "#5B6B63", "#E2DDCD")
 
@@ -363,41 +371,41 @@ def _when(sid: int, a1: str, formula: str, bg: str, fg: Optional[str] = None) ->
 
 def layout_requests() -> List[Dict]:
     """Every formatting request for the board, in one batch."""
-    A, F, D, T, H = TAB_IDS[APPOINTMENTS], TAB_IDS[FOLLOW_UPS], TAB_IDS["Dashboard"], TAB_IDS["Team"], \
-        TAB_IDS["How It Works"]
+    A, F, D, T = TAB_IDS[APPOINTMENTS], TAB_IDS[FOLLOW_UPS], TAB_IDS["Dashboard"], TAB_IDS["Team"]
     r: List[Dict] = []
-    tab_color = {D: GREEN, A: GREEN, F: BRASS, 3: GOLD, 4: GOLD, T: IVORY, H: IVORY}
+    tab_color = {D: GREEN, A: GREEN, F: BRASS, T: IVORY}
+    tab_color.update({TAB_IDS[p]: GOLD for p in PERSON_TABS})
     for sid, color in tab_color.items():
         r.append({"updateSheetProperties": {"properties": {"sheetId": sid, "tabColorStyle": {"rgbColor": _rgb(color)}},
                                             "fields": "tabColorStyle"}})
-    # Appointments
-    r += [_fmt(A, "A2:R2000", size=10, fg=TEXT, valign="TOP"),
-          _fmt(A, "A1:M1", bold=True, fg="#FFFFFF", bg=GREEN, valign="MIDDLE", wrap=True),
-          _fmt(A, "N1:R1", bold=True, fg="#FFFFFF", bg=BRASS, valign="MIDDLE", wrap=True),
-          _fmt(A, "N2:R2000", bg=GOLD), _fmt(A, "B2:B2000", number="m/d/yyyy h:mm am/pm"),
+    # Appointments: system A-L, the team's M-Q
+    r += [_fmt(A, "A2:Q2000", size=10, fg=TEXT, valign="TOP"),
+          _fmt(A, "A1:L1", bold=True, fg="#FFFFFF", bg=GREEN, valign="MIDDLE", wrap=True),
+          _fmt(A, "M1:Q1", bold=True, fg="#FFFFFF", bg=BRASS, valign="MIDDLE", wrap=True),
+          _fmt(A, "M2:Q2000", bg=GOLD), _fmt(A, "B2:B2000", number="m/d/yyyy h:mm am/pm"),
           _fmt(A, "C2:C2000", number="ddd, mmm d, yyyy"), _fmt(A, "D2:D2000", number="h:mm am/pm"),
-          _fmt(A, "L2:L2000", wrap=True), _fmt(A, "P2:P2000", wrap=True), _fmt(A, "R2:R2000", wrap=True),
-          _borders(A, "A1:R2000"), _height(A, 1, 40),
-          _team_list(A, "N2:N2000"), _checkbox(A, "O2:O2000"),
-          _list(A, "Q2:Q2000", ["Showed", "No-Show", "Rescheduled", "Cancelled"]),
-          _when(A, "A2:R2000", '=AND($C2<>"",$C2=TODAY())', "#DCEFE3"),
-          _when(A, "A2:R2000", '=OR(LEFT($K2,6)="Cancel",$Q2="Cancelled")', "#EEEEEE", GREY),
-          _when(A, "N2:N2000", '=AND($A2<>"",$N2="",$C2>=TODAY())', "#FBE3DF")]
+          _fmt(A, "L2:L2000", wrap=True), _fmt(A, "O2:O2000", wrap=True), _fmt(A, "Q2:Q2000", wrap=True),
+          _borders(A, "A1:Q2000"), _height(A, 1, 40),
+          _team_list(A, "M2:M2000"), _checkbox(A, "N2:N2000"),
+          _list(A, "P2:P2000", ["Showed", "No-Show", "Rescheduled", "Cancelled"]),
+          _when(A, "A2:Q2000", '=AND($C2<>"",$C2=TODAY())', "#DCEFE3"),
+          _when(A, "A2:Q2000", '=OR(LEFT($K2,6)="Cancel",$P2="Cancelled")', "#EEEEEE", GREY),
+          _when(A, "M2:M2000", '=AND($A2<>"",$M2="",$C2>=TODAY())', "#FBE3DF")]
     r += _widths(A, {"A": 90, "B": 135, "C": 130, "D": 80, "E": 85, "F": 170, "G": 115, "H": 190, "I": 135,
-                     "J": 200, "K": 120, "L": 260, "M": 110, "N": 140, "O": 110, "P": 200, "Q": 110, "R": 240})
-    # Follow-Ups
-    r += [_fmt(F, "A2:M2000", size=10, fg=TEXT, valign="TOP"),
-          _fmt(F, "A1:J1", bold=True, fg="#FFFFFF", bg=GREEN, valign="MIDDLE", wrap=True),
-          _fmt(F, "K1:M1", bold=True, fg="#FFFFFF", bg=BRASS, valign="MIDDLE", wrap=True),
-          _fmt(F, "K2:M2000", bg=GOLD), _fmt(F, "B2:B2000", number="m/d/yyyy h:mm am/pm"),
+                     "J": 200, "K": 120, "L": 260, "M": 140, "N": 110, "O": 200, "P": 110, "Q": 240})
+    # Follow-Ups: system A-I, the team's J-L
+    r += [_fmt(F, "A2:L2000", size=10, fg=TEXT, valign="TOP"),
+          _fmt(F, "A1:I1", bold=True, fg="#FFFFFF", bg=GREEN, valign="MIDDLE", wrap=True),
+          _fmt(F, "J1:L1", bold=True, fg="#FFFFFF", bg=BRASS, valign="MIDDLE", wrap=True),
+          _fmt(F, "J2:L2000", bg=GOLD), _fmt(F, "B2:B2000", number="m/d/yyyy h:mm am/pm"),
           _fmt(F, "G2:G2000", number="ddd, mmm d, yyyy"),
-          _fmt(F, "F2:F2000", wrap=True), _fmt(F, "H2:H2000", wrap=True), _fmt(F, "M2:M2000", wrap=True),
-          _borders(F, "A1:M2000"), _height(F, 1, 40),
-          _team_list(F, "K2:K2000"), _checkbox(F, "L2:L2000"),
-          _when(F, "A2:M2000", '=OR($L2=TRUE,$I2<>"Open")', "#EEEEEE", GREY),
-          _when(F, "A2:M2000", '=AND($I2="Open",$L2<>TRUE,OR($G2="",$G2<TODAY()+1))', "#FBE3DF")]
+          _fmt(F, "F2:F2000", wrap=True), _fmt(F, "H2:H2000", wrap=True), _fmt(F, "L2:L2000", wrap=True),
+          _borders(F, "A1:L2000"), _height(F, 1, 40),
+          _team_list(F, "J2:J2000"), _checkbox(F, "K2:K2000"),
+          _when(F, "A2:L2000", '=OR($K2=TRUE,$I2<>"Open")', "#EEEEEE", GREY),
+          _when(F, "A2:L2000", '=AND($I2="Open",$K2<>TRUE,OR($G2="",$G2<TODAY()+1))', "#FBE3DF")]
     r += _widths(F, {"A": 90, "B": 135, "C": 170, "D": 115, "E": 190, "F": 260, "G": 130, "H": 280, "I": 110,
-                     "J": 110, "K": 140, "L": 70, "M": 260})
+                     "J": 140, "K": 70, "L": 260})
     # Dashboard
     r += [_fmt(D, "A1:H31", size=10, fg=TEXT),
           _fmt(D, "A1", bold=True, size=18, fg=GREEN), _fmt(D, "A2", italic=True, fg=GREY),
@@ -426,7 +434,7 @@ def layout_requests() -> List[Dict]:
         "position": {"overlayPosition": {"anchorCell": {"sheetId": D, "rowIndex": 21, "columnIndex": 4},
                                          "widthPixels": 560, "heightPixels": 300}}}}})
     # Person tabs
-    for sid in (TAB_IDS["Person 1"], TAB_IDS["Person 2"]):
+    for sid in (TAB_IDS[p] for p in PERSON_TABS):
         r += [_fmt(sid, "A1:P500", size=10, fg=TEXT, valign="TOP"),
               _fmt(sid, "A1", bold=True, size=16, fg=GREEN), _fmt(sid, "A2", bold=True),
               _fmt(sid, "B2", bold=True, size=14, fg=GREEN, bg=GOLD), _fmt(sid, "D2", italic=True, size=9, fg=GREY),
@@ -438,14 +446,10 @@ def layout_requests() -> List[Dict]:
               _fmt(sid, "I5:I500", wrap=True), _height(sid, 4, 36)]
         r += _widths(sid, {"A": 130, "B": 80, "C": 85, "D": 160, "E": 110, "F": 130, "G": 180, "H": 110, "I": 200,
                            "J": 24, "K": 130, "L": 160, "M": 110, "N": 220, "O": 260, "P": 60})
-    # Team + How It Works
-    r += [_fmt(T, "A1:D1", bold=True, fg="#FFFFFF", bg=GREEN), _fmt(T, "A2:D30", size=10, bg=GOLD),
-          _borders(T, "A1:D30")] + _widths(T, {"A": 180, "B": 130, "C": 220, "D": 240})
-    r += [_fmt(H, "A1:B22", size=10, fg=TEXT, wrap=True, valign="TOP"),
-          _fmt(H, "A1", bold=True, size=16, fg=GREEN),
-          _fmt(H, "A2:B2", bold=True, fg="#FFFFFF", bg=GREEN), _fmt(H, "A3:A22", bold=True),
-          _fmt(H, "A13:B13", bold=True, fg="#FFFFFF", bg=GREEN), _fmt(H, "A19:B19", bold=True, fg="#FFFFFF", bg=GREEN),
-          _fmt(H, "A15:B15", bg=GOLD)] + _widths(H, {"A": 190, "B": 640})
+    # Team (Active? is the team's switch; Status is written by the system)
+    r += [_fmt(T, "A1:F1", bold=True, fg="#FFFFFF", bg=GREEN), _fmt(T, "A2:E30", size=10, bg=GOLD),
+          _fmt(T, "F2:F30", size=10), _checkbox(T, "E2:E30"), _borders(T, "A1:F30")]
+    r += _widths(T, {"A": 180, "B": 130, "C": 220, "D": 240, "E": 70, "F": 320})
     return r
 
 
@@ -513,6 +517,265 @@ def known_ids(client, sid: str, tab: str) -> List[str]:
     return [str(c[0]).strip() for c in (got.get("values") or []) if c and str(c[0]).strip()]
 
 
+# ── the team's side: read back, round robin, pause ─────────────────────────
+#
+# Owner, Nov 22 8:45 PM: "when they update it here, it can get updated on the
+# app ... We need to know what has happened" / "a team of five ... auto
+# assigned ... round robin ... pause putting somebody in there if they hadn't
+# been updating the spreadsheet ... a week ... alert Mike Sleater and myself."
+
+PAUSE_AFTER = timedelta(days=7)
+PLACEHOLDER = re.compile(r"^\s*Person\s+\d+\s*$", re.I)
+TEAM_RANGE = "'Team'!A2:F30"
+APPT_KEYS = ("assigned", "confirmed", "link", "outcome", "notes")
+FU_KEYS = ("assigned", "done", "notes")
+KEYS = {APPOINTMENTS: APPT_KEYS, FOLLOW_UPS: FU_KEYS}
+
+
+def _truthy(v) -> bool:
+    return str(v).strip().upper() == "TRUE" or v is True
+
+
+def read_staff(client, sid: str, tab: str) -> Dict[str, Dict[str, Any]]:
+    """{row id: {"row": n, keys...}} - the team's columns as they are now."""
+    from app.services.volt.sheets_export import column
+    first = len(COLUMNS[tab])
+    width = first + len(STAFF_COLUMNS[tab])
+    got = client.spreadsheets().values().get(
+        spreadsheetId=sid, range=_rng(tab, "A2:%s%d" % (column(width), MAX_ROWS + 1))).execute()
+    out: Dict[str, Dict[str, Any]] = {}
+    for i, cells in enumerate(got.get("values") or []):
+        rid = str(cells[0]).strip() if cells else ""
+        if not rid or rid in out:
+            continue
+        cells = list(cells) + [""] * (width - len(cells))
+        vals = [str(c).strip() for c in cells[first:width]]
+        out[rid] = dict(zip(KEYS[tab], vals), row=i + 2)
+    return out
+
+
+def read_team(client, sid: str) -> List[Dict[str, Any]]:
+    """The people on the Team tab, in order: name, active (the Active? box),
+    and whether the name is still a placeholder ("Person 3")."""
+    got = client.spreadsheets().values().get(spreadsheetId=sid, range=TEAM_RANGE).execute()
+    team = []
+    for i, cells in enumerate(got.get("values") or []):
+        cells = list(cells) + [""] * 5
+        name = str(cells[0]).strip()
+        if not name:
+            continue
+        team.append({"name": name, "row": i + 2, "active": str(cells[4]).strip().upper() != "FALSE",
+                     "placeholder": bool(PLACEHOLDER.match(name))})
+    return team
+
+
+def _lead_for(db, tab: str, rid: str) -> Optional[str]:
+    from app.models.models import BookingLink, EmailMessage, Message
+    from app.models.program_models import ProgramConversation
+    if tab == APPOINTMENTS:
+        b = db.query(BookingLink.lead_id).filter(BookingLink.id == rid).first()
+        return b[0] if b else None
+    if rid.startswith("FU-"):
+        c = db.query(ProgramConversation.lead_id).filter(ProgramConversation.id == rid[3:]).first()
+        return c[0] if c else None
+    if rid.startswith("TOLD-"):
+        for M in (Message, EmailMessage):
+            m = db.query(M.lead_id).filter(M.id == rid[5:]).first()
+            if m:
+                return m[0]
+    return None
+
+
+def _note(db, org_id: str, lead_id: Optional[str], body: str) -> None:
+    if not lead_id:
+        return
+    from app.models.work_models import LeadNote
+    db.add(LeadNote(organization_id=org_id, lead_id=lead_id, body=body[:4000], kind="internal"))
+
+
+def _apply(db, prog, tab: str, rid: str, lead_id: Optional[str], old: Dict, new: Dict,
+           now: datetime) -> List[str]:
+    """What the team changed on the sheet, put into the app. Returns the
+    changes in plain words (also written to the family's notes)."""
+    from app.models.models import BookingLink
+    from app.models.program_models import ProgramConversation
+    who = new.get("assigned") or "the team"
+    said: List[str] = []
+    changed = [k for k in KEYS[tab] if (old.get(k) or "") != (new.get(k) or "")]
+    if not changed:
+        return said
+    if "assigned" in changed and new.get("assigned"):
+        said.append("assigned to %s" % new["assigned"])
+    if tab == APPOINTMENTS:
+        b = db.query(BookingLink).filter(BookingLink.id == rid).first()
+        if "confirmed" in changed and _truthy(new.get("confirmed")):
+            said.append("confirmed with the family")
+            if b is not None and b.confirmed_at is None:
+                b.confirmed_at = now
+        if "outcome" in changed and new.get("outcome"):
+            out = new["outcome"]
+            said.append("outcome: %s" % out)
+            status = {"showed": "completed", "no-show": "no_show"}.get(out.strip().lower())
+            if b is not None and status and (b.status or "") in ("booked", "confirmed", "completed", "no_show"):
+                from app.services.programs import appointment_ops as OPS
+                from app.services.programs import appointments as A
+                actor = A.program_advisor(db, prog)          # the program's booking calendar owner
+                sp = db.begin_nested()
+                try:
+                    OPS.attendance(db, prog, b, status, actor, now=now)
+                    if sp.is_active:
+                        sp.commit()
+                except Exception as exc:                 # noqa: BLE001 - recorded as a note instead
+                    if sp.is_active:
+                        sp.rollback()
+                    said.append("(not recorded as attendance: %s)" % str(exc)[:120])
+        if "link" in changed and new.get("link"):
+            said.append("call details: %s" % new["link"])
+    else:
+        if "done" in changed and _truthy(new.get("done")):
+            said.append("follow-up done")
+            if rid.startswith("FU-"):
+                c = db.query(ProgramConversation).filter(ProgramConversation.id == rid[3:]).first()
+                if c is not None and c.state in OPEN_STATES:
+                    c.state, c.next_followup_at = "closed", None
+                    c.handoff_reason = ("Handled by %s on the Restland sheet" % who)[:250]
+    if "notes" in changed and new.get("notes"):
+        said.append("notes: %s" % new["notes"])
+    if said:
+        _note(db, prog.organization_id, lead_id, "Restland sheet (%s): %s" % (who, "; ".join(said)))
+    return said
+
+
+def _eligible(tab: str, row: List[Any], today_serial: float) -> bool:
+    """Rows that need a person now: upcoming booked appointments, open follow-ups."""
+    if tab == APPOINTMENTS:
+        status = str(row[10] or "")
+        date = row[2]
+        return status.startswith(("Booked", "Confirmed")) and isinstance(date, (int, float)) and date >= today_serial
+    return str(row[8] or "") == "Open"
+
+
+def _cfg(prog) -> Dict[str, Any]:
+    return json.loads(prog.booking_policy_json or "{}").get("handoff_sheet") or {}
+
+
+def _save_cfg(prog, cfg: Dict[str, Any]) -> None:
+    pol = json.loads(prog.booking_policy_json or "{}")
+    pol["handoff_sheet"] = cfg
+    prog.booking_policy_json = json.dumps(pol)
+
+
+def _pause_alert(db, prog, name: str, since: datetime, now: datetime) -> None:
+    from app.services.programs import alert_ledger as L
+    when = since.strftime("%b %-d")
+    sms = ("Restland sheet: %s hasn't updated the sheet since %s. New families are no longer being assigned "
+           "to them until they do." % (name, when))
+    L.page(db, prog, lead_id=None, key="handoff-paused:%s:%s" % (name.lower(), now.strftime("%Y%m%d")),
+           kind="handoff", sms_text=sms, subject="Restland sheet - %s paused (no updates in a week)" % name,
+           html="<p>%s</p>" % sms, management=True, coalesce=False, audit_message=sms)
+
+
+def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any]]],
+              now: Optional[datetime] = None) -> Dict[str, Any]:
+    """Read the team's columns back into the app, pause anyone with no
+    updates in a week (alerting the owners once), and assign new families
+    round robin to the active people."""
+    from app.models.program_models import HandoffSheetRow as R
+    from app.services.volt.sheets_export import column, central_serial
+    now = now or datetime.utcnow()
+    org = prog.organization_id
+    today_serial = int(central_serial(now))
+    out: Dict[str, Any] = {"changes": 0, "assigned": 0, "paused": []}
+    team = read_team(client, sid)
+    known = {r.row_id: r for r in db.query(R).filter(R.organization_id == org).all()}
+    staff = {tab: read_staff(client, sid, tab) for tab in (APPOINTMENTS, FOLLOW_UPS)}
+    # 1. what the team typed -> the app
+    for tab, by_id in staff.items():
+        for rid, cur in by_id.items():
+            vals = {k: cur.get(k, "") for k in KEYS[tab]}
+            rec = known.get(rid)
+            if rec is None:
+                rec = R(organization_id=org, row_id=rid, tab=tab, lead_id=_lead_for(db, tab, rid),
+                        staff_json=json.dumps({k: "" for k in KEYS[tab]}))
+                db.add(rec)
+                known[rid] = rec
+            old = json.loads(rec.staff_json or "{}")
+            if old != vals:
+                if _apply(db, prog, tab, rid, rec.lead_id, old, vals, now):
+                    out["changes"] += 1
+                rec.staff_json = json.dumps(vals)
+                rec.staff_changed_at = now
+                if vals.get("assigned") != rec.assigned_to:
+                    rec.assigned_to, rec.auto_assigned = vals.get("assigned") or None, False
+                    rec.assigned_at = now if vals.get("assigned") else None
+    db.flush()
+    # 2. who is open for new families: active, a real name, not paused
+    cfg = _cfg(prog)
+    paused = dict(cfg.get("paused") or {})
+    open_ids = {r[0] for tab in rows for r in rows[tab] if _eligible(tab, r, today_serial)}
+    status_lines: Dict[str, str] = {}
+    for p in team:
+        name = p["name"]
+        if p["placeholder"]:
+            status_lines[name] = "Type the person's name here to add them to the rotation"
+            continue
+        if not p["active"]:
+            status_lines[name] = "Not in the rotation (Active? is unchecked)"
+            continue
+        mine = [r for r in known.values() if (r.assigned_to or "") == name]
+        has_open = any(r.row_id in open_ids for r in mine)
+        last = max([r.staff_changed_at or r.assigned_at for r in mine if (r.staff_changed_at or r.assigned_at)]
+                   or [None]) if mine else None
+        if has_open and last is not None and now - last > PAUSE_AFTER:
+            if name not in paused:
+                paused[name] = now.isoformat()
+                _pause_alert(db, prog, name, last, now)
+                out["paused"].append(name)
+            status_lines[name] = "Paused: no updates since %s. Owners alerted." % last.strftime("%b %-d")
+        else:
+            paused.pop(name, None)
+            status_lines[name] = "In the rotation"
+    rotation = [p["name"] for p in team if status_lines.get(p["name"]) == "In the rotation"]
+    # 3. round robin: every row that needs a person and has nobody
+    last_name = cfg.get("rr_last")
+    idx = rotation.index(last_name) if last_name in rotation else -1
+    writes = []
+    for tab in (APPOINTMENTS, FOLLOW_UPS):
+        first_staff = len(COLUMNS[tab]) + 1
+        for row in rows[tab]:
+            rid = str(row[0])
+            cur = staff[tab].get(rid)
+            if not rotation or cur is None or cur.get("assigned") or not _eligible(tab, row, today_serial):
+                continue
+            idx = (idx + 1) % len(rotation)
+            name = rotation[idx]
+            writes.append({"range": _rng(tab, "%s%d" % (column(first_staff), cur["row"])), "values": [[name]]})
+            rec = known[rid]
+            vals = json.loads(rec.staff_json or "{}")
+            vals["assigned"] = name
+            rec.staff_json, rec.assigned_to, rec.auto_assigned, rec.assigned_at = json.dumps(vals), name, True, now
+            _note(db, org, rec.lead_id, "Restland sheet: assigned to %s (automatic, in turn)" % name)
+            cfg["rr_last"] = name
+            out["assigned"] += 1
+    if writes:
+        client.spreadsheets().values().batchUpdate(
+            spreadsheetId=sid, body={"valueInputOption": "RAW", "data": writes}).execute()
+    # 4. the Team tab's Status column
+    team_status = [["Status"]]
+    if team:
+        rows_needed = max(p["row"] for p in team)
+        col = [["Status"]] + [[""] for _ in range(rows_needed - 1)]
+        for p in team:
+            col[p["row"] - 1] = [status_lines.get(p["name"], "")]
+        team_status = col
+    client.spreadsheets().values().update(spreadsheetId=sid, range="'Team'!F1:F%d" % len(team_status),
+                                          valueInputOption="RAW", body={"values": team_status}).execute()
+    cfg["paused"] = paused
+    _save_cfg(prog, cfg)
+    db.commit()
+    return out
+
+
 def sync(db: Session, prog, client=None) -> Dict[str, Any]:
     from app.services.volt import sheets_export as X
     sid = sheet_id(prog)
@@ -525,9 +788,12 @@ def sync(db: Session, prog, client=None) -> Dict[str, Any]:
     except Exception as exc:                             # noqa: BLE001 - the data still goes in
         db.rollback()
         log.warning("handoff sheet layout not applied: %s", X.categorize(exc))
-    a = upsert(client, sid, APPOINTMENTS, appointment_rows(db, org))
-    f = upsert(client, sid, FOLLOW_UPS, follow_up_rows(db, org, known_ids(client, sid, FOLLOW_UPS)))
-    return {"appointments": a, "follow_ups": f}
+    appts = appointment_rows(db, org)
+    fus = follow_up_rows(db, org, known_ids(client, sid, FOLLOW_UPS))
+    a = upsert(client, sid, APPOINTMENTS, appts)
+    f = upsert(client, sid, FOLLOW_UPS, fus)
+    t = team_pass(db, prog, client, sid, {APPOINTMENTS: appts, FOLLOW_UPS: [r for r in fus if r[1] is not None]})
+    return {"appointments": a, "follow_ups": f, "team": t}
 
 
 def run(db: Session, now: Optional[datetime] = None, force: bool = False) -> Dict[str, Any]:

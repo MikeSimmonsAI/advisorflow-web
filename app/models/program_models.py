@@ -692,3 +692,26 @@ class ProgramConversationTurn(Base):
     reason = Column(String, nullable=True)
     response_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class HandoffSheetRow(Base):
+    """One row of a program's handoff Google Sheet (Restland, owner Nov 22):
+    who it is assigned to, the team's own columns as last read, and when the
+    team last changed them - so what the team types flows back into the app
+    and an assignee who stops updating can be paused."""
+    __tablename__ = "handoff_sheet_rows"
+    __table_args__ = (UniqueConstraint("organization_id", "row_id", name="uq_handoff_sheet_row"),
+                      Index("ix_handoff_sheet_rows_assignee", "organization_id", "assigned_to"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    organization_id = Column(String, nullable=False)
+    row_id = Column(String, nullable=False)                    # column A: booking id, FU-<conv>, TOLD-<msg>
+    tab = Column(String, nullable=False)                       # Appointments | Follow-Ups
+    lead_id = Column(String, nullable=True)
+    assigned_to = Column(String, nullable=True)
+    auto_assigned = Column(Boolean, nullable=False, default=False)
+    assigned_at = Column(DateTime, nullable=True)
+    staff_json = Column(Text, nullable=True)                   # the team's columns as last read
+    staff_changed_at = Column(DateTime, nullable=True)         # the team last changed this row
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
