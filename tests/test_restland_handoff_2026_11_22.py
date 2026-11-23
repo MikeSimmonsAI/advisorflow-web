@@ -172,7 +172,8 @@ class _Client:
 
 def _sheet():
     return {RS.APPOINTMENTS: [list(RS.APPT_COLUMNS) + list(RS.STAFF_COLUMNS[RS.APPOINTMENTS])],
-            RS.FOLLOW_UPS: [list(RS.FU_COLUMNS) + list(RS.STAFF_COLUMNS[RS.FOLLOW_UPS])]}
+            RS.FOLLOW_UPS: [list(RS.FU_COLUMNS) + list(RS.STAFF_COLUMNS[RS.FOLLOW_UPS]) + [RS.FU_RESULT_HEADER]
+                            + list(RS.FU_WORK_COLUMNS)]}
 
 
 def test_the_sync_writes_only_system_columns_and_keeps_the_teams_work():
@@ -374,11 +375,11 @@ def test_what_the_team_types_goes_into_the_app(setter, sample_advisor):
     _run_team(db, prog, sheet, appts, [], now)
     # the team fills in their columns
     row = _pad(sheet[RS.APPOINTMENTS][1])
-    row[12:17] = ["Ann", "TRUE", "", "Showed", "Met with Hal and his wife; bought a marker."]
+    row[12:16] = ["Ann", "", "Showed", "Met with Hal and his wife; bought a marker."]
     out = _run_team(db, prog, sheet, appts, [], now + timedelta(minutes=5))
     assert out["changes"] == 1
     db.refresh(b)
-    assert b.status == "completed" and b.confirmed_at is not None
+    assert b.status == "completed"
     notes = [n.body for n in db.query(LeadNote).filter_by(lead_id=lead.id).all()]
     assert any("Showed" in n and "bought a marker" in n and "Ann" in n for n in notes)
 
@@ -414,7 +415,7 @@ def test_a_week_without_updates_pauses_the_person_and_alerts_once(setter, monkey
     _run_team(db, prog, sheet, appts, [], now)                         # a1 -> Ann, a2 -> Bob
     later = now + timedelta(days=8)
     row_b = _pad([r for r in sheet[RS.APPOINTMENTS][1:] if r[0] == "a2"][0])
-    row_b[16] = "Left a voicemail"                                     # Bob kept working; Ann did nothing
+    row_b[15] = "Left a voicemail"                                     # Bob kept working; Ann did nothing
     appts.append(_appt("a3", today + 20))
     out = _run_team(db, prog, sheet, appts, [], later)
     assert pages == ["Ann"] and out["paused"] == ["Ann"]
@@ -425,7 +426,7 @@ def test_a_week_without_updates_pauses_the_person_and_alerts_once(setter, monkey
     _run_team(db, prog, sheet, appts, [], later + timedelta(minutes=5))
     assert pages == ["Ann"]                                            # one alert per pause
     row_a = _pad([r for r in sheet[RS.APPOINTMENTS][1:] if r[0] == "a1"][0])
-    row_a[16] = "Called, no answer"                                    # Ann is back
+    row_a[15] = "Called, no answer"                                    # Ann is back
     _run_team(db, prog, sheet, appts, [], later + timedelta(minutes=10))
     status = {r[0]: _c(r, 5) for r in sheet["Team"][1:]}
     assert status["Ann"] == "In the rotation"
@@ -664,3 +665,21 @@ def test_a_follow_up_for_an_entered_family_goes_to_whoever_entered_it(setter, sa
     _run_team(db, prog, sheet, [], fus, now)
     got = {r[0]: _c(r, 9) for r in sheet[RS.FOLLOW_UPS][1:]}
     assert got["FU-" + conv.id] == "Bob"            # not the rotation's next person
+
+
+# ── Owner, Nov 23 4:41 PM: "Confirmed With Family?" removed; columns found by header ─
+
+def test_team_columns_are_read_by_header_not_position():
+    sheet = _sheet()
+    assert "Confirmed With Family?" not in RS.STAFF_COLUMNS[RS.APPOINTMENTS]
+    # an old sheet that still has the column (or any extra column) reads right
+    sheet[RS.APPOINTMENTS][0] = list(RS.APPT_COLUMNS) + ["Assigned To", "Confirmed With Family?",
+                                                           "Remote Call Link / Details", "Outcome", "Team Notes"]
+    sheet[RS.APPOINTMENTS].append(["b1"] + [""] * 11 + ["Ann", "TRUE", "zoom.us/j/1", "Showed", "good visit"])
+    got = RS.read_staff(_Client(sheet), "sid", RS.APPOINTMENTS)["b1"]
+    assert (got["assigned"], got["link"], got["outcome"], got["notes"]) == ("Ann", "zoom.us/j/1", "Showed", "good visit")
+    # and the sheet without it
+    sheet[RS.APPOINTMENTS] = [list(RS.APPT_COLUMNS) + list(RS.STAFF_COLUMNS[RS.APPOINTMENTS]),
+                              ["b1"] + [""] * 11 + ["Ann", "zoom.us/j/1", "Showed", "good visit"]]
+    got = RS.read_staff(_Client(sheet), "sid", RS.APPOINTMENTS)["b1"]
+    assert (got["assigned"], got["link"], got["outcome"], got["notes"]) == ("Ann", "zoom.us/j/1", "Showed", "good visit")
