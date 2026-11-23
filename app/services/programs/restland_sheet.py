@@ -234,7 +234,10 @@ def _conv_row(db, conv, lead) -> List[Any]:
     else:
         why = _plain_why(conv.handoff_reason)
     status = ("Open" if state in OPEN_STATES else DONE_STATES.get(state, "In progress"))
-    fu_on = central_serial(conv.next_followup_at) if state == "waiting_future" and conv.next_followup_at else ""
+    # The date a follow-up is due: the family's own "later" date, or a date the
+    # team set on a needs-a-person follow-up (that one never texts the family).
+    fu_on = (central_serial(conv.next_followup_at)
+             if conv.next_followup_at and state in ("waiting_future", "human") else "")
     return ["FU-" + conv.id, central_serial(conv.created_at), safe(_name(lead)), _phone(lead.phone),
             safe(lead.email), safe(why[:300]), fu_on, safe(_last_family_words(db, lead.id)), status]
 

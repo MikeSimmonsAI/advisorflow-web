@@ -85,6 +85,92 @@ CARMELITA_UNTIL = datetime(2026, 11, 23, 19, 0)          # 1 PM Central, in UTC
 CARMELITA_330_KEY = "restland-carmelita-330pm-2026-11-23"
 CARMELITA_330_SLOT = datetime(2026, 11, 23, 15, 30)      # Central
 CARMELITA_330_UNTIL = datetime(2026, 11, 23, 19, 30)     # 1:30 PM Central, in UTC
+
+# Owner, Nov 23 4:55 PM: 19 emailed replies and call-center call-backs that
+# never reached the system (Restland's emails carry Mike's NSMG address as
+# Reply-To, so email replies land in his work inbox). Each one goes into the
+# app (the family's words, why they're on the list, automatic outreach
+# stopped, a note) and so onto the Follow-Ups tab. Plus Carmelita Alcala:
+# Neoso's "followup 12/7" becomes a dated follow-up for the team - nothing is
+# sent to her (a "needs a person" follow-up never texts the family).
+EMAILED_KEY = "restland-emailed-replies-2026-11-23"
+EMAILED_UNTIL = datetime(2026, 11, 26, 6, 0)
+_NOV30, _DEC7 = datetime(2026, 11, 30, 15, 0), datetime(2026, 12, 7, 15, 0)     # 9 AM Central
+# (lead id, state, why / window, follow-up date, what they said, channel, extra note)
+EMAILED = [
+    ("d41b343a-0769-45b2-a93c-9ec0c8c6b16c", "waiting_future", "after Thanksgiving", _NOV30,
+     "I'll get in touch after Thanksgiving.", "email", None),
+    ("02004df2-af60-4f88-b7f6-6d59a195e8a5", "waiting_future", "feeling unwell (colds / flu) - next month", _DEC7,
+     "We are feeling well - colds maybe the flu. Next month might be better.", "email", None),
+    ("13a12d5d-1ccd-49c0-a008-495a10a74e91", "callback_requested", "as soon as possible - before the date in the text",
+     None, "(Call center) Replied to the text and hadn't heard back; wants to talk before tomorrow. Call 214-680-1065.",
+     "call", None),
+    ("fa2ddb87-b765-40c8-8967-e7af37c0014c", "callback_requested", "wants more info on the Permission to Access forms",
+     None, "(Call center) Got the text; wants more info on the Permission to Access forms. Call 972-363-4361.",
+     "call", None),
+    ("f31e2f7b-48c1-4a46-bf4d-a022237be1ba", "callback_requested", "will call back to speak with Mike", None,
+     "(Call center) Didn't say what he needs; asked for Michael. Call 469-810-1630.", "call", None),
+    ("01c0f7a3-d06e-4860-9442-0b71f110df20", "human", "Asked what the file items are about - explain and set a time",
+     None, "Hello Mike. What kind of things for the file are you talking about?", "email", None),
+    ("483cfcdf-15ff-4e4b-ab20-c4d64a03a472", "human", "Doesn't live in Dallas - explain, offer a call if he asks",
+     None, "I do not live in Dallas. Let me know what this is about.", "email", None),
+    ("cb375146-276e-4076-9d00-49744b3438df", "human",
+     "Wants Sunday Dec 13 at 2 PM (or 4) with her mom - Sundays are closed; find another time", None,
+     "Booking page only went to Dec 5. Can come Sunday Dec 13, 2 o'clock better (or 4). Lives 2 hours away, works "
+     "Saturdays and 3 jobs. Call or text after 10 PM any night. Mentions previous problems with purchases.", "email",
+     None),
+    ("b152343e-4f35-43c9-8f9b-bb27ce8714c5", "human", "Asked for Dec 1 or 2 in the afternoon - book it; asks if his wife "
+     "needs to be there", None, "Could not make your suggested times. How about December 1 or 2 in the afternoon? "
+     "Does my wife need to be present for this meeting?", "email", None),
+    ("7f9559b0-264a-44e9-a90d-860ba228ff97", "human",
+     "Annay (daughter-in-law) asks if there's an issue with the records/burial and what the form is - explain", None,
+     "Is there an issue with our existing cemetery records or my father-in-law's burial arrangements? Please explain "
+     "the Permission to Access form and whether the appointment is mandatory.", "email", None),
+    ("c3effc9e-45c6-49d5-9fe1-27a7c907434f", "human",
+     "Betty Miller passed away over 5 years ago - talk to her daughter Cazzie Husbands (executor)", None,
+     "(Son Curtis W. Miller) My mother died and was buried in the family plot over 5 years ago. My sister Cazzie "
+     "Husbands was the executor - cmhusbands65@gmail.com, (903) 216-0433. Spaces still available in the family plot.",
+     "email", "Betty Miller has passed away (per her son Curtis). Contact: Cazzie Husbands (executor), "
+     "cmhusbands65@gmail.com, (903) 216-0433."),
+    ("d4a416b9-1020-4629-85e9-cb28fd588a05", "human", "Thinks she already did everything - check her file", None,
+     "I think I already did everything.", "email", None),
+    ("8a978d02-3161-40ed-8373-c2a14c0ed196", "human",
+     "Says it's handled - going to the National Cemetery with her husband; all paid", None,
+     "Have dealt with this in the past. I will be going to the National Cemetery with my husband. All is paid for "
+     "and fine with the girls.", "email", None),
+    ("8104deac-4c48-417e-a102-68e85c002a48", "human",
+     "Lives in Virginia now; her son Dax and daughter Cecille Deason will handle arrangements", None,
+     "I do not live in Dallas anymore, I live in Virginia now, but yes, I will be using my space in Dallas. My son "
+     "Dax Deason and daughter Cecille Deason will communicate for arrangements. They have all my cemetery files.",
+     "email", "New contact info she gave: phone 915-920-6538; 319 North First Street Apt 203, Bridgewater, VA 22812."),
+    ("57e020ca-7b84-4ccc-8a02-cf15e8c87a73", "human",
+     "Met with Deidra Cunningham on July 1 - says this was covered; check with Deidra", None,
+     "On July 1 I met at Restland with Deidra Cunningham and I am sure we covered the items you list. Please discuss "
+     "with her or check her files.", "email", None),
+    ("c28238a1-0870-42a6-b53c-4dae95a8a6b7", "human",
+     "No time to come in; wants it sent to him to decide; not interested in buying another site", None,
+     "I don't have time to stop by your office. We went through this last year and your guy wanted to sell me another "
+     "site, which I'm not interested in. Send me whatever you're trying to do and I'll decide. 469 325 8839",
+     "email", "Phone he gave: 469-325-8839."),
+    ("cd06936b-bad5-4e63-92a0-68596f6119bf", "human",
+     "Already done with Leslie Castillo on Nov 9 (also contacted by Alanna Cherry) - confirm and close", None,
+     "I already took care of the business with Leslie Castillo on Monday, November 9. Alanna Cherry asked too. Please "
+     "report to your group that the project is complete and no one else needs to address it.", "email", None),
+]
+EMAILED_NOTES = [   # already in the system - the email / call adds to their file
+    ("1c295bab-6345-4d72-9335-b6f841113b53", "(Call center, Nov 23 2:04 PM) Barbara Thompson called back - you had "
+     "contacted her. Call her at 972-768-9097."),
+    ("ce5f284b-d206-406d-bd9a-2801e2aac6b7", "(Call center, Nov 21) Daughter Adrianna Rojas asked for a call about her "
+     "mother's paperwork / PN arrangements: 214-850-4431."),
+]
+# Owner, Nov 23 4:59 PM ("the emails aren't being sent back into the system"):
+# family replies go to the mailbox the system reads, not Mike's NSMG inbox.
+REPLY_TO_SYSTEM = "support@evosyspro.live"
+# Colleen Crawford emailed 4:56 PM: "1pm WEDNESDAY...by phone. I am in Indiana. 765 327 1488"
+COLLEEN = ("fa0cd5b6-d595-4c41-9644-f32aad0b7f74", datetime(2026, 11, 25, 13, 0), "17653271488",
+           "1pm WEDNESDAY...by phone. I am in Indiana. 765 327 1488")
+CARMELITA_FU = ("4f7ef8fe-5007-4ccb-aadb-7957154eec00", _DEC7,
+                "Team follow-up Mon Dec 7 (Neoso Walker's note after her visit)")
 # Owner, Nov 22 8:18 PM: these four "after the holidays" families are followed
 # up the first Monday after New Year's - Mon Jan 4 2027, 9 AM Central.
 AFTER_NEW_YEAR = datetime(2027, 1, 4, 15, 0)
@@ -296,6 +382,102 @@ def restland_jan4_and_remote_on_request(db: Session, prog, now: datetime) -> Dic
     run.status, run.finished_at, run.summary_json = "applied", datetime.utcnow(), json.dumps(summary)
     db.commit()
     return summary
+
+
+def restland_emailed_replies(db: Session, prog, now: datetime) -> Dict:
+    from app.models.models import Lead
+    from app.models.work_models import LeadNote
+    from app.services import cadence_service as CS
+    from app.services.programs import ai_setter
+    org_id = prog.organization_id
+    run, item = _open_run(db, org_id, EMAILED_KEY)
+    out: Dict = {"added": 0, "noted": 0, "missing": []}
+
+    def note(lead_id, body):
+        db.add(LeadNote(organization_id=org_id, lead_id=lead_id, body=body[:4000], kind="internal"))
+
+    for lead_id, state, why, when, said, channel, extra in EMAILED:
+        lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == org_id).first()
+        if lead is None:
+            out["missing"].append(lead_id)
+            continue
+        conv = ai_setter.conversation_for(db, lead)
+        before = {"state": conv.state, "handoff_reason": conv.handoff_reason, "callback_window": conv.callback_window,
+                  "followup_reason": conv.followup_reason, "next_followup_at": conv.next_followup_at,
+                  "lead_status": lead.status}
+        ai_setter._turn(db, conv, "family", said, action="received",
+                        reason="%s reply that reached Mike's inbox, entered Nov 23" % channel)
+        conv.state = state
+        if state == "waiting_future":
+            conv.followup_reason, conv.next_followup_at, conv.followups_sent = why, when, 0
+        elif state == "callback_requested":
+            conv.callback_window, conv.next_followup_at = why, None
+        else:
+            conv.handoff_reason, conv.next_followup_at = why[:250], when
+        conv.last_family_at = now
+        if lead.status in ("new", "sent"):
+            lead.status = "replied"
+        CS.stop_cadence_for_lead(db, lead.id, "stopped_replied")
+        note(lead.id, "Owner, Nov 23: their %s reply reached Mike's work inbox, not the system - entered by hand. "
+             "They said: %s%s" % (channel, said, (" | %s" % extra) if extra else ""))
+        item("program_conversation", conv.id, "emailed_reply", before,
+             {"state": state, "why": why, "when": when}, "owner Nov 23: emailed reply entered")
+        out["added"] += 1
+    for lead_id, body in EMAILED_NOTES:
+        if db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == org_id).first() is not None:
+            note(lead_id, body)
+            out["noted"] += 1
+    lead = db.query(Lead).filter(Lead.id == CARMELITA_FU[0], Lead.organization_id == org_id).first()
+    if lead is not None:
+        conv = ai_setter.conversation_for(db, lead)
+        before = {"state": conv.state, "handoff_reason": conv.handoff_reason, "next_followup_at": conv.next_followup_at}
+        conv.state, conv.handoff_reason, conv.next_followup_at = "human", CARMELITA_FU[2], CARMELITA_FU[1]
+        note(lead.id, "Owner, Nov 23: on the Follow-Ups list for Mon Dec 7 (Neoso Walker) - nothing is sent to her.")
+        item("program_conversation", conv.id, "team_followup", before,
+             {"state": "human", "next_followup_at": CARMELITA_FU[1]}, "owner Nov 23: Neoso's followup 12/7")
+        out["carmelita"] = "Dec 7"
+    # Replies come back into the system from now on.
+    from app.models.models import Organization
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if org is not None and (org.reply_to_email or "") != REPLY_TO_SYSTEM:
+        item("organization", org.id, "reply_to", {"reply_to_email": org.reply_to_email},
+             {"reply_to_email": REPLY_TO_SYSTEM}, "owner Nov 23: email replies must reach the system")
+        out["reply_to"] = {"before": org.reply_to_email, "after": REPLY_TO_SYSTEM}
+        org.reply_to_email = REPLY_TO_SYSTEM
+    db.commit()
+    # Colleen Crawford: 1 PM Wednesday by phone, the number she gave.
+    lead = db.query(Lead).filter(Lead.id == COLLEEN[0], Lead.organization_id == org_id).first()
+    if lead is not None:
+        from app.models.models import BookingLink
+        from app.services.programs import appointments as A
+        conv = ai_setter.conversation_for(db, lead)
+        ai_setter._turn(db, conv, "family", COLLEEN[3], action="received",
+                        reason="email reply that reached Mike's inbox, entered Nov 23")
+        lead.callback_phone, lead.callback_phone_source, lead.callback_phone_at = COLLEEN[2], "email:reply", now
+        CS.stop_cadence_for_lead(db, lead.id, "stopped_replied")
+        has = db.query(BookingLink).filter(BookingLink.lead_id == lead.id,
+                                           BookingLink.status.in_(("booked", "confirmed"))).count()
+        res = {"status": "already_booked"} if has else A.book(db, prog, lead, COLLEEN[1], A.PHONE)
+        if res.get("ok") and not res.get("simulated"):
+            conv.state, conv.booked_time = "booked", COLLEEN[1]
+            if res.get("booking_id"):
+                conv.booking_link_id = res.get("booking_id")
+            try:
+                A.notify_team_booked(db, prog, lead, COLLEEN[1], A.PHONE)
+            except Exception:                            # noqa: BLE001
+                log.exception("Colleen booked alert failed")
+            note(lead.id, "Owner, Nov 23: emailed '%s' - booked a phone call Wed Nov 25 at 1:00 PM. "
+                 "Call her at 765-327-1488 (she's in Indiana)." % COLLEEN[3])
+        else:
+            conv.state = "human"
+            conv.handoff_reason = ("Asked for a phone call Wed 1 PM (in Indiana, 765-327-1488) - not booked: %s"
+                                   % (res.get("reason") or res.get("status")))[:250]
+            note(lead.id, "Owner, Nov 23: emailed '%s' - could not book automatically (%s); a person sets it."
+                 % (COLLEEN[3], res.get("reason") or res.get("status")))
+        out["colleen"] = res.get("status")
+    run.status, run.finished_at, run.summary_json = "applied", datetime.utcnow(), json.dumps(out, default=str)
+    db.commit()
+    return out
 
 
 def restland_book_carmelita(db: Session, prog, now: datetime, key: str = CARMELITA_KEY,
@@ -511,6 +693,8 @@ def apply_pending(db: Session, now: Optional[datetime] = None) -> Dict:
                     res["sheet_test_undo"] = restland_sheet_test_undo(db, prog, now)
                 if now < CARMELITA_UNTIL and _ledger(db, prog.organization_id, CARMELITA_KEY) is None:
                     res["carmelita_3pm"] = restland_book_carmelita(db, prog, now)
+                if now < EMAILED_UNTIL and _ledger(db, prog.organization_id, EMAILED_KEY) is None:
+                    res["emailed_replies"] = restland_emailed_replies(db, prog, now)
                 if now < CARMELITA_330_UNTIL and _ledger(db, prog.organization_id, CARMELITA_330_KEY) is None:
                     res["carmelita_330pm"] = restland_book_carmelita(db, prog, now, CARMELITA_330_KEY,
                                                                      CARMELITA_330_SLOT)
