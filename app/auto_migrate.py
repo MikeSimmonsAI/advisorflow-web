@@ -1694,6 +1694,11 @@ COLUMNS_TO_ADD = [
     ("lead_intel_prospects", "email_verified", "BOOLEAN"),
     ("lead_intel_prospects", "evidence_json", "TEXT"),
     ("lead_intel_prospects", "raw_json", "TEXT"),
+    # #452 Harvey viability score + attack group on the master pool
+    ("lead_intel_prospects", "viability_score", "INTEGER"),
+    ("lead_intel_prospects", "viability_group", "VARCHAR"),
+    ("lead_intel_prospects", "viability_json", "TEXT"),
+    ("lead_intel_prospects", "viability_at", "TIMESTAMP"),
     # Divine Shine acquisition pilot P3 (#452): the client's postal address for the email footer
     ("acquisition_profiles", "mailing_address", "TEXT"),
     ("acquisition_profiles", "booking_user_id", "VARCHAR"),

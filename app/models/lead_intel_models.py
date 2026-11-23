@@ -107,6 +107,13 @@ class LeadIntelProspect(Base):
     evidence_json = Column(Text, nullable=True)                    # qualification evidence / notes / confidence
     raw_json = Column(Text, nullable=True)                         # every original column, mapped or not
 
+    # Harvey viability score + attack group (#452). Its own columns: never
+    # touches stage, bucket or the older qualification score above.
+    viability_score = Column(Integer, nullable=True, index=True)   # 0-100
+    viability_group = Column(String(1), nullable=True, index=True) # A | B | C | D
+    viability_json = Column(Text, nullable=True)                   # parts + reasons
+    viability_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, server_default=func.now(), index=True)
 
     __table_args__ = (
