@@ -1305,7 +1305,7 @@ def _deliver(db, prog, lead, conv, resp, text, action, mode, *, now) -> ProgramC
         from app.services.programs import outreach_slots as _os
         if _os.closed_for_org(db, lead.organization_id, now):
             return _turn(db, conv, "ai", text, action=action, delivery="held",
-                         response_id=resp.id, reason="closed day - nothing is sent on Sundays")
+                         response_id=resp.id, reason="closed day - nothing is sent today (Sunday or a no-contact day)")
         # AUTO, and this conversation is the AI's: answer the email in its own
         # thread, to the person who wrote it, from the mailbox it came to.
         from app.services.programs import email_reply

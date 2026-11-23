@@ -306,8 +306,8 @@ def check(lead, now_utc: Optional[datetime] = None, program_days: bool = True) -
                     "basis": resolved["basis"], "zones": zones, "local": local}
     if program_days and _program_closed(lead, now_utc):
         return {"permitted": False, "code": OUTSIDE_WINDOW,
-                "reason": ("This program sends nothing on Sundays (owner, Nov 22); "
-                           "it waits for the next open day."),
+                "reason": ("Nothing is sent today (a program's closed day such as Sunday, "
+                           "or a no-contact day such as Thanksgiving); it waits for the next open day."),
                 "basis": resolved["basis"], "zones": zones, "local": local}
     outside = [name for name, dt in pairs
                if not (LOCAL_FLOOR <= dt.time() <= LOCAL_CEILING)]

@@ -238,6 +238,9 @@ def day_slots(db: Session, advisor, target_date: date_cls, policy: Dict, *, toda
         return dict(out, reason="Date is more than %d days out" % HORIZON_DAYS)
     if str(target_date.weekday()) not in policy["days"]:
         return dict(out, reason="No appointments on this day")
+    from app.services import no_contact_days as _ncd
+    if _ncd.quiet_on(target_date):
+        return dict(out, reason="Closed that day (holiday)")
 
     dur, gap = policy["duration"], policy["gap_after"]
     candidates = [datetime(target_date.year, target_date.month, target_date.day, h, m)

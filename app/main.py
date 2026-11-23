@@ -1855,6 +1855,9 @@ async def _sales_reminder_loop():
                 def _one_pass():
                     # Off the event loop — see `_off_loop`. Delivery here is
                     # SMTP, which is exactly the kind of call that can stall.
+                    from app.services import no_contact_days as _ncd
+                    if _ncd.quiet_now():
+                        return {"sent": 0, "skipped": "no-contact day"}   # Thanksgiving: nothing goes out
                     db = SessionLocal()
                     try:
                         return reminders.process_due(db)
@@ -2183,6 +2186,9 @@ async def _evosys_sales_outreach_loop():
                 def _one_pass():
                     from app.services.evosys_sales import outreach as _O
                     from app.services.evosys_sales import booking_page as _BP
+                    from app.services import no_contact_days as _ncd
+                    if _ncd.quiet_now():
+                        return {"skipped": "no-contact day"}   # Thanksgiving: no outreach, no reminders
                     db = SessionLocal()
                     try:
                         out = _O.run_pass(db) or {}
