@@ -1100,6 +1100,7 @@ def ensure_person_tabs(db: Session, prog, client, sid: str) -> bool:
     return True
 
 
+_PT_STAMP_COLS = [len(PT_APPT) - 1, PT_FU_COL0 - 1 + len(PT_FU) - 1]
 _PT_TEXT_COLS = [i for i, (k, _) in enumerate(PT_APPT) if k not in ("date", "time", "updated")] + \
                 [PT_FU_COL0 - 1 + i for i, (k, _) in enumerate(PT_FU) if k not in ("due", "updated", "done")]
 
@@ -1107,7 +1108,11 @@ _PT_TEXT_COLS = [i for i, (k, _) in enumerate(PT_APPT) if k not in ("date", "tim
 def _same_row(was: List[str], shown: List[str]) -> bool:
     """Equal in every text field (dates/times are written as numbers and read
     back formatted, so they're compared through the row id instead)."""
-    return all((was[i] if i < len(was) else "") == (shown[i] if i < len(shown) else "") for i in _PT_TEXT_COLS)
+    if not all((was[i] if i < len(was) else "") == (shown[i] if i < len(shown) else "") for i in _PT_TEXT_COLS):
+        return False
+    # a time stamp that should be blank (or now has a value) is a difference too
+    return all(bool(was[i] if i < len(was) else "") == bool(shown[i] if i < len(shown) else "")
+               for i in _PT_STAMP_COLS)
 
 
 def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any]]],
