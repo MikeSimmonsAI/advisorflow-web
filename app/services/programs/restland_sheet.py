@@ -526,7 +526,7 @@ def known_ids(client, sid: str, tab: str) -> List[str]:
 
 PAUSE_AFTER = timedelta(days=7)
 PLACEHOLDER = re.compile(r"^\s*Person\s+\d+\s*$", re.I)
-TEAM_RANGE = "'Team'!A2:F30"
+TEAM_RANGE = "'Team'!A2:E30"
 APPT_KEYS = ("assigned", "confirmed", "link", "outcome", "notes")
 FU_KEYS = ("assigned", "done", "notes")
 KEYS = {APPOINTMENTS: APPT_KEYS, FOLLOW_UPS: FU_KEYS}
@@ -768,8 +768,12 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
         for p in team:
             col[p["row"] - 1] = [status_lines.get(p["name"], "")]
         team_status = col
-    client.spreadsheets().values().update(spreadsheetId=sid, range="'Team'!F1:F%d" % len(team_status),
-                                          valueInputOption="RAW", body={"values": team_status}).execute()
+    try:
+        client.spreadsheets().values().update(spreadsheetId=sid, range="'Team'!F1:F%d" % len(team_status),
+                                              valueInputOption="RAW", body={"values": team_status}).execute()
+    except Exception as exc:                             # noqa: BLE001 - the Status column is a courtesy
+        from app.services.volt.sheets_export import categorize
+        log.warning("handoff sheet team status not written: %s", categorize(exc))
     cfg["paused"] = paused
     _save_cfg(prog, cfg)
     db.commit()
@@ -812,6 +816,7 @@ def run(db: Session, now: Optional[datetime] = None, force: bool = False) -> Dic
         try:
             out[prog.organization_id] = sync(db, prog)
         except Exception as exc:                         # noqa: BLE001 - category only, never cell text
+            db.rollback()                                # nothing half-done carries into the next job
             out[prog.organization_id] = {"error": X.categorize(exc)}
             log.warning("handoff sheet sync failed for %s: %s", prog.organization_id, X.categorize(exc))
     return out
