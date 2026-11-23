@@ -165,3 +165,35 @@ def test_handoff_change_restores_later_follow_ups_and_adds_remote_calls(rl, monk
     profs = db.query(LocationProfile).filter_by(organization_id=org.id).all()
     assert profs and all("phone" in identity.appointment_ways(p) for p in profs)
     assert OC.apply_pending(db, now=utc(2026, 11, 22, 19, 5)) == {}                          # once
+
+
+def test_a_thumbs_up_after_agreeing_keeps_the_later_follow_up(rl, monkeypatch):
+    from app.models.program_models import ProgramConversation, ProgramConversationTurn
+    from app.models.reset_models import WorkspaceResetRun
+    db, org = rl["db"], rl["org"]
+    _launch(rl)
+    lead = _dallas(rl)
+    c = ProgramConversation(organization_id=org.id, lead_id=lead.id, state="ai_active",
+                            next_followup_at=datetime(2027, 1, 25, 15, 0))
+    db.add(c)
+    db.flush()
+    t0 = datetime(2026, 11, 18, 3, 17)
+    for i, (role, action, text) in enumerate((("family", None, "Not until late January"),
+                                              ("ai", "follow_up_later", None), ("family", None, "\U0001F44D"))):
+        db.add(ProgramConversationTurn(conversation_id=c.id, organization_id=org.id, lead_id=lead.id, role=role,
+                                       action=action, text=text, created_at=t0 + timedelta(minutes=i)))
+    db.commit()
+    # the first restore already ran
+    db.add(WorkspaceResetRun(organization_id=org.id, run_key=OC.RESTLAND_HANDOFF_KEY, mode=OC.MODE, status="applied"))
+    db.commit()
+    monkeypatch.setattr(OC, "APPLY_UNTIL", datetime(2026, 11, 1))
+    monkeypatch.setattr(OC, "_ledger", lambda db_, org_id, key: None if key == OC.RESTLAND_HANDOFF_2_KEY else True)
+    out = OC.apply_pending(db, now=utc(2026, 11, 23, 2, 0))
+    assert len(out[org.id]["handoff_acks"]["follow_ups_restored"]) == 1
+    db.refresh(c)
+    assert c.state == "waiting_future" and c.next_followup_at == datetime(2027, 1, 25, 15, 0)
+
+
+def test_a_real_reply_after_agreeing_is_left_alone():
+    assert OC._ACK.match("\U0001F44D") and OC._ACK.match("Thanks!")
+    assert not OC._ACK.match("Actually call me Monday")
