@@ -63,6 +63,44 @@ _last_run: Dict[str, datetime] = {}
 
 # ── settings ────────────────────────────────────────────────────────────────
 
+# The Google login the server writes with. Owner, Nov 22: the board must not
+# run on the VOLT login - EVOSYS_SHEETS_SERVICE_ACCOUNT_JSON (an EvoSys
+# service account) is used when it is set; the VOLT one only until then.
+CRED_ENV, FALLBACK_ENV = "EVOSYS_SHEETS_SERVICE_ACCOUNT_JSON", "VOLT_SHEETS_SERVICE_ACCOUNT_JSON"
+
+
+def _cred_env() -> str:
+    import os
+    return CRED_ENV if (os.getenv(CRED_ENV) or "").strip() else FALLBACK_ENV
+
+
+def sync_account_email() -> Optional[str]:
+    """Who the sheet must be shared with (not a secret)."""
+    import os
+    try:
+        return json.loads(os.getenv(_cred_env()) or "{}").get("client_email")
+    except ValueError:
+        return None
+
+
+def api():
+    """A Sheets client on the EvoSys login (falls back to the VOLT one)."""
+    import os
+    from app.services.volt.sheets_export import SCOPES, SheetsError
+    raw = (os.getenv(_cred_env()) or "").strip()
+    if not raw:
+        raise SheetsError("not_configured")
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    try:
+        creds = service_account.Credentials.from_service_account_info(json.loads(raw), scopes=SCOPES)
+    except Exception:                                  # noqa: BLE001 - never echo the credential
+        raise SheetsError("credential") from None
+    import google_auth_httplib2
+    import httplib2
+    http = google_auth_httplib2.AuthorizedHttp(creds, http=httplib2.Http(timeout=30))
+    return build("sheets", "v4", http=http, cache_discovery=False)
+
 def sheet_id(prog) -> Optional[str]:
     try:
         cfg = json.loads(getattr(prog, "booking_policy_json", None) or "{}").get("handoff_sheet") or {}
@@ -480,7 +518,7 @@ def sync(db: Session, prog, client=None) -> Dict[str, Any]:
     sid = sheet_id(prog)
     if not sid:
         return {"skipped": "no handoff sheet"}
-    client = client or X.api()
+    client = client or api()
     org = prog.organization_id
     try:
         ensure_layout(db, prog, client, sid)
