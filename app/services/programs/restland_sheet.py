@@ -48,7 +48,8 @@ COLUMNS = {APPOINTMENTS: APPT_COLUMNS, FOLLOW_UPS: FU_COLUMNS}
 # The team's own columns, to the right of the system's (written once, as the
 # header, by the sheet's setup - never by the sync).
 STAFF_COLUMNS = {
-    APPOINTMENTS: ("Assigned To", "Confirmed With Family?", "Remote Call Link / Details", "Outcome", "Team Notes"),
+    # Owner, Nov 23 4:41 PM: no "Confirmed With Family?" column.
+    APPOINTMENTS: ("Assigned To", "Remote Call Link / Details", "Outcome", "Team Notes"),
     FOLLOW_UPS: ("Assigned To", "Done?", "Team Notes", "Appointment Date", "Appointment Time", "How",
                  "Home Address"),
 }
@@ -406,21 +407,21 @@ def layout_requests() -> List[Dict]:
     for sid, color in tab_color.items():
         r.append({"updateSheetProperties": {"properties": {"sheetId": sid, "tabColorStyle": {"rgbColor": _rgb(color)}},
                                             "fields": "tabColorStyle"}})
-    # Appointments: system A-L, the team's M-Q
-    r += [_fmt(A, "A2:Q2000", size=10, fg=TEXT, valign="TOP"),
+    # Appointments: system A-L, the team's M-P (Assigned To, Remote Call Link, Outcome, Team Notes)
+    r += [_fmt(A, "A2:P2000", size=10, fg=TEXT, valign="TOP"),
           _fmt(A, "A1:L1", bold=True, fg="#FFFFFF", bg=GREEN, valign="MIDDLE", wrap=True),
-          _fmt(A, "M1:Q1", bold=True, fg="#FFFFFF", bg=BRASS, valign="MIDDLE", wrap=True),
-          _fmt(A, "M2:Q2000", bg=GOLD), _fmt(A, "B2:B2000", number="m/d/yyyy h:mm am/pm"),
+          _fmt(A, "M1:P1", bold=True, fg="#FFFFFF", bg=BRASS, valign="MIDDLE", wrap=True),
+          _fmt(A, "M2:P2000", bg=GOLD), _fmt(A, "B2:B2000", number="m/d/yyyy h:mm am/pm"),
           _fmt(A, "C2:C2000", number="ddd, mmm d, yyyy"), _fmt(A, "D2:D2000", number="h:mm am/pm"),
-          _fmt(A, "L2:L2000", wrap=True), _fmt(A, "O2:O2000", wrap=True), _fmt(A, "Q2:Q2000", wrap=True),
-          _borders(A, "A1:Q2000"), _height(A, 1, 40),
-          _team_list(A, "M2:M2000"), _checkbox(A, "N2:N2000"),
-          _list(A, "P2:P2000", ["Showed", "No-Show", "Rescheduled", "Cancelled"]),
-          _when(A, "A2:Q2000", '=AND($C2<>"",$C2=TODAY())', "#DCEFE3"),
-          _when(A, "A2:Q2000", '=OR(LEFT($K2,6)="Cancel",$P2="Cancelled")', "#EEEEEE", GREY),
+          _fmt(A, "L2:L2000", wrap=True), _fmt(A, "N2:N2000", wrap=True), _fmt(A, "P2:P2000", wrap=True),
+          _borders(A, "A1:P2000"), _height(A, 1, 40),
+          _team_list(A, "M2:M2000"),
+          _list(A, "O2:O2000", ["Showed", "No-Show", "Rescheduled", "Cancelled"]),
+          _when(A, "A2:P2000", '=AND($C2<>"",$C2=TODAY())', "#DCEFE3"),
+          _when(A, "A2:P2000", '=OR(LEFT($K2,6)="Cancel",$O2="Cancelled")', "#EEEEEE", GREY),
           _when(A, "M2:M2000", '=AND($A2<>"",$M2="",$C2>=TODAY())', "#FBE3DF")]
     r += _widths(A, {"A": 90, "B": 135, "C": 130, "D": 80, "E": 85, "F": 170, "G": 115, "H": 190, "I": 135,
-                     "J": 200, "K": 120, "L": 260, "M": 140, "N": 110, "O": 200, "P": 110, "Q": 240})
+                     "J": 200, "K": 120, "L": 260, "M": 140, "N": 200, "O": 110, "P": 240})
     # Follow-Ups: system A-I, the team's J-P, the booking result Q, the team's
     # follow-up log R-S
     r += [_fmt(F, "A2:S2000", size=10, fg=TEXT, valign="TOP"),
@@ -586,7 +587,7 @@ def known_ids(client, sid: str, tab: str) -> List[str]:
 PAUSE_AFTER = timedelta(days=7)
 PLACEHOLDER = re.compile(r"^\s*Person\s+\d+\s*$", re.I)
 TEAM_RANGE = "'Team'!A2:E30"
-APPT_KEYS = ("assigned", "confirmed", "link", "outcome", "notes")
+APPT_KEYS = ("assigned", "link", "outcome", "notes")
 FU_KEYS = ("assigned", "done", "notes", "appt_date", "appt_time", "appt_how", "appt_address",
            "fu_date", "fu_result")
 FU_WORK_KEYS = ("fu_date", "fu_result")
@@ -599,25 +600,25 @@ def _truthy(v) -> bool:
 
 
 def read_staff(client, sid: str, tab: str) -> Dict[str, Dict[str, Any]]:
-    """{row id: {"row": n, keys...}} - the team's columns as they are now."""
+    """{row id: {"row": n, keys...}} - the team's columns as they are now,
+    found by their HEADER (not their position), so a column the owner adds,
+    moves or deletes never makes one column read as another."""
     from app.services.volt.sheets_export import column
-    first = len(COLUMNS[tab])
-    width = first + len(STAFF_COLUMNS[tab])
-    last = FU_WORK_FIRST + len(FU_WORK_COLUMNS) if tab == FOLLOW_UPS else width
+    labels = list(STAFF_COLUMNS[tab]) + (list(FU_WORK_COLUMNS) if tab == FOLLOW_UPS else [])
+    keys = list(KEYS[tab])
     got = client.spreadsheets().values().get(
-        spreadsheetId=sid, range=_rng(tab, "A2:%s%d" % (column(last), MAX_ROWS + 1))).execute()
+        spreadsheetId=sid, range=_rng(tab, "A1:%s%d" % (column(40), MAX_ROWS + 1))).execute()
+    values = got.get("values") or []
+    header = [str(c).strip() for c in (values[0] if values else [])]
+    where = {k: (header.index(lbl) if lbl in header else None) for k, lbl in zip(keys, labels)}
     out: Dict[str, Dict[str, Any]] = {}
-    for i, cells in enumerate(got.get("values") or []):
+    for i, cells in enumerate(values[1:]):
         rid = str(cells[0]).strip() if cells else ""
         if not rid or rid in out:
             continue
-        cells = list(cells) + [""] * (last - len(cells))
-        vals = [str(c).strip() for c in cells[first:width]]
-        if tab == FOLLOW_UPS:
-            vals += [str(c).strip() for c in cells[FU_WORK_FIRST:last]]
-        out[rid] = dict(zip(KEYS[tab], vals), row=i + 2)
+        vals = {k: (str(cells[j]).strip() if j is not None and j < len(cells) else "") for k, j in where.items()}
+        out[rid] = dict(vals, row=i + 2)
     return out
-
 
 def read_team(client, sid: str) -> List[Dict[str, Any]]:
     """The people on the Team tab, in order: name, active (the Active? box),
@@ -734,10 +735,6 @@ def _apply(db, prog, tab: str, rid: str, lead_id: Optional[str], old: Dict, new:
         said.append("assigned to %s" % new["assigned"])
     if tab == APPOINTMENTS:
         b = db.query(BookingLink).filter(BookingLink.id == rid).first()
-        if "confirmed" in changed and _truthy(new.get("confirmed")):
-            said.append("confirmed with the family")
-            if b is not None and b.confirmed_at is None:
-                b.confirmed_at = now
         if "outcome" in changed and new.get("outcome"):
             out = new["outcome"]
             said.append("outcome: %s" % out)
