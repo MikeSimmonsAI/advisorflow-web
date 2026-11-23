@@ -944,6 +944,14 @@ def copy_to_main(client, sid: str, staff, copy) -> int:
     return len(data)
 
 
+def _team_touched(rec, editable) -> bool:
+    """Has the team filled in anything on this row (not just an assignment)?"""
+    if rec is None or not rec.staff_changed_at:
+        return False
+    snap = json.loads(rec.staff_json or "{}")
+    return any((snap.get(k) or "") not in ("", "FALSE") for k in editable)
+
+
 def person_tabs_write(client, sid: str, tabs: List[Dict[str, Any]], rows: Dict[str, List[List[Any]]],
                       staff, known, grids: Dict[str, List[List[Any]]], today_serial: float) -> int:
     """Rewrite each person tab from the main tabs - only the rows that differ."""
@@ -967,7 +975,7 @@ def person_tabs_write(client, sid: str, tabs: List[Dict[str, Any]], rows: Dict[s
             appts.append([rid, r[2], r[3], r[5], r[6], r[8], r[9], cur.get("outcome") or r[10],
                           cur.get("link", ""), cur.get("outcome", ""), cur.get("sold", ""), cur.get("sold_what", ""),
                           cur.get("notes", ""),
-                          central_serial(rec.staff_changed_at) if rec is not None and rec.staff_changed_at else ""])
+                          central_serial(rec.staff_changed_at) if _team_touched(rec, PT_APPT_EDIT) else ""])
         appts.sort(key=lambda x: (x[1] if isinstance(x[1], (int, float)) else 1e9,
                                   x[2] if isinstance(x[2], (int, float)) else 0))
         fus = []
@@ -978,7 +986,7 @@ def person_tabs_write(client, sid: str, tabs: List[Dict[str, Any]], rows: Dict[s
             fus.append([rid, r[6], r[2], r[3], r[5], r[7], False, cur.get("fu_date", ""), cur.get("fu_result", ""),
                         cur.get("appt_date", ""), cur.get("appt_time", ""), cur.get("appt_how", ""),
                         cur.get("appt_address", ""), cur.get("notes", ""),
-                        central_serial(rec.staff_changed_at) if rec is not None and rec.staff_changed_at else ""])
+                        central_serial(rec.staff_changed_at) if _team_touched(rec, PT_FU_EDIT) else ""])
         fus.sort(key=lambda x: (x[1] if isinstance(x[1], (int, float)) and x[1] else 0, str(x[0])))
         n = max(len(appts), len(fus))
         old = grids.get(t["title"]) or []
@@ -1316,6 +1324,19 @@ def _existing(db, org_id: str, phone: Optional[str], email: Optional[str]):
     return None
 
 
+def _title_of(client, sid: str, sheet_id: int, default: str) -> str:
+    """A tab's current title, found by its fixed id - the owner may rename it
+    (Nov 23: "New Families" became "6 Block")."""
+    try:
+        meta = client.spreadsheets().get(spreadsheetId=sid, fields="sheets.properties").execute()
+        for s_ in meta.get("sheets") or []:
+            if s_["properties"].get("sheetId") == sheet_id:
+                return s_["properties"].get("title") or default
+    except Exception:                                    # noqa: BLE001
+        pass
+    return default
+
+
 def new_families_pass(db: Session, prog, client, sid: str, team_names: List[str],
                       now: Optional[datetime] = None) -> Dict[str, Any]:
     """Read the New Families tab; add each complete new row as a tagged
@@ -1328,7 +1349,8 @@ def new_families_pass(db: Session, prog, client, sid: str, team_names: List[str]
     now = now or datetime.utcnow()
     org = prog.organization_id
     width = len(NF_COLUMNS)
-    got = client.spreadsheets().values().get(spreadsheetId=sid, range=_rng(NEW_FAMILIES, "A1:O%d" % (MAX_ROWS + 1))
+    nf_tab = _title_of(client, sid, TAB_IDS[NEW_FAMILIES], NEW_FAMILIES)
+    got = client.spreadsheets().values().get(spreadsheetId=sid, range=_rng(nf_tab, "A1:O%d" % (MAX_ROWS + 1))
                                              ).execute()
     values = got.get("values") or []
     if not values or [str(c).strip() for c in values[0][:width]] != list(NF_COLUMNS):
@@ -1351,7 +1373,7 @@ def new_families_pass(db: Session, prog, client, sid: str, team_names: List[str]
         def say(text, added=None, rid=None):
             row = [text, added if added is not None else cells[NF_STATUS_COL + 1], rid if rid is not None else ref]
             if row != cells[NF_STATUS_COL:NF_STATUS_COL + 3]:
-                writes.append({"range": _rng(NEW_FAMILIES, "M%d:O%d" % (n, n)), "values": [row]})
+                writes.append({"range": _rng(nf_tab, "M%d:O%d" % (n, n)), "values": [row]})
 
         if ref.startswith("NF-"):
             rec = db.query(R).filter(R.organization_id == org, R.row_id == ref).first()
