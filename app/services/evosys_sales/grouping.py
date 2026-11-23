@@ -19,6 +19,7 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models.evosys_sales_models import EvoSysLead
@@ -324,15 +325,35 @@ def possible_duplicate(db: Session, opp: Opportunity) -> Optional[str]:
     created - the importer reports them as already there): the same company
     name once 'LLC', 'Cleaning Services' etc. are removed, or the same email
     domain (free mail providers excluded). A person decides."""
-    q = db.query(Opportunity).filter(Opportunity.brand_sales_org_id == opp.brand_sales_org_id,
-                                     Opportunity.id != opp.id, Opportunity.status == "open")
     core = core_name(opp.company_name)
     dom = (opp.email or "").split("@")[-1].lower() if "@" in (opp.email or "") else ""
-    for o in q.all():
-        if core and len(core) >= 4 and core_name(o.company_name) == core:
-            return o.id
-        if dom and dom not in _FREE_MAIL and (o.email or "").lower().endswith("@" + dom):
-            return o.id
+    use_name = bool(core and len(core) >= 4)
+    use_dom = bool(dom and dom not in _FREE_MAIL)
+    if not use_name and not use_dom:
+        return None
+    # Speed (owner request 2026-11-22): this used to load every open lead on
+    # the team as a full record, once per imported row, so big imports slowed
+    # to a crawl as the team grew. Same rules, but the database now narrows
+    # the list first and only three columns come back:
+    #  * every word left in core_name() is a run of letters/digits/& taken
+    #    from the lowercased company name, so a lead with the same core name
+    #    always contains its longest word - nothing that could match is
+    #    filtered out (the exact core_name() comparison below still decides);
+    #  * the email domain check is the same "ends with @domain" test.
+    conds = []
+    if use_name:
+        word = max(core.split(" "), key=len)
+        conds.append(func.lower(Opportunity.company_name).like("%" + word + "%"))
+    if use_dom:
+        conds.append(func.lower(Opportunity.email).like("%@" + dom))
+    q = (db.query(Opportunity.id, Opportunity.company_name, Opportunity.email)
+         .filter(Opportunity.brand_sales_org_id == opp.brand_sales_org_id,
+                 Opportunity.id != opp.id, Opportunity.status == "open", or_(*conds)))
+    for oid, cname, email in q.all():
+        if use_name and core_name(cname) == core:
+            return oid
+        if use_dom and (email or "").lower().endswith("@" + dom):
+            return oid
     return None
 
 
