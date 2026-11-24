@@ -1027,7 +1027,7 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
             <button key={k} className={mode === k ? 'on' : ''} onClick={() => focusComposer(k)}><Icon n={ic} />{l}</button>))}
         </div>
         {mode === 'email' && !f.is_demo && (f.reply_to?.channel === 'email'
-          ? <p className={`cmd-replyto ${f.reply_to.threadable ? '' : 'bad'}`}>Replying to <b>{f.reply_to.to_name || f.reply_to.to}</b>{f.reply_to.to_name ? ` <${f.reply_to.to}>` : ''}{f.reply_to.subject ? ` · ${/^re:/i.test(f.reply_to.subject) ? f.reply_to.subject : `Re: ${f.reply_to.subject}`}` : ''}
+          ? <p className={`cmd-replyto ${f.reply_to.threadable ? '' : 'bad'}`}>Replying to <b>{f.reply_to.to_name || f.reply_to.to}</b>{f.reply_to.to_name ? ` <${f.reply_to.to}>` : ''}{f.reply_to.subject ? ` · ${/^re:/i.test(f.reply_to.subject) ? f.reply_to.subject : `Re: ${f.reply_to.subject}`}` : ''}{f.reply_to.new_thread ? ` · sent as a new email from ${f.reply_to.from}` : ''}
             {!f.reply_to.threadable && <><br />{f.reply_to.why_not}</>}</p>
           : <p className="cmd-replyto bad">There is no email from this family to answer. Reply by text, or add a note.</p>)}
         {mode === 'email' && f.is_demo && <input className="cmd-subj" value={subject} onChange={e => setSubject(e.target.value)} placeholder="Subject" />}

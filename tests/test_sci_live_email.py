@@ -366,3 +366,37 @@ def test_an_ai_text_reply_marks_the_message_answered(setter, sample_advisor, mon
         resp = R.on_inbound(db, lead, "What would we talk about?", "sms")
     db.refresh(resp)
     assert send.call_count == 1 and resp.handling_status == "responded"
+
+
+def test_email_entered_by_hand_is_answered_with_a_new_email(setter, sample_advisor, client):
+    """Owner, Nov 24: a reply that reached Mike's work inbox and was entered by
+    hand is not in a connected mailbox - it is answered with a NEW email from
+    the workspace's mailbox to the family's address, not blocked."""
+    from app.models.models import Organization
+    db, org = setter["db"], setter["org"]
+    setter["prog"].ai_setter_mode = "off"
+    o = db.query(Organization).filter_by(id=org.id).one()
+    o.reply_to_email = "support@evosys.test"
+    box = InboundMailbox(address="support@evosys.test", is_active=True, refresh_token_encrypted="x")
+    db.add(box)
+    lead = _estes(db, org, sample_advisor)
+    db.add(EmailMessage(lead_id=lead.id, sender_id=sample_advisor.id, subject="A few things for your file",
+                        body_html="b", status="sent", sent_at=datetime.utcnow() - timedelta(days=1)))
+    db.commit()
+    with patch("app.services.programs.responses._deliver_staff_alert", return_value=(True, None)):
+        resp = R.on_inbound(db, lead, "Can we meet next week?", "email", reply_id="manual-email:x:%s" % lead.id)
+    h = _h(db, setter["admin"])
+    fam = client.get("/program/command/family/%s" % lead.id, headers=h).json()
+    assert fam["reply_to"]["threadable"] and fam["reply_to"]["new_thread"] and fam["reply_to"]["to"] == SENDER
+    sent = []
+    with patch("app.services.inbound_mailbox_service.send_mail",
+               side_effect=lambda db_, b, **kw: sent.append((b.address, kw)) or {"success": True, "error": None}):
+        r = client.post("/program/command/reply", headers=h,
+                        json={"lead_id": lead.id, "channel": "email", "text": "Hi Estes, would Tuesday work?",
+                              "idempotency_key": "kn", "response_id": resp.id})
+    assert r.status_code == 200, r.text
+    assert sent and sent[0][0] == "support@evosys.test" and sent[0][1]["to_email"] == SENDER
+    assert sent[0][1]["subject"] == "Re: A few things for your file"
+    em = db.query(EmailMessage).filter_by(lead_id=lead.id, status="sent").order_by(EmailMessage.sent_at.desc()).first()
+    db.refresh(resp)
+    assert resp.handling_status == "responded"

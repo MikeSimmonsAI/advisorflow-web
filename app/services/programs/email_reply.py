@@ -66,6 +66,26 @@ def inbound_meta(db: Session, resp) -> Dict:
     return out
 
 
+def new_thread_mailbox(db: Session, lead):
+    """The connected mailbox this family's workspace sends from (its Reply-To,
+    then its From), able to start a new email."""
+    from app.models.models import Organization
+    from app.services import inbound_mailbox_service as ims
+    org = db.query(Organization).filter(Organization.id == lead.organization_id).first()
+    for addr in (getattr(org, "reply_to_email", None), getattr(org, "from_email", None)):
+        box = ims.sending_mailbox(db, addr)
+        if box is not None and not getattr(box, "purpose", None):
+            return box
+    return None
+
+
+def last_subject(db: Session, lead) -> Optional[str]:
+    from app.models.models import EmailMessage
+    m = (db.query(EmailMessage).filter(EmailMessage.lead_id == lead.id, EmailMessage.subject.isnot(None))
+         .order_by(EmailMessage.sent_at.desc().nullslast()).first())
+    return (m.subject or "").strip() or None if m is not None else None
+
+
 def _text_to_html(text: str) -> str:
     paras = [p.strip() for p in re.split(r"\n\s*\n", (text or "").strip()) if p.strip()]
     return "".join("<p>%s</p>" % _html.escape(p).replace("\n", "<br>") for p in paras)
@@ -185,10 +205,19 @@ def send_reply(db: Session, prog, lead, resp, text: str, *, send_source: str, id
         return {"ok": prior.status == "sent", "duplicate": True, "email": _row_json(prior),
                 "error": getattr(prior, "error", None) if prior.status != "sent" else None}
     meta = inbound_meta(db, resp)
-    to_addr = meta.get("sender_email")
+    # Owner, Nov 24: an email that is not in a connected mailbox (it reached
+    # Mike's work inbox and was entered by hand) is answered with a NEW email
+    # from the program's mailbox to the family's address - never left unanswerable.
+    fresh = not meta.get("threadable")
+    to_addr = meta.get("sender_email") or ((lead.email or "").strip().lower() or None)
     why = _blocked(db, lead, to_addr)
-    if why is None and not meta.get("threadable"):
-        why = "the original email is not in a connected mailbox, so it cannot be answered in its thread"
+    box_new = None
+    if why is None and fresh:
+        box_new = new_thread_mailbox(db, lead)
+        if box_new is None:
+            why = "no connected mailbox can send this email"
+        elif not meta.get("subject"):
+            meta["subject"] = last_subject(db, lead) or "Your Restland file"
     body_text = strip_signature(db, lead, text)
     if why is None and not body_text:
         why = "the reply is empty"
@@ -203,7 +232,7 @@ def send_reply(db: Session, prog, lead, resp, text: str, *, send_source: str, id
                        sent_by_user_id=actor_id)
     row.idempotency_key = key
     row.to_email = to_addr
-    row.from_email = meta.get("mailbox")
+    row.from_email = meta.get("mailbox") or (box_new.address if box_new is not None else None)
     row.in_reply_to = meta.get("internet_message_id")
     row.response_id = getattr(resp, "id", None)
     if row.sender_id is None:
@@ -216,6 +245,25 @@ def send_reply(db: Session, prog, lead, resp, text: str, *, send_source: str, id
         return {"ok": False, "error": why, "email": _row_json(row)}
     from app.models.inbound_mailbox_models import InboundMailbox
     from app.services import inbound_mailbox_service as ims
+    if fresh:
+        res = ims.send_mail(db, box_new, to_email=to_addr, subject=subject[:250], body_html=body_html)
+        ok, err = bool(res.get("success")), res.get("error")
+        row.status, row.error = ("sent" if ok else "failed"), err
+        row.provider_message_id = "graph-new:%s" % box_new.address if ok else None
+        if ok and resp is not None:
+            now = datetime.utcnow()
+            resp.responded_at = resp.responded_at or now
+            if (resp.handling_status or "new") in ("new", "opened"):
+                resp.handling_status = "responded"
+        db.commit()
+        if ok:
+            try:
+                from app.services.programs import identity
+                identity.record_on_behalf(db, lead, channel="email", actor_user_id=actor_id,
+                                          sender_user_id=row.sender_id, message_id=row.id)
+            except Exception:                            # noqa: BLE001
+                pass
+        return {"ok": ok, "error": err, "email": _row_json(row), "new_thread": True}
     box = db.query(InboundMailbox).filter(InboundMailbox.id == meta["mailbox_id"]).first()
     try:
         token = ims._access_token_send(box)

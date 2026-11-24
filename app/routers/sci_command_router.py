@@ -851,6 +851,14 @@ def _reply_target(db, latest, lead) -> dict:
     if latest.channel == "email":
         from app.services.programs import email_reply
         m = email_reply.inbound_meta(db, latest)
+        if not m.get("threadable") and lead.email and email_reply.new_thread_mailbox(db, lead) is not None:
+            # Not in a connected mailbox (owner, Nov 24): answered with a new
+            # email from the program's mailbox to the family's address.
+            box = email_reply.new_thread_mailbox(db, lead)
+            return {"channel": "email", "response_id": latest.id, "to": lead.email.strip().lower(),
+                    "to_name": ("%s %s" % (lead.first_name or "", lead.last_name or "")).strip() or None,
+                    "subject": m.get("subject") or email_reply.last_subject(db, lead) or "Your Restland file",
+                    "threadable": True, "new_thread": True, "from": box.address, "why_not": None}
         return {"channel": "email", "response_id": latest.id, "to": m.get("sender_email"),
                 "to_name": m.get("sender_name"), "subject": m.get("subject"),
                 "threadable": bool(m.get("threadable")),
