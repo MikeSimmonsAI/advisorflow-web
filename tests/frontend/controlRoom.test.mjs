@@ -111,6 +111,8 @@ eq(V.monitoringView({ state: 'degraded', message: 'm' }).kind, 'degraded')
 
 // ── Staging banner ──
 ok(V.stagingBanner({ environment: 'staging' }).label === 'STAGING / QA')
+ok(V.stagingBanner({ environment: 'staging' }, 'consumer_leads').label === 'CONSUMER LEADS — STAGING / QA')
+eq(V.stagingBanner({ environment: 'production' }, 'consumer_leads'), null)
 for (const e of [{ environment: 'production' }, { environment: 'demo' }, null, undefined, {}]) eq(V.stagingBanner(e), null)
 
 // ── Wiring (source level; no browser available) ──

@@ -186,7 +186,7 @@ with sync_playwright() as p:
     pg.wait_for_selector("[data-cl-sources]")
     prov = pg.inner_text("[data-providers]")
     check("Facebook / Instagram / TikTok shown as waiting for account connection",
-          all(re.search(n + r".*Waiting for account connection", prov) for n in ["Facebook Lead Ads", "Instagram Lead Ads", "TikTok Instant Forms"]))
+          all(re.search(n + r".*Awaiting account connection", prov) for n in ["Facebook Lead Ads", "Instagram Lead Ads", "TikTok Instant Forms"]))
     pg.fill("[data-new-name]", "Synthetic test webhook")
     pg.click("[data-new-create]")
     pg.wait_for_selector("[data-fresh-secret] code")

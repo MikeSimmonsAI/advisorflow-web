@@ -45,7 +45,7 @@ Consumer Leads is a campaign **inside VOLT Marketing**. It is separate from recr
 
 ## Lead sources (`app/services/volt/lead_sources.py`)
 - **Working now:** custom webhook (HMAC-SHA256 over `<timestamp>.<body>`, 5-minute window), Google Ads lead-form webhook (`google_key`), and CSV import (a consent statement is required).
-- **Waiting for account connection (cannot be turned on):** Facebook and Instagram Lead Ads (an approved Meta app with `leads_retrieval`, plus Page authorization), and TikTok Instant Forms (an approved TikTok for Business app, plus the advertiser's authorization).
+- **Awaiting account connection (cannot be turned on):** Facebook and Instagram Lead Ads (an approved Meta app with `leads_retrieval`, plus Page authorization), and TikTok Instant Forms (an approved TikTok for Business app, plus the advertiser's authorization).
 - **Real sources** accept leads only while public intake is on. **Test sources** write test data only.
 - **Deliveries:** idempotent per (source, external id). The payload is cleared once processed. Bad data waits for a mapping fix and Retry. Temporary errors are retried by the VOLT watch loop with backoff (up to 5 tries).
 
@@ -60,6 +60,8 @@ A relay job is released without a person only when all of these hold:
 - GitHub's required checks and rules pass (never bypassed);
 - every file is `ConsumerLeadsWorkspace.jsx`, `VoltLeads.jsx`, a VOLT `.css`, a VOLT brand image, `docs/volt/`, or a VOLT test that only adds lines;
 - the changed lines mention no intake, consent, settings/grants, secrets/tokens, outreach, test-partition or preview code.
+
+Scope (fixed 2026-11-14, #571): only Consumer Leads requests (title "Consumer Leads: ...") submitted after the policy went live (PR #615, 03:47:57 UTC Nov 15), with a recorded requester. Older relay jobs are never considered. The first production pass after #615 tried to approve an old docs-only job; the save failed (the approver column must be a real user, so nothing merged), PRs #595/#603/#604 were set to draft, and `VOLT_DEV_AUTO_RELEASE=off` was set on the backend until the fix shipped. The policy now leaves the approver empty, names itself in the job history, and isolates each job so one failure never stops the watch.
 
 Anything else waits for a person. The job timeline records `auto_release` (with every check passed) or `auto_release_skipped` (with the reason). Kill switch: `VOLT_DEV_AUTO_RELEASE=off`.
 

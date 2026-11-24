@@ -175,7 +175,12 @@ export function monitoringView(m) {
 
 // Shown only when the BACKEND says staging (same source as the demo banner),
 // never from the hostname. Production and unknown answers render nothing.
-export function stagingBanner(env) {
+export function stagingBanner(env, area = null) {
   if (!env || env.environment !== 'staging') return null
+  // Same staging decision (the backend's answer); only the wording follows the
+  // business on screen. SCI's wording is unchanged everywhere else.
+  if (area === 'consumer_leads') {
+    return { label: 'CONSUMER LEADS — STAGING / QA', text: 'Test environment. Not production. No real customers or messages.' }
+  }
   return { label: 'STAGING / QA', text: 'Test environment. Not production. No real SCI customers or messages.' }
 }

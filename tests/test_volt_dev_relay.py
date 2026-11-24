@@ -516,8 +516,10 @@ SAFE_JSX = ("frontend/src/pages/volt/VoltLeads.jsx", "@@ -1 +1 @@\n-<h2>Common q
 
 
 def _ready_job(**over):
+    from datetime import datetime
     from app.models.volt_models import VoltDevJob
-    j = VoltDevJob(kind="change", status="ready_to_test", tests_passed=True, head_sha="e" * 40, pr_number=900, number=9)
+    j = VoltDevJob(kind="change", status="ready_to_test", tests_passed=True, head_sha="e" * 40, pr_number=900, number=9,
+                   title="Consumer Leads: tweak copy", created_at=datetime(2026, 11, 15, 4, 0), requested_by="u-1")
     for k, v in over.items():
         setattr(j, k, v)
     return j
@@ -544,6 +546,14 @@ def test_auto_release_allows_only_low_risk_changes(monkeypatch):
         r = D.auto_release_check(_ready_job(), files_diff=diff)
         assert r["eligible"] is False and why in r["reason"], (why, r)
     assert D.auto_release_check(_ready_job(kind="revert"), files_diff=_files(SAFE_JSX))["eligible"] is False
+    # Never: jobs that are not Consumer Leads requests, jobs from before the
+    # policy existed (DEV-1/4/5 docs-only PRs), or jobs with no requester.
+    from datetime import datetime
+    for over, why in (({"title": "VOLT: CSV export docs"}, "Only Consumer Leads"),
+                      ({"created_at": datetime(2026, 11, 13, 23, 15)}, "before the automatic release policy"),
+                      ({"requested_by": None}, "operator")):
+        r = D.auto_release_check(_ready_job(**over), files_diff=_files(("docs/volt/dev-relay/DEV-4.md", "@@\n+notes")))
+        assert r["eligible"] is False and why in r["reason"], (over, r)
     assert D.auto_release_check(_ready_job(tests_passed=False), files_diff=_files(SAFE_JSX))["eligible"] is False
     monkeypatch.setattr(D, "release_check", lambda job, poll=3: {"ok": False, "blocker": "Required check failed",
                                                                  "source": "GitHub", "next_action": "Fix it"})
@@ -575,7 +585,11 @@ def test_auto_release_pass_approves_the_exact_commit_and_explains_skips(dev, mon
     assert [j.id for j in out] == [jobs[0][0].id]
     db.refresh(jobs[0][0]); db.refresh(jobs[1][0])
     a, b = jobs[0][0], jobs[1][0]
-    assert a.status == "merge_requested" and a.merge_approved_sha == "0" * 40 and a.merge_requested_by == "policy:auto-release"
+    # The policy is not a person: the users.id foreign key stays empty (it failed in
+    # production when this held a label), and the job names the policy instead.
+    assert a.status == "merge_requested" and a.merge_approved_sha == "0" * 40 and a.merge_requested_by is None
+    assert dev["c"].get(_base(dev) + "/jobs/DEV-%d" % a.number, headers=H(db, dev["staff"])).json()["merge_approved_by"] \
+        == "Automatic release policy"
     ev = db.query(VoltDevEvent).filter(VoltDevEvent.job_id == a.id, VoltDevEvent.action == "auto_release").one()
     assert "GitHub required checks" in ev.detail and "low-risk" in ev.detail
     assert b.status == "ready_to_test"
@@ -604,3 +618,41 @@ def test_consumer_leads_completion_email_has_the_facts(dev):
         assert s in html, s
     again = RR.notify(db, j, "deployed")                              # same job/status/attempt: no second email
     assert {r.id for r in again} <= {r.id for r in rows}
+
+
+def test_auto_release_ignores_old_jobs_and_one_failure_never_stops_the_watch(dev, monkeypatch):
+    from datetime import datetime
+    from app.services.volt import devdispatch as D
+    from app.models.volt_models import VoltDevEvent, VoltDevJob
+    db = dev["db"]
+    monkeypatch.setenv("VOLT_DEV_AUTO_RELEASE", "on")
+    monkeypatch.setenv("VOLT_DEV_GITHUB_TOKEN", "x")
+    monkeypatch.setattr(D, "review", lambda job, max_chars=0: _files(SAFE_JSX))
+    D._SEEN["auto_release"].clear()
+    # An old docs-only job (like DEV-4/5) and a fresh Consumer Leads job.
+    for i, (title, created) in enumerate((("Build VOLT consumer insurance lead funnel", datetime(2026, 11, 13, 23, 0)),
+                                         ("Consumer Leads: fresh", None))):
+        assert _submit(dev, dev["staff"], title=title).status_code == 200
+        j = db.query(VoltDevJob).order_by(VoltDevJob.number.desc()).first()
+        _next(dev, run_id=str(900 + i))
+        _report(dev, j.id, run_id=str(900 + i), status="ready_to_test", changed_files=[SAFE_JSX[0]], tests_passed=True,
+                pr_number=970 + i, head_sha=("%d" % (i + 5)) * 40)
+        if created:
+            j.created_at = created
+        db.commit()
+    old, fresh = db.query(VoltDevJob).order_by(VoltDevJob.number).all()[-2:]
+    assert [j.id for j in D.waiting_for_auto_release(db)] == [fresh.id]           # the old job is never considered
+    monkeypatch.setattr(D.R, "approve_by_policy", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db said no")))
+    assert D.auto_release_pass(db) == []
+    db.commit()
+    ev = db.query(VoltDevEvent).filter(VoltDevEvent.job_id == fresh.id, VoltDevEvent.action == "auto_release_error").one()
+    assert "a person approves" in ev.detail
+    db.refresh(old); db.refresh(fresh)
+    assert old.status == fresh.status == "ready_to_test"
+    assert not db.query(VoltDevEvent).filter(VoltDevEvent.job_id == old.id, VoltDevEvent.action.like("auto_release%")).count()
+    # The whole watch pass still completes (no {"error": True}).
+    D._SELFTEST["done"] = True
+    monkeypatch.setattr(D, "configured", lambda: True)
+    monkeypatch.setattr(D, "reconcile_github", lambda db: {"approved": [], "merged": []})
+    out = D.watch_pass(db)
+    assert "error" not in out

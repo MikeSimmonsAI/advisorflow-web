@@ -2262,8 +2262,10 @@ async def _volt_dev_relay_loop():
                 def _busy() -> bool:
                     db = SessionLocal()
                     try:
-                        return db.query(VoltDevJob.id).filter(VoltDevJob.status.in_(
+                        return (db.query(VoltDevJob.id).filter(VoltDevJob.status.in_(
                             ("queued", "merge_requested", "claude_working", "coding_completed", "merged"))).first() is not None
+                                # a ready Consumer Leads job the release policy should look at
+                                or bool(_vdd.waiting_for_auto_release(db)))
                     finally:
                         db.close()
                 def _one_pass():
