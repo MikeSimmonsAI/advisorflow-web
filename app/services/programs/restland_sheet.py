@@ -1026,6 +1026,48 @@ def person_tabs_write(client, sid: str, tabs: List[Dict[str, Any]], rows: Dict[s
     return writes
 
 
+def _pt_header_rows() -> Dict[int, List[str]]:
+    """The banner / group / column-name rows of a person tab, by sheet row."""
+    W = PT_WIDTH
+
+    def row(vals):
+        return (list(vals) + [""] * W)[:W]
+    return {
+        PT_APPT_BANNER: row(["MY APPOINTMENTS   -   after each visit, fill in the gold columns"]),
+        PT_APPT_GROUPS: row(["", "THE APPOINTMENT"] + [""] * (PT_APPT_INFO - 2) + ["YOUR UPDATE  (type here)"]),
+        PT_APPT_HEAD: row([lbl for _, lbl in PT_APPT]),
+        PT_FU_BANNER: row(["MY FOLLOW-UPS   -   call these families, then fill in the gold columns"]),
+        PT_FU_GROUPS: row(["", "WHO TO CALL & WHY"] + [""] * (PT_FU_INFO - 2) + ["YOUR UPDATE  (type here)"]),
+        PT_FU_HEAD: row([lbl for _, lbl in PT_FU]),
+    }
+
+
+def person_tab_headers_heal(client, sid: str, tabs: List[Dict[str, Any]]) -> int:
+    """Put the header rows back if anything (a deploy switch-over, a person)
+    changed them. One read per tab; writes only when they differ."""
+    from app.services.volt.sheets_export import column
+    want = _pt_header_rows()
+    fixed = 0
+    for t in tabs:
+        try:
+            got = client.spreadsheets().values().batchGet(
+                spreadsheetId=sid, ranges=[_rng(t["title"], "A%d:%s%d" % (r, column(PT_WIDTH), r)) for r in want]
+            ).execute()
+        except Exception:                                # noqa: BLE001
+            continue
+        data = []
+        for (r, row), vr in zip(want.items(), got.get("valueRanges") or []):
+            have = [_cell(v) for v in ((vr.get("values") or [[]])[0])]
+            have = (have + [""] * PT_WIDTH)[:PT_WIDTH]
+            if have != row:
+                data.append({"range": _rng(t["title"], "A%d:%s%d" % (r, column(PT_WIDTH), r)), "values": [row]})
+        if data:
+            client.spreadsheets().values().batchUpdate(
+                spreadsheetId=sid, body={"valueInputOption": "RAW", "data": data}).execute()
+            fixed += len(data)
+    return fixed
+
+
 _PT_APPT_TEXT = [i for i, (k, _) in enumerate(PT_APPT) if k not in ("date", "time", "updated")]
 _PT_FU_TEXT = [i for i, (k, _) in enumerate(PT_FU) if k not in ("due", "updated", "done")]
 
@@ -1198,8 +1240,8 @@ def ensure_person_tabs(db: Session, prog, client, sid: str) -> bool:
     """Give the person tabs their current look, once per version."""
     pol = json.loads(prog.booking_policy_json or "{}")
     cfg = pol.get("handoff_sheet") or {}
-    if cfg.get("person_tabs_v5"):
-        return False
+    if cfg.get("person_tabs_v5") or cfg.get("person_tabs_v3"):
+        return False                                     # this layout is on the tabs (headers self-heal below)
     # A layout applied before leaves its row striping and color rules behind:
     # Google refuses to stripe a range twice, so take the old ones off first.
     first: List[Dict] = []
@@ -1396,6 +1438,7 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
         try:
             out["person_tab_rows"] = person_tabs_write(client, sid, ptabs, rows, staff, known, pt["grids"],
                                                        today_serial)
+            out["person_tab_headers_fixed"] = person_tab_headers_heal(client, sid, ptabs)
         except Exception as exc:                         # noqa: BLE001 - the main tabs are already right
             from app.services.volt.sheets_export import categorize
             log.warning("person tabs not written: %s", categorize(exc))
@@ -1607,7 +1650,7 @@ def sync(db: Session, prog, client=None) -> Dict[str, Any]:
         ensure_person_tabs(db, prog, client, sid)
     except Exception as exc:                             # noqa: BLE001 - the main tabs still sync
         db.rollback()
-        log.warning("handoff sheet person tabs layout not applied: %s", X.categorize(exc))
+        log.warning("handoff sheet person tabs layout not applied: %s (%s)", X.categorize(exc), str(exc)[:300])
     appts = appointment_rows(db, org)
     fus = follow_up_rows(db, org, known_ids(client, sid, FOLLOW_UPS))
     a = upsert(client, sid, APPOINTMENTS, appts)
