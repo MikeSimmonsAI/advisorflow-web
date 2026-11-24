@@ -455,6 +455,62 @@ def route(db: Session, org_ids: List[str], sender: str, subject: Optional[str] =
     return pool[0], "matched", detail
 
 
+# ── a family's email FORWARDED in by staff (owner, Nov 24) ──────────────────
+#
+# Restland emails sent before 5 PM Nov 23 carry Mike's NSMG address as
+# Reply-To, so late replies to them still land in his work inbox, which the
+# system cannot read. Forwarding one to this mailbox now files it on the family
+# who wrote it: a forward (FW:/Fwd:) from a staff address - a user of a
+# workspace that sends from this mailbox, or FORWARDER_ADDRESSES - is routed by
+# the ORIGINAL sender in the forwarded header, and the family's own words (not
+# the forwarding note, not our quoted email) are stored as their reply.
+
+_FWD_SUBJECT = re.compile(r'(?i)^\s*(fwd?|fw)\s*:')
+_FWD_FROM = re.compile(r'(?im)^\s*\*?From:\*?\s*(.*)$')
+_EMAIL = re.compile(r'[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}')
+
+
+def _plain(content: str) -> str:
+    t = content or ""
+    # HTML only when it has real tags: a plain-text forward keeps "<a@b.com>".
+    if re.search(r'(?i)<\s*/?\s*(html|body|div|p|br|span|table|tr|td|b|hr|blockquote|font)\b', t):
+        t = re.sub(r'(?i)<br\s*/?>|</p>|</div>|</tr>', '\n', t)
+        t = re.sub(r'<[^>]+>', ' ', t)
+    t = _html.unescape(t).replace('\r\n', '\n')
+    return re.sub(r'[ \t\u00a0]+', ' ', t)
+
+
+def staff_forwarders(db: Session, org_ids: List[str]) -> set:
+    from app.models.models import User
+    out = {a.strip().lower() for a in (os.environ.get("FORWARDER_ADDRESSES") or "").split(",") if a.strip()}
+    if org_ids:
+        out |= {(e or "").strip().lower() for (e,) in db.query(User.email)
+                .filter(User.organization_id.in_(org_ids), User.is_active.isnot(False)).all() if e}
+    return out
+
+
+def forwarded_original(m: dict) -> Optional[Dict]:
+    """{"sender", "body"} of the email inside a forward, or None."""
+    if not _FWD_SUBJECT.match(m.get("subject") or ""):
+        return None
+    t = _plain((m.get("body") or {}).get("content") or m.get("bodyPreview") or "")
+    hit = _FWD_FROM.search(t)
+    if not hit:
+        return None
+    em = _EMAIL.search(hit.group(1)) or _EMAIL.search(t[hit.end():hit.end() + 300])
+    if not em:
+        return None
+    rest = t[hit.end():]
+    # skip the rest of the forwarded header (Sent/Date/To/Cc/Subject lines)
+    lines = rest.split("\n")
+    i = 0
+    while i < len(lines) and (not lines[i].strip() or re.match(
+            r'(?i)^\s*\*?(sent|date|to|cc|subject|from)\*?\s*:', lines[i])):
+        i += 1
+    body = clean_body("\n".join(lines[i:]))
+    return {"sender": em.group(0).strip().lower(), "body": body}
+
+
 def recipients_of(m: dict) -> List[str]:
     """Every To/Cc address on a Graph message, lower-cased."""
     out = []
@@ -835,6 +891,29 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
                     matched += 1 if evs[0] == "evs_reply" else 0
                     continue
                 alias_prof = _alias_location(db, m)
+                fwd = forwarded_original(m) if sender in staff_forwarders(db, org_ids) else None
+                if fwd is not None and fwd["sender"] not in staff_forwarders(db, org_ids):
+                    # Staff forwarded a family's email: it belongs to the family.
+                    flead, foutcome, fdetail = route(db, org_ids, fwd["sender"], None)
+                    row.detail = ("Forwarded by %s; original from %s. %s" % (sender, fwd["sender"], fdetail or "")).strip()
+                    if flead is None:
+                        row.outcome = foutcome
+                        db.add(row)
+                        db.commit()
+                        continue
+                    body = fwd["body"] or "(Forwarded with no message of their own.)"
+                    reply, created = _store_reply(db, flead, body, received, m.get("internetMessageId"))
+                    row.outcome = "matched"
+                    row.organization_id, row.lead_id, row.reply_id = flead.organization_id, flead.id, reply.id
+                    db.add(row)
+                    db.commit()
+                    if created:
+                        from app.services.programs import responses as _program_responses
+                        _program_responses.safe_on_inbound(db, flead, body, "email", reply_id=reply.id)
+                        _maybe_hand_to_ai(db, flead, reply)
+                        db.commit()
+                    matched += 1
+                    continue
                 if alias_prof is not None:
                     from app.services.programs import aliases as _aliases
                     _aliases.mark_verified(alias_prof, now)
