@@ -145,6 +145,9 @@ class _Values:
         self._put(range, body["values"])
         return _Exec({})
 
+    def batchGet(self, spreadsheetId, ranges):
+        return _Exec({"valueRanges": [self.get(spreadsheetId, r).execute() for r in ranges]})
+
 
 class _Exec:
     def __init__(self, out):
@@ -816,3 +819,18 @@ def test_a_newcomer_gets_new_appointments_until_caught_up_and_follow_ups_balance
     assert got["n2"] in ("Ann", "Bob", "Kit")
     fu = {r[0]: _c(r, 9) for r in sheet[RS.FOLLOW_UPS][1:]}
     assert [fu["FU-n0"], fu["FU-n1"]] == ["Kit", "Kit"]
+
+
+
+def test_person_tab_header_rows_heal_themselves(setter):
+    db = setter["db"]
+    prog = _prog(setter)
+    now = datetime(2026, 11, 23, 23, 0)
+    sheet = _board([("Ann", "TRUE")])
+    sheet["__titles__"] = {3: "Ann"}
+    _run_team(db, prog, sheet, [], [], now)
+    ann = sheet["Ann"]
+    assert ann[RS.PT_APPT_HEAD - 1][3] == "Family" and ann[RS.PT_FU_BANNER - 1][0].startswith("MY FOLLOW-UPS")
+    ann[RS.PT_FU_HEAD - 1][2] = "junk"                               # something overwrote a header
+    out = _run_team(db, prog, sheet, [], [], now + timedelta(minutes=2))
+    assert out["person_tab_headers_fixed"] == 1 and sheet["Ann"][RS.PT_FU_HEAD - 1][2] == "Family"
