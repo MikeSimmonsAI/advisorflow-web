@@ -164,11 +164,17 @@ def test_reminders_24h_and_2h_and_the_early_morning_move(rl):
     early = _booking(rl, rl["leads"][6], datetime(2026, 11, 13, 10, 0))   # 2 hours before = 8:00 AM
     AN.on_booked(db, early, now=now)
     r2e = _rows(rl, early, purpose="reminder_2h", channel="sms")[0]
-    # 8:00 AM would move to 5:45 PM the evening before - 7 h 45 m after the
-    # 24-hour reminder. The collision rule skips it; it is never called "2 hours".
-    assert r2e.status == "skipped" and _due_local(r2e) == datetime(2026, 11, 12, 17, 45)
-    assert "7 h 45 m" in r2e.reason and "8:00 AM" in r2e.reason
+    # Owner, Nov 24: 8:00 AM is before 9 AM, so the morning visit gets its
+    # reminder at 8:30 AM that morning ("see you today"), not the evening before.
+    assert r2e.status == "scheduled" and _due_local(r2e) == datetime(2026, 11, 13, 8, 30)
+    assert "8:30 AM" in r2e.reason and "8:00 AM" in r2e.reason
     assert _rows(rl, early, purpose="reminder_24h", channel="sms")[0].status == "scheduled"
+    policy, lead = AN._policy_for_booking(db, early)
+    assert "is today:" in AN.compose(db, r2e, early, lead, policy)["body"]
+    # an afternoon visit keeps its true 2-hour time
+    late = _booking(rl, rl["leads"][12], datetime(2026, 11, 13, 13, 0))
+    AN.on_booked(db, late, now=now)
+    assert _due_local(_rows(rl, late, purpose="reminder_2h", channel="sms")[0]) == datetime(2026, 11, 13, 11, 0)
 
 
 def test_collision_rule_keeps_the_near_reminder_and_drops_the_one_after_the_confirmation(rl):
@@ -180,8 +186,16 @@ def test_collision_rule_keeps_the_near_reminder_and_drops_the_one_after_the_conf
     AN.on_booked(db, b, now=now)
     r24 = _rows(rl, b, purpose="reminder_24h", channel="sms")[0]
     r2 = _rows(rl, b, purpose="reminder_2h", channel="sms")[0]
-    assert r24.status == "skipped" and "2 h 00 m" in r24.reason       # 2 hours after the confirmation
+    # Owner, Nov 24: the confirmation no longer cancels a reminder 2 hours later.
+    assert r24.status == "scheduled" and _due_local(r24) == datetime(2026, 11, 12, 14, 30)
     assert r2.status == "scheduled" and _due_local(r2) == datetime(2026, 11, 13, 12, 30)
+    # booked 24 h 30 m ahead: the 24-hour reminder would follow the confirmation
+    # by 30 minutes - that one near-duplicate is still skipped
+    b2 = _booking(rl, rl["leads"][13], start)
+    AN.on_booked(db, b2, now=AN._utc(start) - timedelta(hours=24, minutes=30))
+    r24b = _rows(rl, b2, purpose="reminder_24h", channel="sms")[0]
+    assert r24b.status == "skipped" and "after the booking confirmation" in r24b.reason
+    assert _rows(rl, b2, purpose="reminder_2h", channel="sms")[0].status == "scheduled"
 
 
 def test_a_moved_reminder_that_does_not_collide_is_described_accurately(rl):
@@ -197,11 +211,23 @@ def test_a_moved_reminder_that_does_not_collide_is_described_accurately(rl):
     b = _booking(rl, rl["leads"][11], start)
     AN.on_booked(db, b, now=AN._utc(start) - timedelta(days=5))
     r2 = _rows(rl, b, purpose="reminder_2h", channel="sms")[0]
-    assert r2.status == "scheduled" and _due_local(r2) == datetime(2026, 11, 12, 17, 45)
-    assert "16 h 15 m before the visit" in r2.reason and "instead of 2 h 00 m" in r2.reason
+    # a 10:00 AM visit: the reminder goes 8:30 AM that morning (owner, Nov 24)
+    assert r2.status == "scheduled" and _due_local(r2) == datetime(2026, 11, 13, 8, 30)
+    assert "morning of the visit" in r2.reason
     policy, lead = AN._policy_for_booking(db, b)
     text = AN.compose(db, r2, b, lead, policy)["body"]
-    assert "is tomorrow:" in text and "coming up" not in text
+    assert "is today:" in text and "coming up" not in text
+    # a 1:30 PM visit whose reminder falls before 9 AM is not a morning visit:
+    # it still moves to the evening before, described accurately
+    pm = datetime(2026, 11, 13, 13, 30)
+    raw["notifications"]["reminder_minutes"] = [360]                # 6 hours before 1:30 PM = 7:30 AM
+    prog.booking_policy_json = json.dumps(raw)
+    db.commit()
+    b3 = _booking(rl, rl["leads"][14], pm)
+    AN.on_booked(db, b3, now=AN._utc(pm) - timedelta(days=5))
+    r6 = [r for r in _rows(rl, b3, channel="sms") if r.purpose.startswith("reminder")][0]
+    assert r6.status == "scheduled" and _due_local(r6) == datetime(2026, 11, 12, 17, 45)
+    assert "instead of 6 h 00 m" in r6.reason
 
 
 def test_close_in_booking_skips_elapsed_reminders_instead_of_dumping_them(rl):
@@ -586,3 +612,25 @@ def test_survey_invitation_names_restland_only_for_office_visits(rl):
         policy, lead = AN._policy_for_booking(db, b)
         body = AN.compose(db, row, b, lead, policy)["body"]
         assert expect in body
+
+
+
+def test_replan_moves_old_skipped_morning_reminders_to_eight_thirty(rl):
+    """At deploy (owner, Nov 24): an upcoming 10 AM visit planned under the old
+    rule (2-hour reminder skipped) gets its 8:30 AM reminder; opt-outs and
+    already-sent reminders are untouched."""
+    db = rl["db"]
+    configured(rl)
+    start = datetime(2026, 11, 13, 10, 0)
+    b = _booking(rl, rl["leads"][15], start)
+    now = AN._utc(start) - timedelta(days=3)
+    AN.on_booked(db, b, now=now)
+    for r in _rows(rl, b, purpose="reminder_2h"):                    # as the old rule left it
+        r.status, r.reason = "skipped", "not sent: it would go at 5:45 PM Thu Central (moved from 8:00 AM, " \
+                                        "which is outside 9 AM-6 PM), only 7 h 45 m from another message"
+    db.commit()
+    res = AN.replan_reminders(db, rl["org"].id, now=now)
+    assert len(res["changed"]) == len(_rows(rl, b, purpose="reminder_2h"))
+    for r in _rows(rl, b, purpose="reminder_2h"):
+        assert r.status == "scheduled" and _due_local(r) == datetime(2026, 11, 13, 8, 30)
+    assert AN.replan_reminders(db, rl["org"].id, now=now)["changed"] == []    # once is enough
