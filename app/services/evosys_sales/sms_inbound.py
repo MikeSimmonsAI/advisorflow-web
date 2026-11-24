@@ -216,17 +216,17 @@ def notify_owner(s, line: str, subject: str, html_body: str) -> None:
         if em and em.strip().lower() not in emails:
             emails.append(em.strip().lower())
     if phones:
-        try:
-            from app.services import sms_programs as _sci
-            client, from_ = _sci.sci_sender()
-            from app.services.twilio_callbacks import apply_status_callback
-            for ph in phones:
-                try:
-                    client.messages.create(**apply_status_callback(dict(body=line[:320], from_=from_, to=ph)))
-                except Exception:                           # noqa: BLE001
-                    log.exception("[evosys-sales] alert text to one recipient failed")
-        except Exception:                                   # noqa: BLE001
-            log.exception("[evosys-sales] owner alert text failed")
+        # From the SALES line only (owner, Nov 23: sales alerts were arriving
+        # from SCI's toll-free number and showing up in the SCI thread). No
+        # sales number = no alert text; never another program's line.
+        from app.services.evosys_sales.outreach import _send_text
+        for ph in phones:
+            try:
+                res = _send_text(ph, line[:320], s)
+                if not res.get("success"):
+                    log.warning("[evosys-sales] alert text not sent: %s", res.get("error"))
+            except Exception:                               # noqa: BLE001
+                log.exception("[evosys-sales] alert text to one recipient failed")
     if emails:
         try:
             from app.services import staff_alert_email
