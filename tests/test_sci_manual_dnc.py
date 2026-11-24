@@ -65,3 +65,45 @@ def test_dnc_is_tenant_scoped(program, sample_advisor, client):
     db = program["db"]
     r = client.post("/program/command/dnc", headers=_h(db, program["admin"]), json={"lead_id": "nope"})
     assert r.status_code == 404
+
+
+# ── Owner, Nov 24: a family marked Do Not Contact by mistake comes off it ───
+
+def test_taking_a_family_off_dnc_clears_every_block_and_sends_nothing(setter, sample_advisor, client):
+    from app.models.models import ContactSuppression
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L001", first="Larry")
+    _run(db, lead, "Tell me more", _Fake([_d("offer_times", "Would {TIMES} work?")]))
+    st = db.query(CadenceState).filter_by(lead_id=lead.id).first()
+    if st is None:
+        db.add(CadenceState(lead_id=lead.id, status="active"))
+    db.commit()
+    h = _h(db, setter["admin"])
+    assert client.post("/program/command/dnc", headers=h, json={"lead_id": lead.id, "reason": "x"}).status_code == 200
+    # the AI also read a reply as an opt-out, and the family-wide list has them
+    db.add(ProgramResponse(organization_id=org.id, lead_id=lead.id, channel="sms", response_class="opt_out",
+                           handling_status="closed", body_excerpt="ok thanks", received_at=datetime.utcnow()))
+    db.add(ContactSuppression(organization_id=org.id, kind="email", value=(lead.email or "l@x.com").lower(),
+                              scope="family", reason="x", source="manual"))
+    db.commit()
+    # a reason is required
+    assert client.post("/program/command/dnc/clear", headers=h, json={"lead_id": lead.id}).status_code == 422
+    r = client.post("/program/command/dnc/clear", headers=h,
+                    json={"lead_id": lead.id, "reason": "AI misread their reply"})
+    assert r.status_code == 200, r.text
+    assert r.json()["carrier_stop_possible"] is True            # the opt-out reply came by text
+    db.expire_all()
+    lead = db.query(Lead).get(lead.id)
+    assert lead.status != "dnc" and lead.allow_email is True
+    assert db.query(SuppressionEntry).filter_by(organization_id=org.id).count() == 0
+    assert db.query(ProgramResponse).filter_by(lead_id=lead.id, response_class="opt_out").count() == 0
+    conv = S.conversation_for(db, lead, create=False)
+    assert conv.state == "human"
+    st = db.query(CadenceState).filter_by(lead_id=lead.id).one()
+    assert str(getattr(st.status, "value", st.status)) == "paused"
+    fam = client.get("/program/command/family/%s" % lead.id, headers=h).json()
+    assert fam["handling"]["opted_out"] is False
+    from app.models.models import AuditLogEntry
+    assert db.query(AuditLogEntry).filter_by(action="sci.clear_do_not_contact", target_id=lead.id).count() == 1
+    # and it can be marked again later
+    assert client.post("/program/command/dnc", headers=h, json={"lead_id": lead.id}).json()["already"] is False

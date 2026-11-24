@@ -665,6 +665,7 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
   const [homeAddr, setHomeAddr] = useState('')
   const [booked, setBooked] = useState(null)    // what happened, shown on the card
   const [dncAsk, setDncAsk] = useState(null)         // Do Not Contact: null = closed, string = reason
+  const [undoAsk, setUndoAsk] = useState(null)       // take OFF Do Not Contact: null = closed, string = reason
   const [customDay, setCustomDay] = useState('')     // "Choose custom time": the day picked
   const [daySlots, setDaySlots] = useState(null)     // every open time that day
   const [manualTime, setManualTime] = useState('')   // a time typed in by hand ("10:00")
@@ -807,6 +808,19 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
       setDncAsk(null); toast(`${f.name} is on Do Not Contact. Nothing more goes to them.`); load()
     } catch (e) { toast(e.message || 'Could not update.') } finally { setBusy(false) }
   }
+  // Owner, Nov 24: a family marked Do Not Contact by mistake (by the AI or a
+  // person) comes off it here. Nothing is sent; the texts can then be restarted.
+  const clearDnc = async () => {
+    if (!undoAsk?.trim()) return
+    setBusy(true)
+    try {
+      const r = await api.post('/program/command/dnc/clear', { lead_id: id, reason: undoAsk.trim() })
+      setUndoAsk(null)
+      toast(`${f.name} is off Do Not Contact. Texts and emails are allowed again.` +
+        (r.carrier_stop_possible ? ' They texted STOP, so the phone company still blocks texts until they text START - email or call them.' : ''))
+      load()
+    } catch (e) { toast(e.message || 'Could not update.') } finally { setBusy(false) }
+  }
   const markHandled = async () => {
     try { await api.post(`/program/responses/${f.response_id}/mark`, { state: 'closed' }); toast('Marked handled.'); load() }
     catch (e) { toast(e.message || 'Could not update.') }
@@ -855,7 +869,18 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
           <button className="primary" disabled={busy} onClick={markDnc}>Yes, do not contact</button></div>
       </section>}
       {f.handling?.opted_out && <section className="cmd-handoff-banner" role="status"><b>DO NOT CONTACT</b>
-        <p>This family opted out or was marked Do Not Contact. Nothing goes to them.</p></section>}
+        <p>This family opted out or was marked Do Not Contact. Nothing goes to them.</p>
+        {!f.is_demo && (undoAsk === null
+          ? <div className="cmd-send"><button onClick={() => setUndoAsk('')}>Take off Do Not Contact</button></div>
+          : <div role="group" aria-label="Take off Do Not Contact">
+            <p>Marked by mistake? This clears every block on {f.name} - texts, email, calls - and puts the conversation with a person. Nothing is sent.</p>
+            <input className="cmd-subj" value={undoAsk} onChange={e => setUndoAsk(e.target.value)} maxLength={200}
+                   placeholder="Why (e.g. AI misread their reply)" aria-label="Reason" />
+            <div className="cmd-send">
+              <button disabled={busy} onClick={() => setUndoAsk(null)}>Cancel</button>
+              <button className="primary" disabled={busy || !undoAsk.trim()} onClick={clearDnc}>{busy ? 'Saving…' : 'Take off Do Not Contact'}</button>
+            </div></div>)}
+      </section>}
       {f.human_handoff && <section className="cmd-handoff-banner" role="alert">
         <b>HUMAN RESPONSE NEEDED</b>
         <p>The AI sent this family nothing.{f.handoff_reason ? ` Why: ${f.handoff_reason}` : ''}</p>
