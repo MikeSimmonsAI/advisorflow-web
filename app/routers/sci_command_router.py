@@ -1210,6 +1210,23 @@ def command_do_not_contact(body: DncIn, db: Session = Depends(get_db), user: Use
     return dnc.mark_do_not_contact(db, lead, user, body.reason)
 
 
+@router.post("/dnc/clear")
+def command_clear_do_not_contact(body: DncIn, db: Session = Depends(get_db),
+                                 user: User = Depends(require_tenant_user)):
+    """Take a family OFF Do Not Contact - marked by accident by the AI or a
+    person (owner, Nov 24). Managers only, a reason is required, audited.
+    Undoes every block; sends nothing."""
+    from app.services.programs import dnc
+    prog = _program(db, user, managers_only=True)
+    lead = db.query(Lead).filter(Lead.id == body.lead_id, Lead.organization_id == prog.organization_id).first()
+    if lead is None:
+        raise HTTPException(status_code=404, detail="Family not found.")
+    try:
+        return dnc.clear_do_not_contact(db, lead, user, body.reason or "")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
 class ScheduleIn(BaseModel):
     lead_id: str
     slot: str                       # local Central ISO, from /slots
