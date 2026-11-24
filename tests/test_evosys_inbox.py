@@ -130,7 +130,8 @@ def test_unapproved_claims_and_hard_questions_wait_for_mike(db_session, brand, m
 def test_a_draft_that_repeats_an_earlier_text_is_not_sent(db_session, brand, manager, monkeypatch):
     pitch = ("Hi! Great to hear you're interested. Our goal is to book you at least 3 appointments in the next "
              "30 days with businesses that need cleaning, completely free.")
-    out = _draft(db_session, brand, manager, monkeypatch, "Yes",
+    # (a plain "Yes" gets the standard booking text instead - see test_evosys_sales_texting)
+    out = _draft(db_session, brand, manager, monkeypatch, "Yes, tell me more",
                  {"category": "interested", "summary": "", "simple": True, "draft": pitch + " https://x.test/2"},
                  convo=[("us", pitch + " https://x.test/1")])
     assert out["auto_ok"] is False and any("repeats" in n for n in out["needs_person"])
@@ -168,7 +169,16 @@ def test_a_spanish_draft_always_comes_with_english(db_session, brand, manager, m
 
 
 def test_never_says_we_have_no_website(db_session, brand, manager, monkeypatch):
-    out = _draft(db_session, brand, manager, monkeypatch, "Yes",
+    out = _draft(db_session, brand, manager, monkeypatch, "Sí, cuénteme más",
                  {"category": "interested", "summary": "", "simple": True,
                   "draft": "¡Hola! No tenemos un sitio web oficial, pero visite https://evosyspro.live"})
     assert out["auto_ok"] is False and any("claim" in n for n in out["needs_person"])
+
+
+def test_a_plain_yes_never_carries_a_bad_draft(db_session, brand, manager, monkeypatch):
+    # owner, Nov 23: a plain yes always gets the booking link, never waits
+    out = _draft(db_session, brand, manager, monkeypatch, "Sí",
+                 {"category": "unclear", "summary": "", "simple": False,
+                  "draft": "¡Hola! No tenemos un sitio web oficial, pero visite https://evosyspro.live"})
+    assert out["category"] == "interested" and out["auto_ok"] is True
+    assert "sitio web" not in out["draft"] and "calendario" in out["draft"]

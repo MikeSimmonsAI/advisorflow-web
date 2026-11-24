@@ -16,7 +16,7 @@ A text from a number that matches no lead is logged and dropped.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -274,3 +274,40 @@ def _do_not_contact(db: Session, opp: Opportunity, text: str) -> None:
         SDNC.record(db, opp, user, "Texted STOP to the EvoSys Sales number: %s" % text[:200])
     except ValueError:
         log.exception("[evosys-sales sms] could not record Do Not Contact for lead %s", opp.id)
+
+
+def answer_waiting_yes(db: Session, s, now: Optional[datetime] = None, days: int = 3) -> int:
+    """Catch-up (owner, 2026-11-23): a plain "yes" that was held for a person
+    instead of answered gets its booking link now, through the normal
+    automatic-answer path and all its checks. Only their newest text, only if
+    nothing went to them after it, only the last few days. Returns how many."""
+    from app.services.evosys_sales import ai as AI
+    now = now or datetime.utcnow()
+    if not s.text_auto_reply:
+        return 0
+    since = now - timedelta(days=days)
+    rows = (db.query(EvoSysOutreachMessage)
+            .filter(EvoSysOutreachMessage.brand_sales_org_id == s.brand_sales_org_id,
+                    EvoSysOutreachMessage.direction == "in", EvoSysOutreachMessage.channel == "text",
+                    EvoSysOutreachMessage.created_at >= since,
+                    EvoSysOutreachMessage.label.in_(("unclear", "interested")))
+            .order_by(EvoSysOutreachMessage.created_at).limit(200).all())
+    sent = 0
+    for m in rows:
+        if not AI.plain_yes(m.body) or not m.provider_message_id:
+            continue
+        later = (db.query(EvoSysOutreachMessage.id)
+                 .filter(EvoSysOutreachMessage.opportunity_id == m.opportunity_id,
+                         EvoSysOutreachMessage.created_at > m.created_at).first())
+        if later is not None:
+            continue                      # answered, or they wrote again: nothing to catch up
+        opp = db.get(Opportunity, m.opportunity_id)
+        if opp is None:
+            continue
+        try:
+            if _auto_answer(db, s, opp, m.provider_message_id):
+                sent += 1
+        except Exception:                                  # noqa: BLE001
+            db.rollback()
+            log.exception("[evosys-sales sms] catch-up answer failed for lead %s", opp.id)
+    return sent
