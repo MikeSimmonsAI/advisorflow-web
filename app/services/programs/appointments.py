@@ -157,7 +157,7 @@ def all_slots_on_day(db: Session, prog, day, kind: str = VISIT) -> Tuple[List[da
     # A person picking a custom time sees every free half hour, not only the
     # set starts (owner, Nov 23).
     res = compute_day_slots(db, advisor, day, program_visit=True, today=today, minutes=minutes_for(kind),
-                            any_time=30)
+                            any_time=15)
     if res.get("calendar_error"):
         return [], "the calendar cannot be read right now"
     slots = sorted(datetime.fromisoformat(x) for x in res.get("slots") or [])
@@ -179,7 +179,7 @@ def still_free(db: Session, prog, slot: datetime, kind: str = VISIT) -> bool:
     # Any time asked for, not only the set starts (owner, Nov 23: "if the
     # customer requested 3 o'clock, sure, we can do 3 o'clock").
     res = compute_day_slots(db, advisor, slot.date(), program_visit=True, today=_today_central().date(),
-                            minutes=minutes_for(kind), any_time=15)
+                            minutes=minutes_for(kind), any_time=5)
     if res.get("calendar_error"):
         return False
     return slot.strftime("%Y-%m-%dT%H:%M:00") in set(res.get("slots") or [])

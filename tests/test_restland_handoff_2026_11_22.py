@@ -511,7 +511,10 @@ def test_requested_off_grid_time_is_open_when_free():
         def query(self, *a): return Q(self.rows)
 
     pol = BP.parse({"starts": ["10:00", "11:30", "13:00", "14:30", "16:00"], "duration": 45, "gap_after": 45, "days": "0123456"})
+    from app.services import no_contact_days as _ncd
     day = date.today() + timedelta(days=2)
+    while _ncd.quiet_on(day):                     # not a closed holiday (e.g. Thanksgiving)
+        day += timedelta(days=1)
     pol = dict(pol, days="0123456")
     adv = SimpleNamespace(id="adv")
     free = lambda *a, **k: ([], None)

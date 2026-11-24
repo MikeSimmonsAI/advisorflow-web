@@ -667,6 +667,7 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
   const [dncAsk, setDncAsk] = useState(null)         // Do Not Contact: null = closed, string = reason
   const [customDay, setCustomDay] = useState('')     // "Choose custom time": the day picked
   const [daySlots, setDaySlots] = useState(null)     // every open time that day
+  const [manualTime, setManualTime] = useState('')   // a time typed in by hand ("10:00")
   const [menu, setMenu] = useState(false)
   const [picking, setPicking] = useState(false)
   const composer = useRef(null)
@@ -758,6 +759,15 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
     if (!d) return
     try { setDaySlots(await api.get(`/program/command/day-slots?lead_id=${id}&date=${d}`)) }
     catch (e) { setDaySlots({ slots: [], reason: e.message || 'Could not read the calendar.' }) }
+  }
+  // MANUAL TIME (owner, Nov 24): whatever time the family said, typed in by
+  // hand - not only the suggested times. The server re-checks it on booking.
+  const useManualTime = () => {
+    if (!customDay || !/^\d{2}:\d{2}$/.test(manualTime)) return
+    const [h, m] = manualTime.split(':').map(Number)
+    const time = `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`
+    setPick({ value: `${customDay}T${manualTime}:00`, time, label: `${dayLabel(`${customDay}T${manualTime}:00`)} at ${time}` })
+    setBooked(null)
   }
   const firstName = () => (f.name || '').split(' ')[0].toLowerCase().replace(/^./, c => c.toUpperCase())
   // Ask the family about ONE time (picked by a person) instead of booking it outright.
@@ -959,6 +969,12 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
               ? <div className="cmd-slots cmd-slots-day">{daySlots.slots.map(s => (
                 <button key={s.value} className={pick?.value === s.value ? 'on' : ''} disabled={busy} onClick={() => { setPick(s); setBooked(null) }}>{s.time}</button>))}</div>
               : <p className="cmd-muted">{daySlots.reason || 'No open times that day.'} Try another day.</p>)}
+          {customDay && <div className="cmd-manual-time" style={{ marginTop: 10 }}>
+            <label className="cmd-custom-day">Or type the time they asked for
+              <input type="time" step="300" min="07:00" max="20:00" value={manualTime}
+                     onChange={e => setManualTime(e.target.value)} aria-label="Manual appointment time" /></label>
+            <button disabled={busy || !manualTime} onClick={useManualTime} style={{ marginLeft: 8 }}>Use this time</button>
+          </div>}
         </details>
         {pick && <div className="cmd-pick" role="group" aria-label="Confirm booking">
           <p>Book <b>{f.name}</b> for <b>{pick.label || `${dayLabel(pick.value)} ${pick.time}`}</b>?{f.phone ? ` They get a text at ${fmtPhone(f.phone)} confirming it.` : ' They have no phone on file, so call them to let them know.'}</p>

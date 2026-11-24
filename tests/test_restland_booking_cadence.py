@@ -135,15 +135,19 @@ def test_existing_booking_and_gap_block_overlapping_starts(rl):
     db.add(BookingLink(lead_id=rl["leads"][1].id, user_id=rl["mike"].id, status="booked",   # an older 60-min visit
                        booked_time=datetime(2026, 11, 14, 15, 0), appt_duration=None))
     db.commit()
+    # Restland books on top of other appointments (owner, Nov 24): nothing is taken away.
     times = [s[11:16] for s in _slots(rl, day, now=datetime(2026, 11, 13, 8))["slots"]]
-    # 11:30 taken; 10:00 holds 10:00-11:30 and still fits; the 15:00 legacy visit (60 + 45 gap)
-    # blocks 14:30 and 16:00.
-    assert times == ["10:00", "13:00"]
+    assert times == ["10:00", "11:30", "13:00", "14:30", "16:00"]
+    # A program WITHOUT that rule: 11:30 taken; 10:00 holds 10:00-11:30 and still fits;
+    # the 15:00 legacy visit (60 + 45 gap) blocks 14:30 and 16:00.
+    pol = dict(BP.for_program(prog_of(rl)), allow_overlap=False)
+    res = BP.day_slots(rl["db"], rl["mike"], day, pol, now_local=datetime(2026, 11, 13, 8), busy_reader=NO_BUSY)
+    assert [s[11:16] for s in res["slots"]] == ["10:00", "13:00"]
 
 
 def test_calendar_conflict_and_unreadable_calendar(rl):
     configured(rl)
-    pol = BP.for_program(prog_of(rl))
+    pol = dict(BP.for_program(prog_of(rl)), allow_overlap=False)     # a program without double booking
     day = date(2026, 11, 15)
     busy = lambda db, a, d: ([(datetime(2026, 11, 15, 12, 0), datetime(2026, 11, 15, 12, 30))], None)   # noqa
     res = BP.day_slots(rl["db"], rl["mike"], day, pol, now_local=datetime(2026, 11, 14, 8), busy_reader=busy)
@@ -151,6 +155,10 @@ def test_calendar_conflict_and_unreadable_calendar(rl):
     down = lambda db, a, d: ([], "unreadable")                                           # noqa
     res = BP.day_slots(rl["db"], rl["mike"], day, pol, now_local=datetime(2026, 11, 14, 8), busy_reader=down)
     assert res["slots"] == [] and res["calendar_error"] == "unreadable"
+    # Restland: the calendar never takes a time away, and isn't needed to offer one.
+    rpol = BP.for_program(prog_of(rl))
+    res = BP.day_slots(rl["db"], rl["mike"], day, rpol, now_local=datetime(2026, 11, 14, 8), busy_reader=down)
+    assert [s[11:16] for s in res["slots"]] == ["10:00", "11:30", "13:00", "14:30", "16:00"]
 
 
 def test_same_day_notice_and_horizon(rl):
@@ -208,11 +216,12 @@ def test_home_and_office_share_one_calendar_and_keep_the_place(rl):
     b = db.query(BookingLink).filter_by(id=r["booking_id"]).one()
     assert (b.meeting_type, b.appt_duration) == ("home", 45) and b.visit_address.startswith("4521 Elm")
     assert b.booked_time == datetime(sun.year, sun.month, sun.day, 10, 0)
-    # The same time is gone for an office visit, and an off-grid time is refused.
+    # The same time is booked again for another family (owner, Nov 24: double and
+    # triple booking are fine), and a time the family asked for (10:45) is booked too.
     r2 = _book(rl, rl["leads"][3], datetime(sun.year, sun.month, sun.day, 10, 0), meeting_key="office")
-    assert r2["ok"] is False
+    assert r2["ok"] is True, r2
     r3 = _book(rl, rl["leads"][4], datetime(sun.year, sun.month, sun.day, 10, 45), meeting_key="office")
-    assert r3["ok"] is False
+    assert r3["ok"] is True, r3
     r4 = _book(rl, rl["leads"][5], datetime(sun.year, sun.month, sun.day, 11, 30), meeting_key="office")
     assert r4["ok"] is True
     assert db.query(BookingLink).filter_by(id=r4["booking_id"]).one().visit_address == BP.RESTLAND_ADDRESS
@@ -227,15 +236,9 @@ def test_reassignment_checks_the_new_person_and_is_audited(rl):
     sat = _next(5)
     r = _book(rl, rl["leads"][7], datetime(sat.year, sat.month, sat.day, 13, 0), meeting_key="office")
     b = db.query(BookingLink).filter_by(id=r["booking_id"]).one()
-    # Pat already has a visit then: refused, nothing changes.
+    # Pat already has a visit then - Restland double-books, so the move still goes through.
     db.add(BookingLink(lead_id=rl["leads"][8].id, user_id=rl["staff"].id, status="booked",
                        booked_time=datetime(sat.year, sat.month, sat.day, 13, 0), appt_duration=45))
-    db.commit()
-    with pytest.raises(ValueError):
-        BP.reassign(db, prog_of(rl), b, rl["staff"], rl["mike"], busy_reader=NO_BUSY)
-    db.refresh(b)
-    assert b.user_id == rl["mike"].id
-    db.query(BookingLink).filter(BookingLink.user_id == rl["staff"].id).delete()
     db.commit()
     out = BP.reassign(db, prog_of(rl), b, rl["staff"], rl["mike"], busy_reader=NO_BUSY)
     db.refresh(b)
@@ -514,3 +517,33 @@ def test_booking_page_context_and_weekend_slots_route(rl, client):
                                                  "token": link.token})
     assert res.status_code == 200
     assert "Weekend" not in (res.json().get("reason") or "")
+
+
+
+# ── Owner, Nov 24: book the customer's time, double or triple booked ────────
+
+def test_customer_time_is_always_bookable_even_triple_booked(rl):
+    db = rl["db"]
+    configured(rl)
+    assert BP.allows_overlap(BP.for_program(prog_of(rl)))
+    d = _next(1)
+    for i in (20, 21, 22):                                    # three families at 10:00 the same day
+        r = _book(rl, rl["leads"][i], datetime(d.year, d.month, d.day, 10, 0), meeting_key="office")
+        assert r["ok"] is True, r
+    assert db.query(BookingLink).filter(BookingLink.booked_time == datetime(d.year, d.month, d.day, 10, 0),
+                                        BookingLink.status == "booked").count() == 3
+
+
+def test_manual_time_any_minute_seven_to_eight_and_far_out(rl):
+    configured(rl)
+    pol = BP.for_program(prog_of(rl))
+    d = _next(2)
+    down = lambda db, a, day: ([], "unreadable")                  # noqa: E731 - calendar not needed
+    for hh, mm in ((7, 0), (9, 10), (17, 35), (20, 0)):
+        assert BP.is_open(rl["db"], rl["mike"], datetime(d.year, d.month, d.day, hh, mm), pol, busy_reader=down)
+    assert not BP.is_open(rl["db"], rl["mike"], datetime(d.year, d.month, d.day, 21, 0), pol, busy_reader=down)
+    far = date.today() + timedelta(days=40)                    # well past the two-week page window
+    assert BP.is_open(rl["db"], rl["mike"], datetime(far.year, far.month, far.day, 14, 0), pol, busy_reader=down)
+    # Offers (the booking page, the AI) keep the five set starts.
+    res = BP.day_slots(rl["db"], rl["mike"], d, pol, busy_reader=down)
+    assert [s[11:16] for s in res["slots"]] == ["10:00", "11:30", "13:00", "14:30", "16:00"]
