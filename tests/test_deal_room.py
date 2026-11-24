@@ -353,3 +353,54 @@ def test_opt_out_in_chat_stops_ai_and_outreach_but_keeps_the_room(client, room, 
     assert b.do_not_contact
     assert client.post(DR.__name__ and "/wholesale/deal-room/threads/%s/return-to-ai" % th["id"], headers=room["H"],
                        json={}).status_code == 409
+
+
+def test_staff_can_manage_manual_investors_and_delete_an_invite_without_deleting_the_account(
+    client, admin_auth_headers, db_session,
+):
+    A = admin_auth_headers
+    manual = DRS + "/manual-investors"
+    buyer_id = ok(client.post(manual, headers=A, json={
+        "name": "Manual Buyer", "email": "Buyer@practice.invalid", "is_test": True,
+    }))["id"]
+    assert ok(client.get(manual, headers=A))["investors"] == []
+    assert ok(client.get(manual + "?include_test=true", headers=A))["investors"][0]["email"] == "buyer@practice.invalid"
+    ok(client.patch(f"{manual}/{buyer_id}", headers=A, json={
+        "name": "Manual Buyer", "email": "buyer@practice.invalid", "phone": "555-0100",
+    }))
+    invite, token = _invite(client, A, "Manual Buyer", "buyer@practice.invalid", buyer_id)
+    edit = ok(client.patch(f"{DRS}/invites/{invite['id']}", headers=A, json={
+        "name": "Manual Buyer", "email": "corrected@practice.invalid",
+    }))
+    assert edit["status"] == "expired"
+    assert client.get(f"/investor/invite/{token}").status_code == 404
+    fresh = ok(client.post(f"{DRS}/invites/{invite['id']}/resend", headers=A))
+    investor = _accept(client, fresh["link"].rsplit("/", 1)[-1])
+    assert ok(client.get(manual + "?include_test=true", headers=A))["investors"] == []
+    row = ok(client.get(DRS + "/investors?include_test=true", headers=A))["investors"][0]
+    account = f"{DRS}/accounts/{row['account_id']}"
+    ok(client.patch(account, headers=A, json={
+        "name": "Corrected Buyer", "email": "contact@practice.invalid", "company": "Practice LLC",
+    }))
+    row = ok(client.get(DRS + "/investors?include_test=true", headers=A))["investors"][0]
+    assert (row["name"], row["email"], row["contact_email"]) == (
+        "Corrected Buyer", "corrected@practice.invalid", "contact@practice.invalid",
+    )
+    duplicate, duplicate_token = _invite(client, A, "Separate Invitation", "corrected@practice.invalid")
+    duplicate_path = f"{DRS}/invites/{duplicate['id']}"
+    ok(client.post(duplicate_path + "/revoke", headers=A))
+    assert any(i["id"] == duplicate["id"] and i["status"] == "revoked"
+               for i in ok(client.get(DRS + "/invites?include_test=true", headers=A))["invites"])
+    ok(client.delete(duplicate_path, headers=A))
+    assert client.get(f"/investor/invite/{duplicate_token}").status_code == 404
+    assert client.get("/investor/me", headers=investor).status_code == 200
+    ok(client.delete(account, headers=A))
+    assert client.get("/investor/me", headers=investor).status_code in (403, 404)
+    assert ok(client.get(DRS + "/investors?include_test=true", headers=A))["investors"] == []
+    assert db_session.get(WholesaleBuyer, buyer_id) is not None
+
+    remove_id = ok(client.post(manual, headers=A, json={"name": "Delete Manual", "is_test": True}))["id"]
+    _, removed_token = _invite(client, A, "Delete Manual", "delete@practice.invalid", remove_id)
+    ok(client.delete(f"{manual}/{remove_id}", headers=A))
+    assert client.get(f"/investor/invite/{removed_token}").status_code == 404
+    assert db_session.get(WholesaleBuyer, remove_id) is None

@@ -118,12 +118,22 @@ function Feed({ events }) {
 }
 
 // ── investors ──────────────────────────────────────────────────────────────
-function Investors({ practice, bump, done, fail, go, onInvite, openBuyer }) {
+function Investors({ practice, bump, done, fail, go, onInvite, openBuyer, active }) {
   const [d, setD] = useState(null)
   const [inv, setInv] = useState(null)
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(null)
   const [link, setLink] = useState(null)
+  const [manual, setManual] = useState([])
+  const [editor, setEditor] = useState(null)
+  const [inviteBuyer, setInviteBuyer] = useState(null)
+  useEffect(() => {
+    let current = true
+    api.get(`${DRS}/manual-investors?include_test=${practice}`).then((r) => {
+      if (current) setManual(r.investors)
+    }).catch(fail)
+    return () => { current = false }
+  }, [practice, bump, fail])
   useEffect(() => {
     const t = setTimeout(() => {
       api.get(`${DRS}/investors?include_test=${practice}${q ? '&q=' + encodeURIComponent(q) : ''}`).then((x) => setD(x.investors)).catch(fail)
@@ -133,8 +143,15 @@ function Investors({ practice, bump, done, fail, go, onInvite, openBuyer }) {
   useEffect(() => { api.get(`${DRS}/invites?include_test=${practice}`).then((x) => setInv(x.invites)).catch(fail) }, [practice, bump, fail])
   useEffect(() => { if (openBuyer && d && !open) { const x = d.find((y) => y.buyer_id === openBuyer); if (x) setOpen(x) } }, [openBuyer, d]) // eslint-disable-line react-hooks/exhaustive-deps
   const resend = async (i) => { try { setLink(await api.post(`${DRS}/invites/${i.id}/resend`, {})); done('New link issued; the old one no longer works.') } catch (x) { fail(x) } }
-  const revoke = async (i) => { if (!window.confirm(`Revoke ${i.name}'s invitation?`)) return; try { await api.post(`${DRS}/invites/${i.id}/revoke`, {}); done('Invitation revoked.') } catch (x) { fail(x) } }
+  const revoke = async (i) => { if (!window.confirm(`Revoke ${i.name}'s invitation?`)) return; try { await api.post(`${DRS}/invites/${i.id}/revoke`, {}); setLink(null); done('Invitation revoked.') } catch (x) { fail(x) } }
+  const remove = async (path, prompt, message) => {
+    if (!window.confirm(prompt)) return
+    try { await api.delete(path); setLink(null); setOpen(null); done(message) } catch (e) { fail(e) }
+  }
   const pending = (inv || []).filter((i) => i.status !== 'accepted')
+  const manualResults = manual.filter((r) =>
+    [r.name, r.company, r.email].filter(Boolean).join(' ').toLowerCase().includes(q.trim().toLowerCase()))
+
   return (
     <>
       <section className="drm-card">
@@ -144,6 +161,8 @@ function Investors({ practice, bump, done, fail, go, onInvite, openBuyer }) {
             <label className="evo-sr" htmlFor="drm-q">Search investors</label>
             <input id="drm-q" className="evo-input drm-search" placeholder="Search name, company or email" value={q} onChange={(e) => setQ(e.target.value)} />
             <button type="button" className="evo-btn evo-btn--primary evo-btn--sm" onClick={onInvite}>Invite investor</button>
+            <button type="button" className="evo-btn evo-btn--secondary evo-btn--sm"
+                    onClick={() => setEditor({ type: 'manual', record: {} })}>Add investor manually</button>
           </div>
         </div>
         {!d ? <Skeleton rows={4} /> : d.length ? (
@@ -165,8 +184,23 @@ function Investors({ practice, bump, done, fail, go, onInvite, openBuyer }) {
               </button>
             ))}
           </div>
-        ) : <Empty title="No investors yet">Invite an investor - they appear here when they accept.</Empty>}
+        ) : <Empty title="No investors yet">Investors appear here once they accept an invitation.</Empty>}
       </section>
+      {manualResults.length ? <section className="drm-card">
+        <div className="drm-card__head"><h2 className="drm-h3">Manually added investors <span className="drm-count">{manualResults.length}</span></h2></div>
+        <ul className="drm-list drm-investor-records">
+          {manualResults.map((r) => <li key={r.buyer_id}>
+            <span><b>{r.name}</b><small>{[r.company, r.email, r.phone, r.is_test ? 'Practice' : null].filter(Boolean).join(' · ')}</small></span>
+            <div className="drm-row">
+              <button type="button" className="evo-btn evo-btn--sm" onClick={() => setEditor({ type: 'manual', record: r })}>Edit</button>
+              <button type="button" className="evo-btn evo-btn--sm" onClick={() => setInviteBuyer({ id: r.buyer_id, name: r.name, company_name: r.company, email: r.email })}>Invite</button>
+              <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => remove(
+                `${DRS}/manual-investors/${r.buyer_id}`, `Delete the buyer record for ${r.name}?`, 'Manual investor deleted.',
+              )}>Delete</button>
+            </div>
+          </li>)}
+        </ul>
+      </section> : null}
       <section className="drm-card">
         <div className="drm-card__head"><h2 className="drm-h3">Invitations <span className="drm-count">{pending.length}</span></h2></div>
         {link ? (
@@ -178,27 +212,98 @@ function Investors({ practice, bump, done, fail, go, onInvite, openBuyer }) {
           </div>
         ) : null}
         {!inv ? <Skeleton rows={2} /> : pending.length ? (
-          <div className="evo-table-wrap"><table className="evo-table">
-            <thead><tr><th scope="col">Investor</th><th scope="col">Status</th><th scope="col">Sent</th><th scope="col">Delivery</th><th scope="col"><span className="evo-sr">Actions</span></th></tr></thead>
-            <tbody>{pending.map((i) => (
-              <tr key={i.id}>
-                <td><b>{i.name}</b>{i.is_test ? <> <Tag>Practice</Tag></> : null}<div className="evo-small evo-muted">{i.email}</div></td>
-                <td><Tag kind={i.status === 'pending' ? 'info' : undefined}>{i.status === 'pending' ? 'Not registered yet' : cap(i.status)}</Tag></td>
-                <td className="evo-small">{i.send_count}× · last {when(i.last_sent_at)}</td>
-                <td className="evo-small">{i.delivery && i.delivery.startsWith('not_sent') ? 'Link only (not emailed)' : cap(i.delivery)}</td>
-                <td><div className="drm-row">{i.status === 'pending' || i.status === 'expired' ? <>
-                  <button type="button" className="evo-btn evo-btn--sm" onClick={() => resend(i)}>New link</button>
-                  {i.status === 'pending' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => revoke(i)}>Revoke</button> : null}</> : null}</div></td>
-              </tr>))}</tbody>
-          </table></div>
+          <ul className="drm-list drm-investor-records">
+            {pending.map((i) => <li key={i.id}>
+              <span>
+                <b>{i.name}</b><small>{[i.email, i.is_test ? 'Practice' : null].filter(Boolean).join(' · ')}</small>
+                <small>{i.send_count} sent · {when(i.last_sent_at)}{i.delivery?.startsWith('not_sent') ? ' · Link only' : ''}</small>
+              </span>
+              <Tag kind={i.status === 'pending' ? 'info' : undefined}>{i.status === 'pending' ? 'Not registered yet' : cap(i.status)}</Tag>
+              <div className="drm-row">
+                <button type="button" className="evo-btn evo-btn--sm" onClick={() => setEditor({ type: 'invite', record: i })}>Edit</button>
+                {['pending', 'expired'].includes(i.status) ? <button type="button" className="evo-btn evo-btn--sm" onClick={() => resend(i)}>New link</button> : null}
+                {i.status === 'pending' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => revoke(i)}>Revoke</button> : null}
+                <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => remove(
+                  `${DRS}/invites/${i.id}`, `Delete ${i.name}'s invitation? Its link will stop working.`, 'Invitation deleted.',
+                )}>Delete</button>
+              </div>
+            </li>)}
+          </ul>
         ) : <p className="evo-small evo-muted">No open invitations.</p>}
       </section>
-      {open ? <InvestorDrawer x={open} onClose={() => setOpen(null)} done={done} fail={fail} go={go} /> : null}
+      {open && !editor ? <InvestorDrawer x={open} onClose={() => setOpen(null)} done={done} fail={fail} go={go}
+        onEdit={() => setEditor({ type: 'account', record: open })}
+        onDelete={() => remove(`${DRS}/accounts/${open.account_id}`,
+          `Delete ${open.name}'s Deal Room account? This removes their portal access and keeps the buyer and deal history.`,
+          'Deal Room account deleted.')} /> : null}
+      {editor ? <InvestorEditor {...editor} onClose={() => setEditor(null)} onSaved={(message) => {
+        setEditor(null); setLink(null); setOpen(null); done(message)
+      }} /> : null}
+      {inviteBuyer ? <InviteDrawer open buyer={inviteBuyer} roomActive={active} onDone={done} onClose={() => setInviteBuyer(null)} /> : null}
     </>
   )
 }
 
-function InvestorDrawer({ x, onClose, done, fail, go }) {
+function InvestorEditor({ type, record, onClose, onSaved }) {
+  const registered = type === 'account'
+  const invitation = type === 'invite'
+  const creating = type === 'manual' && !record.buyer_id
+  const [form, setForm] = useState({
+    name: record.legal_name || record.name || '',
+    email: (registered ? record.contact_email : record.email) || '',
+    company: record.company || '',
+    phone: record.phone || '',
+    preferred_name: record.preferred_name || '',
+    position: record.position || '',
+    is_test: false,
+  })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const fields = [
+    ['name', registered ? 'Legal name' : 'Name'],
+    ...(registered ? [['preferred_name', 'Preferred name']] : []),
+    ['email', registered ? 'Contact email' : 'Email', 'email'],
+    ['company', 'Company'],
+    ...(!invitation ? [['phone', 'Phone', 'tel']] : []),
+    ...(registered ? [['position', 'Position']] : []),
+  ]
+  const submit = async (e) => {
+    e.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      if (creating) await api.post(`${DRS}/manual-investors`, form)
+      else if (registered) await api.patch(`${DRS}/accounts/${record.account_id}`, form)
+      else if (invitation) await api.patch(`${DRS}/invites/${record.id}`, form)
+      else await api.patch(`${DRS}/manual-investors/${record.buyer_id}`, form)
+      onSaved(creating ? 'Investor added.' : invitation ? 'Invitation updated.' : 'Investor profile updated.')
+    } catch (e) {
+      setError(errText(e))
+      setBusy(false)
+    }
+  }
+  return (
+    <Drawer open onClose={() => { if (!busy) onClose() }}
+            title={creating ? 'Add investor manually' : invitation ? 'Edit invitation' : 'Edit investor profile'}>
+      <form className="drm-form" onSubmit={submit}>
+        {fields.map(([key, label, inputType]) => <label className="drm-field" key={key}>
+          <span>{label}</span>
+          <input type={inputType || 'text'} value={form[key]} required={key === 'name' || (invitation && key === 'email')}
+                 onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
+        </label>)}
+        {creating ? <label className="drm-check"><input type="checkbox" checked={form.is_test}
+          onChange={(e) => setForm({ ...form, is_test: e.target.checked })} />Practice investor</label> : null}
+        {creating ? <p className="evo-small evo-muted">Adding a profile sends no email and grants no portal access.</p> : null}
+        {registered ? <p className="evo-small evo-muted">Portal sign-in email is {record.email}.</p> : null}
+        {invitation ? <p className="evo-small evo-muted">Changing the email invalidates the old invitation link. Use New link to send a replacement.</p> : null}
+        <Alert>{error}</Alert>
+        <button type="submit" className="evo-btn evo-btn--primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+      </form>
+    </Drawer>
+  )
+}
+
+function InvestorDrawer({ x, onClose, done, fail, go, onEdit, onDelete }) {
   const [room, setRoom] = useState(null)
   const nav = useNavigate()
   useEffect(() => { api.get(`${DRS}/buyers/${x.buyer_id}`).then(setRoom).catch(fail) }, [x.buyer_id, fail])
@@ -210,7 +315,9 @@ function InvestorDrawer({ x, onClose, done, fail, go }) {
             footer={<div className="drm-row drm-row--gap">
               <button type="button" className="evo-btn evo-btn--primary" onClick={() => nav(`/wholesale/buyers?buyer=${x.buyer_id}`)}>Open full buyer profile</button>
               <button type="button" className="evo-btn evo-btn--secondary" onClick={() => { onClose(); go('messages') }}>Messages</button>
-              {x.status === 'active' ? <button type="button" className="evo-btn evo-btn--ghost" onClick={() => setStatus('suspended')}>Suspend access</button>
+              <button type="button" className="evo-btn evo-btn--secondary" onClick={onEdit}>Edit profile</button>
+              <button type="button" className="evo-btn evo-btn--ghost" onClick={onDelete}>Delete account</button>
+              {x.status === 'active' ? <button type="button" className="evo-btn evo-btn--ghost" onClick={() => setStatus('disabled')}>Suspend access</button>
                 : <button type="button" className="evo-btn evo-btn--ghost" onClick={() => setStatus('active')}>Restore access</button>}
             </div>}>
       <div className="drm-dl">
@@ -218,7 +325,8 @@ function InvestorDrawer({ x, onClose, done, fail, go }) {
         <div><dt>Legal name</dt><dd>{x.legal_name || '—'}</dd></div>
         <div><dt>Position</dt><dd>{x.position || '—'}</dd></div>
         <div><dt>Phone</dt><dd>{x.phone || '—'}</dd></div>
-        <div><dt>Email</dt><dd>{x.email}{x.email_verified ? ' (verified)' : ''}</dd></div>
+        <div><dt>Contact email</dt><dd>{x.contact_email || '—'}</dd></div>
+        <div><dt>Sign-in email</dt><dd>{x.email}{x.email_verified ? ' (verified)' : ''}</dd></div>
         <div><dt>Joined</dt><dd>{day(x.joined_at)}</dd></div>
       </div>
       {x.intel ? (

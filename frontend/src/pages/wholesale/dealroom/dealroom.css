@@ -442,3 +442,21 @@
 }
 @media (max-width: 1100px) { .od-lcta.od-lcta--span1, .od-lcta.od-lcta--span2, .od-lcta.od-lcta--span3 { grid-column: 1 / -1; } }
 .od-lcard__media { aspect-ratio: 2 / 1; }
+
+.drm-investor-records > li {
+  flex-wrap: wrap;
+  gap: .75rem;
+}
+
+.drm-investor-records > li > span:first-child {
+  flex: 1 1 12rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .drm-investor-records > li > .drm-row {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+  }
+}

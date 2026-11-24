@@ -36,6 +36,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 from app.models.models import Organization, User
@@ -200,9 +201,16 @@ def create_invite(db, org_id: str, user, *, name: str, email: str, company: Opti
 
 
 def resend_invite(db, org_id: str, invite_id: str, user) -> Tuple[InvestorInvite, str]:
+    from app.services import wholesale_deal_room_setup as SET
+
     inv = _invite(db, org_id, invite_id)
     if inv.status not in (INVITE_PENDING, INVITE_EXPIRED):
         raise HTTPException(status_code=409, detail="This invitation was %s." % inv.status)
+    SET.require_active(db, org_id, bool(inv.is_test), "sending a real invitation")
+    if inv.buyer_id and db.query(WholesaleBuyer.id).filter_by(
+        id=inv.buyer_id, organization_id=org_id, do_not_contact=True,
+    ).first():
+        raise HTTPException(409, "This buyer asked not to be contacted.")
     token = secrets.token_urlsafe(32)                 # the old link stops working
     inv.token_hash, inv.status, inv.expires_at = _sha(token), INVITE_PENDING, _now() + timedelta(days=INVITE_DAYS)
     inv.last_delivery = _send_invite_email(db, inv, token)
@@ -222,16 +230,17 @@ def revoke_invite(db, org_id: str, invite_id: str, user) -> InvestorInvite:
 
 def _invite(db, org_id, invite_id) -> InvestorInvite:
     inv = db.query(InvestorInvite).filter(InvestorInvite.id == invite_id,
-                                          InvestorInvite.organization_id == org_id).first()
+                                          InvestorInvite.organization_id == org_id).with_for_update().first()
     if inv is None:
         raise HTTPException(status_code=404, detail="Invitation not found")
     return inv
 
 
-def _by_token(db, token: str) -> InvestorInvite:
+def _by_token(db, token: str, *, for_update=False) -> InvestorInvite:
     if not token or len(token) < 20 or len(token) > 120:
         raise HTTPException(status_code=404, detail="This invitation link is not valid.")
-    inv = db.query(InvestorInvite).filter(InvestorInvite.token_hash == _sha(token)).first()
+    query = db.query(InvestorInvite).filter(InvestorInvite.token_hash == _sha(token))
+    inv = (query.with_for_update() if for_update else query).first()
     if inv is None:
         raise HTTPException(status_code=404, detail="This invitation link is not valid or was replaced by a newer one.")
     if inv.status == INVITE_PENDING and inv.expires_at < _now():
@@ -266,7 +275,7 @@ def accept_invite(db, token: str, *, password: str, full_name: Optional[str] = N
     after its password is proven), tie it to ONE buyer record, verify the email
     (the emailed link proves control of it), and burn the token."""
     from app.services.auth_service import hash_password, verify_password
-    inv = _by_token(db, token)
+    inv = _by_token(db, token, for_update=True)
     user = db.query(User).filter(User.email == inv.email).first()
     if user is not None and user.role != "investor":
         raise HTTPException(status_code=409, detail="That email belongs to a staff login. Ask for an invitation "
@@ -311,7 +320,7 @@ def _link_buyer(db, inv: InvestorInvite) -> WholesaleBuyer:
     workspace, else a new buyer (source deal_room)."""
     if inv.buyer_id:
         b = db.query(WholesaleBuyer).filter(WholesaleBuyer.id == inv.buyer_id,
-                                            WholesaleBuyer.organization_id == inv.organization_id).first()
+                                            WholesaleBuyer.organization_id == inv.organization_id).with_for_update().first()
         if b is not None:
             if not b.email:
                 b.email = inv.email
@@ -1225,18 +1234,147 @@ def accounts_for_buyer(db, org_id: str, buyer_id: str) -> List[Dict[str, Any]]:
 
 
 def set_account_status(db, org_id: str, account_id: str, status: str, user) -> InvestorAccount:
-    a = db.query(InvestorAccount).filter(InvestorAccount.id == account_id,
-                                         InvestorAccount.organization_id == org_id).first()
-    if a is None:
-        raise HTTPException(status_code=404, detail="Investor not found")
+    a = _staff_account(db, org_id, account_id)
     if status not in ("active", "disabled"):
         raise HTTPException(status_code=400, detail="status must be active or disabled")
     a.status = status
     if status == "disabled":
         from app.services import session_service
         try:
-            session_service.revoke_all_for_user(db, a.user_id)
+            session_service.revoke_all_for_user(db, a.user_id, commit=False)
         except Exception:  # noqa: BLE001 - access is refused by the account status anyway
             pass
     log(db, org_id, "deal_room.account_%s" % status, "Deal Room access %s" % status, user)
     return a
+
+
+MANUAL_INVESTOR_SOURCE = "deal_room_manual"
+
+
+def _profile_fields(data, *, require_email=False):
+    name = (data.get("name") or "").strip()[:120]
+    email = (data.get("email") or "").strip().lower()
+    if not name:
+        raise HTTPException(400, "Enter the investor's name.")
+    if (email or require_email) and (len(email) > 254 or not EMAIL_RE.fullmatch(email)):
+        raise HTTPException(400, "Enter a valid email address.")
+    return name, email or None, (data.get("company") or "").strip()[:160] or None
+
+
+def save_manual_investor(db, org_id, user, data, buyer_id=None):
+    name, email, company = _profile_fields(data)
+    if buyer_id:
+        buyer = (db.query(WholesaleBuyer).filter_by(id=buyer_id, organization_id=org_id,
+                 source=MANUAL_INVESTOR_SOURCE).with_for_update().first())
+        if buyer is None:
+            raise HTTPException(404, "Manual investor not found.")
+        if accounts_for_buyer(db, org_id, buyer.id):
+            raise HTTPException(409, "This investor has registered. Open their account to edit it.")
+    else:
+        buyer = WholesaleBuyer(organization_id=org_id, source=MANUAL_INVESTOR_SOURCE,
+                               is_test=bool(data.get("is_test")))
+    if email and db.query(WholesaleBuyer.id).filter(
+        WholesaleBuyer.organization_id == org_id, WholesaleBuyer.is_test.is_(bool(buyer.is_test)),
+        func.lower(WholesaleBuyer.email) == email, WholesaleBuyer.id != buyer.id,
+    ).first():
+        raise HTTPException(409, "A buyer with that email already exists in this workspace.")
+    buyer.contact_name, buyer.email, buyer.company_name = name, email, company
+    buyer.phone = (data.get("phone") or "").strip()[:200] or None
+    buyer.entity_type = "company" if company else "person"
+    db.add(buyer)
+    db.flush()
+    log(db, org_id, "deal_room.manual_investor_saved", "Manual investor saved", user,
+        details={"buyer_id": buyer.id})
+    return buyer
+
+
+def edit_invite(db, org_id, invite_id, user, data):
+    inv = _invite(db, org_id, invite_id)
+    if inv.status == INVITE_ACCEPTED:
+        raise HTTPException(409, "This invitation was accepted. Edit the investor profile.")
+    name, email, company = _profile_fields(data, require_email=True)
+    if email != inv.email:
+        if inv.buyer_id and accounts_for_buyer(db, org_id, inv.buyer_id):
+            raise HTTPException(409, "This invitation is linked to a registered buyer. Ask an owner to review the existing account.")
+        if db.query(User.id).filter(func.lower(User.email) == email, User.role != "investor").first():
+            raise HTTPException(409, "That email belongs to a staff login.")
+        if db.query(InvestorInvite.id).filter(
+            InvestorInvite.organization_id == org_id, InvestorInvite.id != inv.id,
+            func.lower(InvestorInvite.email) == email, InvestorInvite.status == INVITE_PENDING,
+            InvestorInvite.expires_at >= _now(),
+        ).first():
+            raise HTTPException(409, "An invitation to that email is already pending.")
+        inv.token_hash = None
+        if inv.status != INVITE_REVOKED:
+            inv.status = INVITE_EXPIRED
+    inv.name, inv.email, inv.company = name, email, company
+    log(db, org_id, "deal_room.invite_updated", "Investor invitation updated", user,
+        details={"invite_id": inv.id})
+    return inv
+
+
+def delete_invite(db, org_id, invite_id, user):
+    inv = _invite(db, org_id, invite_id)
+    if inv.status == INVITE_ACCEPTED:
+        raise HTTPException(409, "This invitation was accepted. Manage the investor profile.")
+    db.delete(inv)
+    log(db, org_id, "deal_room.invite_deleted", "Investor invitation deleted", user,
+        details={"invite_id": invite_id})
+
+
+def update_investor_profile(db, org_id, account_id, user, data):
+    account = _staff_account(db, org_id, account_id)
+    buyer = buyer_of(db, account)
+    name, email, company = _profile_fields(data)
+    account.legal_name = name
+    account.preferred_name = (data.get("preferred_name") or "").strip()[:120] or None
+    account.company_legal_name = company
+    account.phone = (data.get("phone") or "").strip()[:200] or None
+    account.position = (data.get("position") or "").strip()[:200] or None
+    other_representative = db.query(InvestorAccount.id).filter(
+        InvestorAccount.organization_id == org_id, InvestorAccount.buyer_id == buyer.id,
+        InvestorAccount.id != account.id,
+    ).first()
+    if other_representative and email != buyer.email:
+        raise HTTPException(409, "This buyer has multiple representatives. Update the shared contact email in the full buyer profile.")
+    if not other_representative:
+        buyer.contact_name = name
+        buyer.email = email
+        buyer.phone = account.phone
+    if account.kind == "business" and not company:
+        account.identity_completed_at = None
+    log(db, org_id, "deal_room.account_updated", "Investor profile updated", user,
+        details={"account_id": account.id})
+
+
+def _staff_account(db, org_id, account_id):
+    account = db.query(InvestorAccount).filter_by(
+        id=account_id, organization_id=org_id,
+    ).with_for_update().first()
+    if account is None:
+        raise HTTPException(404, "Investor not found.")
+    return account
+
+
+def delete_investor_account(db, org_id, account_id, user):
+    account = _staff_account(db, org_id, account_id)
+    buyer = db.query(WholesaleBuyer).filter_by(id=account.buyer_id, organization_id=org_id).first()
+    login = db.get(User, account.user_id)
+    if buyer:
+        if buyer.source == MANUAL_INVESTOR_SOURCE:
+            buyer.source = "deal_room"
+        # Invitations explicitly addressed to this buyer and login must no
+        # longer restore access. A different recipient or an unlinked invite
+        # needs its own staff decision.
+        if login:
+            pending = db.query(InvestorInvite).filter(
+                InvestorInvite.organization_id == org_id, InvestorInvite.buyer_id == buyer.id,
+                func.lower(InvestorInvite.email) == login.email.lower(),
+                InvestorInvite.status.in_((INVITE_PENDING, INVITE_EXPIRED)),
+            ).with_for_update().all()
+            for invite in pending:
+                invite.status, invite.token_hash = INVITE_REVOKED, None
+                invite.revoked_at, invite.revoked_by_id = _now(), user.id
+    db.delete(account)
+    log(db, org_id, "deal_room.account_deleted", "Investor account deleted", user,
+        details={"account_id": account_id, "buyer_id": account.buyer_id})
