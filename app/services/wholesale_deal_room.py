@@ -276,7 +276,7 @@ def accept_invite(db, token: str, *, password: str, full_name: Optional[str] = N
     (the emailed link proves control of it), and burn the token."""
     from app.services.auth_service import hash_password, verify_password
     inv = _by_token(db, token, for_update=True)
-    user = db.query(User).filter(User.email == inv.email).first()
+    user = db.query(User).filter(User.email == inv.email).with_for_update().first()
     if user is not None and user.role != "investor":
         raise HTTPException(status_code=409, detail="That email belongs to a staff login. Ask for an invitation "
                                                     "to a different email address.")
@@ -294,7 +294,9 @@ def accept_invite(db, token: str, *, password: str, full_name: Optional[str] = N
             raise HTTPException(status_code=401, detail="That password does not match your existing Deal Room login.")
     acct = db.query(InvestorAccount).filter(InvestorAccount.organization_id == inv.organization_id,
                                             InvestorAccount.user_id == user.id).first()
-    buyer = _link_buyer(db, inv)
+    if acct and (bool(acct.is_test) != bool(inv.is_test) or (inv.buyer_id and inv.buyer_id != acct.buyer_id)):
+        raise HTTPException(409, "This invitation conflicts with your existing Deal Room profile. Ask the sender for a corrected invitation.")
+    buyer = buyer_of(db, acct) if acct and acct.buyer_id else _link_buyer(db, inv)
     if acct is None:
         acct = InvestorAccount(organization_id=inv.organization_id, user_id=user.id, buyer_id=buyer.id,
                                invite_id=inv.id, kind=kind if kind in ("individual", "business") else None,
@@ -302,6 +304,8 @@ def accept_invite(db, token: str, *, password: str, full_name: Optional[str] = N
                                assigned_user_id=inv.owner_user_id, is_test=bool(inv.is_test),
                                channels=json.dumps(["portal"]))
         db.add(acct)
+    elif not acct.buyer_id:
+        acct.buyer_id = buyer.id
     acct.email_verified_at = _now()
     acct.status = "active"
     inv.status, inv.token_hash, inv.accepted_at, inv.accepted_user_id = INVITE_ACCEPTED, None, _now(), user.id
@@ -1331,6 +1335,12 @@ def update_investor_profile(db, org_id, account_id, user, data):
     account.company_legal_name = company
     account.phone = (data.get("phone") or "").strip()[:200] or None
     account.position = (data.get("position") or "").strip()[:200] or None
+    if not db.query(InvestorAccount.id).filter(
+        InvestorAccount.user_id == account.user_id, InvestorAccount.id != account.id,
+    ).first():
+        login = db.get(User, account.user_id)
+        if login and login.role == "investor":
+            login.full_name = account.preferred_name or name
     other_representative = db.query(InvestorAccount.id).filter(
         InvestorAccount.organization_id == org_id, InvestorAccount.buyer_id == buyer.id,
         InvestorAccount.id != account.id,
@@ -1378,3 +1388,76 @@ def delete_investor_account(db, org_id, account_id, user):
     db.delete(account)
     log(db, org_id, "deal_room.account_deleted", "Investor account deleted", user,
         details={"account_id": account_id, "buyer_id": account.buyer_id})
+
+
+def practice_login_conflicts(db, org_id, invitations):
+    """Return only practice logins whose workspace can make the decision."""
+    emails = {i.email.strip().lower() for i in invitations
+              if not i.is_test and i.status in (INVITE_PENDING, INVITE_EXPIRED)}
+    if not emails:
+        return {}
+    rows = db.query(InvestorAccount, User).join(User, User.id == InvestorAccount.user_id).filter(
+        InvestorAccount.organization_id == org_id, InvestorAccount.is_test.is_(True),
+        User.role == "investor", func.lower(User.email).in_(emails),
+    ).all()
+    return {u.email.lower(): {"account_id": a.id, "name": a.preferred_name or a.legal_name or u.full_name}
+            for a, u in rows}
+
+
+def reassign_practice_email(db, org_id, invite_id, account_id, actor):
+    from app.models.esign_models import EsignSigner
+    from app.services import session_service
+    from app.services import wholesale_deal_room_setup as SET
+
+    invite = _invite(db, org_id, invite_id)
+    if invite.is_test or invite.status not in (INVITE_PENDING, INVITE_EXPIRED):
+        raise HTTPException(409, "Choose an open or expired live invitation.")
+    SET.require_active(db, org_id, False, "reissuing a real invitation")
+    acct = _staff_account(db, org_id, account_id)
+    login = db.query(User).filter_by(id=acct.user_id).with_for_update().first()
+    email = invite.email.strip().lower()
+    if not acct.is_test or not login or login.role != "investor" or login.email.lower() != email:
+        raise HTTPException(409, "The practice login no longer matches this invitation.")
+    if db.query(User.id).filter(func.lower(User.email) == email, User.id != login.id).first():
+        raise HTTPException(409, "More than one platform login uses this email. Review those accounts first.")
+    if login.organization_id or db.query(InvestorAccount.id).filter(
+        InvestorAccount.user_id == login.id, InvestorAccount.id != acct.id,
+    ).first():
+        raise HTTPException(409, "This sign-in is shared across Deal Rooms and needs an account review.")
+    if db.query(EsignSigner.id).filter(func.lower(EsignSigner.email) == email).first():
+        raise HTTPException(409, "This email is attached to signature history. Use a different sign-in email.")
+    if db.query(InvestorInvite.id).filter(
+        InvestorInvite.id != invite.id, func.lower(InvestorInvite.email) == email,
+        InvestorInvite.status == INVITE_PENDING, InvestorInvite.expires_at >= _now(),
+    ).first():
+        raise HTTPException(409, "Another invitation uses this email. Resolve the other invitation first.")
+
+    if invite.buyer_id:
+        buyer = db.query(WholesaleBuyer).filter_by(id=invite.buyer_id, organization_id=org_id).first()
+        if not buyer or buyer.is_test or buyer.id == acct.buyer_id or buyer.do_not_contact:
+            raise HTTPException(409, "Choose an invitation for an eligible live buyer.")
+        if accounts_for_buyer(db, org_id, buyer.id):
+            raise HTTPException(409, "That buyer already has a Deal Room account.")
+    else:
+        if db.query(WholesaleBuyer.id).filter(
+            WholesaleBuyer.organization_id == org_id, func.lower(WholesaleBuyer.email) == email,
+            WholesaleBuyer.do_not_contact.is_(True),
+        ).first():
+            raise HTTPException(409, "This buyer asked not to be contacted.")
+        # A new registration must never fall back to looking up the old buyer by email.
+        buyer = WholesaleBuyer(organization_id=org_id, source="deal_room", is_test=False,
+                               contact_name=invite.name, company_name=invite.company, email=email,
+                               entity_type="company" if invite.company else "person")
+        db.add(buyer)
+        db.flush()
+        invite.buyer_id = buyer.id
+
+    acct.status = "disabled"
+    login.email = f"retired-investor-{login.id}@account.invalid"
+    login.is_active = False
+    login.session_token = None
+    session_service.revoke_all_for_user(db, login.id, commit=False)
+    invite.email = email
+    log(db, org_id, "deal_room.practice_email_reassigned", "Practice sign-in released for a live invitation",
+        actor, details={"account_id": acct.id, "invite_id": invite.id, "buyer_id": buyer.id})
+    return resend_invite(db, org_id, invite.id, actor)

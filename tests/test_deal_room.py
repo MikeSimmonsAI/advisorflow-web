@@ -404,3 +404,33 @@ def test_staff_can_manage_manual_investors_and_delete_an_invite_without_deleting
     ok(client.delete(f"{manual}/{remove_id}", headers=A))
     assert client.get(f"/investor/invite/{removed_token}").status_code == 404
     assert db_session.get(WholesaleBuyer, remove_id) is None
+
+
+def test_reassign_practice_login_to_a_live_invitation(client, admin_auth_headers, monkeypatch):
+    from app.services import wholesale_deal_room_setup as SET
+
+    staff = admin_auth_headers
+    email = "reassign@practice.invalid"
+    _, practice_token = _invite(client, staff, "Paula Practice", email)
+    prior_login = _accept(client, practice_token)
+    previous = ok(client.get(DRS + "/investors?include_test=true", headers=staff))["investors"][0]
+
+    monkeypatch.setattr(SET, "is_active", lambda *_: True)
+    invite = ok(client.post(DRS + "/invites", headers=staff, json={"name": "Matthew Live", "email": email}))
+    old_token = invite["link"].rsplit("/", 1)[-1]
+    rows = ok(client.get(DRS + "/invites", headers=staff))["invites"]
+    assert rows[0]["practice_login"] == {"account_id": previous["account_id"], "name": "Paula Practice"}
+
+    path = f"{DRS}/invites/{invite['id']}/reassign-email"
+    fresh = ok(client.post(path, headers=staff, json={"account_id": previous["account_id"]}))
+    assert client.get(f"/investor/invite/{old_token}").status_code == 404
+    assert client.get("/investor/me", headers=prior_login).status_code in (401, 403, 404)
+    token = fresh["link"].rsplit("/", 1)[-1]
+    assert ok(client.get(f"/investor/invite/{token}"))["next"] == "register"
+    _accept(client, token, password="Matthew-New-2026")
+    live = ok(client.get(DRS + "/investors", headers=staff))["investors"][0]
+    assert live["email"] == email and live["name"] == "Matthew Live"
+    assert live["buyer_id"] != previous["buyer_id"]
+    prior = next(r for r in ok(client.get(DRS + "/investors?include_test=true", headers=staff))["investors"]
+                 if r["account_id"] == previous["account_id"])
+    assert prior["status"] == "disabled" and prior["name"] == "Paula Practice"

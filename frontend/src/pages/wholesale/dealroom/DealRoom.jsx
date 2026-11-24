@@ -143,6 +143,17 @@ function Investors({ practice, bump, done, fail, go, onInvite, openBuyer, active
   useEffect(() => { api.get(`${DRS}/invites?include_test=${practice}`).then((x) => setInv(x.invites)).catch(fail) }, [practice, bump, fail])
   useEffect(() => { if (openBuyer && d && !open) { const x = d.find((y) => y.buyer_id === openBuyer); if (x) setOpen(x) } }, [openBuyer, d]) // eslint-disable-line react-hooks/exhaustive-deps
   const resend = async (i) => { try { setLink(await api.post(`${DRS}/invites/${i.id}/resend`, {})); done('New link issued; the old one no longer works.') } catch (x) { fail(x) } }
+  const [reassigning, setReassigning] = useState(false)
+  const reassign = async (i) => {
+    const prior = i.practice_login
+    if (!window.confirm(`Release ${i.email} from ${prior.name}'s practice sign-in and send a fresh invitation to ${i.name}?`)) return
+    setReassigning(true)
+    try {
+      const fresh = await api.post(`${DRS}/invites/${i.id}/reassign-email`, { account_id: prior.account_id })
+      setLink(fresh)
+      done(fresh.delivery === 'delivered' ? 'Email reassigned and invitation sent.' : 'Email reassigned. Copy the new invitation link to share it.')
+    } catch (e) { fail(e) } finally { setReassigning(false) }
+  }
   const revoke = async (i) => { if (!window.confirm(`Revoke ${i.name}'s invitation?`)) return; try { await api.post(`${DRS}/invites/${i.id}/revoke`, {}); setLink(null); done('Invitation revoked.') } catch (x) { fail(x) } }
   const remove = async (path, prompt, message) => {
     if (!window.confirm(prompt)) return
@@ -216,12 +227,15 @@ function Investors({ practice, bump, done, fail, go, onInvite, openBuyer, active
             {pending.map((i) => <li key={i.id}>
               <span>
                 <b>{i.name}</b><small>{[i.email, i.is_test ? 'Practice' : null].filter(Boolean).join(' · ')}</small>
+                {i.practice_login && ['pending', 'expired'].includes(i.status) ? <small>Practice sign-in · {i.practice_login.name}</small> : null}
                 <small>{i.send_count} sent · {when(i.last_sent_at)}{i.delivery?.startsWith('not_sent') ? ' · Link only' : ''}</small>
               </span>
               <Tag kind={i.status === 'pending' ? 'info' : undefined}>{i.status === 'pending' ? 'Not registered yet' : cap(i.status)}</Tag>
               <div className="drm-row">
                 <button type="button" className="evo-btn evo-btn--sm" onClick={() => setEditor({ type: 'invite', record: i })}>Edit</button>
-                {['pending', 'expired'].includes(i.status) ? <button type="button" className="evo-btn evo-btn--sm" onClick={() => resend(i)}>New link</button> : null}
+                {['pending', 'expired'].includes(i.status) ? (i.practice_login
+                  ? <button type="button" className="evo-btn evo-btn--sm" disabled={reassigning} onClick={() => reassign(i)}>Reassign email &amp; reissue</button>
+                  : <button type="button" className="evo-btn evo-btn--sm" onClick={() => resend(i)}>New link</button>) : null}
                 {i.status === 'pending' ? <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => revoke(i)}>Revoke</button> : null}
                 <button type="button" className="evo-btn evo-btn--ghost evo-btn--sm" onClick={() => remove(
                   `${DRS}/invites/${i.id}`, `Delete ${i.name}'s invitation? Its link will stop working.`, 'Invitation deleted.',

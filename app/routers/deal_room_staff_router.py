@@ -58,8 +58,11 @@ def invites(include_test: bool = False, db: Session = Depends(get_db), user: Use
     DR._expire_invites(db, org_id)
     rows = db.query(InvestorInvite).filter(InvestorInvite.organization_id == org_id).order_by(
         InvestorInvite.created_at.desc()).limit(300).all()
+    conflicts = DR.practice_login_conflicts(db, org_id, rows)
+    out = [{**DR.invite_json(i), "practice_login": conflicts.get(i.email.lower()) if not i.is_test else None}
+           for i in rows if include_test or not i.is_test]
     db.commit()
-    return {"invites": [DR.invite_json(i) for i in rows if include_test or not i.is_test]}
+    return {"invites": out}
 
 
 @router.post("/invites")
@@ -668,5 +671,18 @@ def delete_manual_investor(buyer_id: str, db: Session = Depends(get_db),
         if invitation.status in (DR.INVITE_PENDING, DR.INVITE_EXPIRED):
             DR.revoke_invite(db, org_id, invitation.id, user)
     out = delete_buyer_record(db, org_id, buyer, user)
+    db.commit()
+    return out
+
+class ReassignInviteIn(BaseModel):
+    account_id: str
+
+
+@router.post("/invites/{invite_id}/reassign-email")
+def reassign_invite_email(invite_id: str, payload: ReassignInviteIn, db: Session = Depends(get_db),
+                          user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    org_id = _manage_investors(db, user)
+    invite, token = DR.reassign_practice_email(db, org_id, invite_id, payload.account_id, user)
+    out = {**DR.invite_json(invite), "link": f"{DR.public_base(db, org_id)}/investors/invite/{token}"}
     db.commit()
     return out
