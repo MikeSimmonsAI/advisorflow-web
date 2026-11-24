@@ -16,7 +16,7 @@
 
 databases:
   - name: advisorflow-db
-    plan: basic-256mb
+    plan: basic-1gb
     databaseName: advisorflow
     user: advisorflow
 
