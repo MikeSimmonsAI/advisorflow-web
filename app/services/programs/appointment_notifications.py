@@ -29,10 +29,11 @@ TIMING (America/Chicago, daylight-saving aware):
     booking was made and before the visit; otherwise that reminder is
     skipped. A reminder whose time has already passed when the family books is
     skipped, never sent late in a burst. COLLISIONS: a reminder within 12
-    hours of another message for the same appointment is skipped unless it is
-    the final reminder going at its true time (see MIN_GAP). In practice a
-    10:00 AM visit gets only the 24-hour reminder; its 2-hour reminder would
-    be 5:45 PM the evening before and is not sent. The reminder text says
+    hours of another REMINDER for the same appointment is skipped unless it is
+    the final reminder going at its true time (see MIN_GAP); the confirmation
+    only cancels a reminder landing within 2 hours of it. MORNING OF (owner,
+    Nov 24): a visit before 1 PM whose last reminder would fall before 9 AM
+    gets it at 8:30 AM that morning ("see you today"). The reminder text says
     "today" / "tomorrow" from the moment it actually goes.
   * survey: 24 hours after the visit's recorded end (or its scheduled end),
     only for visits staff marked COMPLETED. Outside the window it waits for
@@ -223,32 +224,8 @@ def on_booked(db: Session, booking, *, event: str = "booked", now: Optional[date
             continue
         if _add(db, booking, lead, purpose, ch, version, now):
             made += 1
-    start = _start_utc(booking)
-    # Earlier messages this family will get for this appointment; a reminder
-    # landing within MIN_GAP of one of them is a near-duplicate (see
-    # _collision_reason). The confirmation counts only if it is being written.
-    anchors = [now] if (chans and not skip_immediate) else []
-    last = min(s["reminder_minutes"]) if s["reminder_minutes"] else None
-    for mins in s["reminder_minutes"]:            # longest offset first (settings sorts it)
-        key = "reminder_24h" if mins == 1440 else "reminder_2h" if mins == 120 else "reminder_%dm" % mins
-        ideal = start - timedelta(minutes=mins)
-        due, status, reason = ideal, "scheduled", None
-        if due <= now:
-            status, reason = "skipped", "booked inside this reminder's interval - not sent late"
-        else:
-            adj = preceding_permitted(due, s)
-            if adj != due:
-                if adj <= now or adj >= start:
-                    status, reason = "skipped", "outside the notification window and no earlier permitted time"
-                else:
-                    due = adj
-                    reason = moved_reason(ideal, adj, start, mins)
-            if status == "scheduled":
-                clash = _collision_reason(due, ideal, anchors, mins == last)
-                if clash:
-                    status, reason = "skipped", clash
-                else:
-                    anchors.append(due)
+    confirm_at = now if (chans and not skip_immediate) else None
+    for key, due, status, reason in plan_reminders(_start_utc(booking), s, now, confirm_at):
         for ch in chans:
             if _add(db, booking, lead, key, ch, version, due, status, reason):
                 made += 1
@@ -269,6 +246,110 @@ def on_booked(db: Session, booking, *, event: str = "booked", now: Optional[date
 #   * booked 26 hours ahead: the 24-hour reminder would follow the confirmation
 #     by 2 hours, so it is skipped; the 2-hour reminder still goes.
 MIN_GAP = timedelta(hours=12)
+# Owner, Nov 24: the confirmation never cancels a reminder unless they would
+# land almost together, and a morning visit gets a "see you today" text at
+# 8:30 AM on the day (the 2-hour reminder would be before 9 AM; it used to
+# move to 5:45 PM the evening before and then be dropped).
+CONFIRM_GAP = timedelta(hours=2)
+MORNING_OF = (8, 30)
+MORNING_OF_BEFORE = (13, 0)        # visits that start before 1 PM
+
+
+def _morning_of(start: datetime, ideal: datetime, s: Dict, now: datetime) -> Optional[datetime]:
+    """8:30 AM Central on the visit day, for a visit before 1 PM whose reminder
+    would fall before the notification window that morning."""
+    st, idl = _local(start), _local(ideal)
+    lo, _hi = _window(s)
+    if st.time() >= time(*MORNING_OF_BEFORE) or idl.date() != st.date() or idl.time() >= lo:
+        return None
+    m = _utc(datetime.combine(st.date(), time(*MORNING_OF)))
+    return m if now < m < start else None
+
+
+def plan_reminders(start: datetime, s: Dict, now: datetime, confirm_at: Optional[datetime] = None):
+    """[(key, due_utc, status, reason)] for every reminder, longest first."""
+    out = []
+    anchors = []                     # reminders already planned (12-hour rule)
+    last = min(s["reminder_minutes"]) if s["reminder_minutes"] else None
+    for mins in s["reminder_minutes"]:            # longest offset first (settings sorts it)
+        key = "reminder_24h" if mins == 1440 else "reminder_2h" if mins == 120 else "reminder_%dm" % mins
+        ideal = start - timedelta(minutes=mins)
+        due, status, reason, morning = ideal, "scheduled", None, False
+        if due <= now:
+            status, reason = "skipped", "booked inside this reminder's interval - not sent late"
+        else:
+            adj = preceding_permitted(due, s)
+            if adj != due:
+                m = _morning_of(start, ideal, s, now) if mins == last else None
+                if m is not None:
+                    due, morning = m, True
+                    reason = "sent at 8:30 AM Central the morning of the visit (the %s reminder would be %s, " \
+                             "before 9 AM)" % (_gap_text(timedelta(minutes=mins)), _local(ideal).strftime("%-I:%M %p"))
+                elif adj <= now or adj >= start:
+                    status, reason = "skipped", "outside the notification window and no earlier permitted time"
+                else:
+                    due = adj
+                    reason = moved_reason(ideal, adj, start, mins)
+            if status == "scheduled":
+                clash = _collision_reason(due, ideal, anchors, mins == last, exempt=(mins == last and morning))
+                if clash is None and confirm_at is not None and abs(due - confirm_at) < CONFIRM_GAP \
+                        and not (mins == last and (due == ideal or morning)):
+                    clash = ("not sent: it would go at %s Central, only %s after the booking confirmation"
+                             % (_local(due).strftime("%-I:%M %p %a"), _gap_text(abs(due - confirm_at))))
+                if clash:
+                    status, reason = "skipped", clash
+                else:
+                    anchors.append(due)
+        out.append((key, due, status, reason))
+    return out
+
+
+def replan_reminders(db: Session, organization_id: str, now: Optional[datetime] = None) -> Dict:
+    """Re-plan the reminders of every upcoming appointment under today's rules
+    (owner, Nov 24). Only reminders that have NOT gone and were scheduled or
+    skipped by the old timing rules change; nothing is sent here."""
+    from app.models.models import BookingLink, Lead
+    now = now or datetime.utcnow()
+    changed = []
+    rows = (db.query(AppointmentNotification)
+            .filter(AppointmentNotification.organization_id == organization_id,
+                    AppointmentNotification.purpose.like("reminder%"),
+                    AppointmentNotification.status.in_(("scheduled", "skipped"))).all())
+    by_booking: Dict[str, list] = {}
+    for r in rows:
+        by_booking.setdefault(r.booking_id, []).append(r)
+    for bid, rs in by_booking.items():
+        b = db.query(BookingLink).filter(BookingLink.id == bid).first()
+        if b is None or (b.status or "") not in LIVE or b.booked_time is None:
+            continue
+        start = _start_utc(b)
+        if start <= now:
+            continue
+        policy, lead = _policy_for_booking(db, b)
+        if policy is None:
+            continue
+        s = settings(policy)
+        version = _version(b)
+        conf = (db.query(AppointmentNotification.created_at)
+                .filter(AppointmentNotification.booking_id == bid,
+                        AppointmentNotification.purpose.in_(("confirmation", "updated")),
+                        AppointmentNotification.version == version).first())
+        plan = {k: (d, st, why) for k, d, st, why in plan_reminders(start, s, now, conf[0] if conf else None)}
+        for r in rs:
+            if r.version != version or r.purpose not in plan:
+                continue
+            old_reason = r.reason or ""
+            if r.status == "skipped" and not (old_reason.startswith("not sent:")
+                                              or old_reason.startswith("outside the notification window")):
+                continue                               # opted out, held, booked too late: unchanged
+            d, st, why = plan[r.purpose]
+            if (r.status, r.due_at, old_reason) != (st, d, why or "") and (st == "scheduled" or r.status == "scheduled"):
+                changed.append({"id": r.id, "booking_id": bid, "purpose": r.purpose, "channel": r.channel,
+                                "before": {"status": r.status, "due_at": r.due_at.isoformat() if r.due_at else None},
+                                "after": {"status": st, "due_at": d.isoformat()}})
+                r.status, r.due_at, r.reason = st, d, why
+    db.commit()
+    return {"changed": changed}
 
 
 def _gap_text(d: timedelta) -> str:
@@ -284,9 +365,9 @@ def moved_reason(ideal: datetime, adj: datetime, start: datetime, mins: int) -> 
                                           _local(ideal).strftime("%-I:%M %p"), "9 AM-6 PM"))
 
 
-def _collision_reason(due: datetime, ideal: datetime, anchors, is_last: bool) -> Optional[str]:
+def _collision_reason(due: datetime, ideal: datetime, anchors, is_last: bool, exempt: bool = False) -> Optional[str]:
     near = [a for a in anchors if abs(due - a) < MIN_GAP]
-    if not near or (is_last and due == ideal):
+    if not near or exempt or (is_last and due == ideal):
         return None
     gap = min(abs(due - a) for a in near)
     moved = "" if due == ideal else (" (moved from %s, which is outside 9 AM-6 PM)" % _local(ideal).strftime("%-I:%M %p"))
