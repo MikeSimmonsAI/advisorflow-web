@@ -163,6 +163,46 @@ EMAILED_NOTES = [   # already in the system - the email / call adds to their fil
     ("ce5f284b-d206-406d-bd9a-2801e2aac6b7", "(Call center, Nov 21) Daughter Adrianna Rojas asked for a call about her "
      "mother's paperwork / PN arrangements: 214-850-4431."),
 ]
+# Owner, Nov 23 9:05 PM: more family replies that reached Mike's NSMG inbox
+# (reply-to pointed there until 5 PM Nov 23). Each one - and the 17 entered
+# earlier - goes into the Conversations inbox as an EMAIL reply, like a real one.
+REPLIES2_KEY = "restland-emailed-replies-2-2026-11-23"
+REPLIES2_UNTIL = datetime(2026, 11, 26, 6, 0)
+# (lead id, state or None to keep, why, follow-up date, what they said, received (UTC), extra note)
+EMAILED_2 = [
+    ("dbcf4b2f-45d9-40a8-8501-eecd8d28ef33", None, None, None,
+     "Hello Michael, I'm not in Texas. How else can we do this? Anne Wehler", datetime(2026, 11, 22, 12, 18),
+     "She is NOT in Texas and asked how else this can be done - her Tue Nov 24 10 AM visit at Restland will not "
+     "work as booked. Call or email her first (lokilani888@hotmail.com) to switch it to a phone call."),
+    ("81f2c560-a7b6-4285-97d6-fa4900400fcb", "human",
+     "Husband Frank Inman has power of attorney - they live near Seattle; everything by EMAIL only", None,
+     "(Frank Inman, her husband) Be is unable to respond. I have full power of attorney. We both live on Mercer "
+     "Island near Seattle, Washington. We are unable to visit your office. Anything that needs to be done will "
+     "have to be by email. You can use Be's email address (beinman79@gmail.com) as I monitor it for her.",
+     datetime(2026, 11, 22, 3, 45),
+     "Frank Inman (husband) has full power of attorney and handles everything - email only, no visits, no texts."),
+    ("e19663a4-c536-49ce-81b9-8790a8a26806", "closed", "Will not attend a meeting - says everything is as it "
+     "should be", None, "No, I have told you. I will not be attending a meeting. Everything is as it should be. "
+     "Marea Downey", datetime(2026, 11, 20, 0, 25), None),
+    ("2b84f8f3-b931-4693-be8d-9a805f1f1c1b", "waiting_future", "Takuya Fukuda (family) is out of town - follow up "
+     "next month for Akira", _DEC7, "(Takuya Fukuda) Thank you for reaching out. I'm currently out of town, but "
+     "I'll follow up with you next month for Akira.", datetime(2026, 11, 19, 0, 55), None),
+]
+EMAIL_ONLY_2 = ("81f2c560-a7b6-4285-97d6-fa4900400fcb",)
+# Beverly Schmedthorst (Mrs. Lee Roy) wrote in August; she is not in the system yet.
+BEVERLY = {"first_name": "Beverly", "last_name": "Schmedthorst", "phone": "12146217290", "email": "bev@gsteps.com",
+           "street_address": "3901 Kirkpatrick Lane, Apt 102", "city": "Flower Mound", "state": "TX",
+           "zip_code": "75028"}
+BEVERLY_SAID = ("I have moved to 3901 Kirkpatrick Lane, Apt 102, Flower Mound Tx 75028 (Pinewoods Sr Living). "
+                "My daughter, Kaye Gullett, takes care of my business. One item we need is a map to Lee Roy's grave - "
+                "we have been there twice and could not find it. Thanks for reminding us we need to update.")
+BEVERLY_WHY = ("Needs a map to Lee Roy's grave (could not find it twice). Daughter Kaye Gullett handles her business: "
+               "214-293-5061, kaye@gsteps.com")
+BEVERLY_NOTE = ("Owner, Nov 23: emailed Aug 13 2026 (bev@gsteps.com). Mrs. Lee Roy Schmedthorst, age 87. Moved to "
+                "Pinewoods Sr Living, 3901 Kirkpatrick Lane Apt 102, Flower Mound TX 75028; phone 214-621-7290. "
+                "Daughter Kaye Gullett has legal permission and handles her business: 214-293-5061, kaye@gsteps.com, "
+                "1308 Saddleback Lane, Lewisville TX 75067. Needs a map to Lee Roy's grave. Aug 3 would have been "
+                "their 69th anniversary.")
 # Owner, Nov 23 4:59 PM ("the emails aren't being sent back into the system"):
 # family replies go to the mailbox the system reads, not Mike's NSMG inbox.
 REPLY_TO_SYSTEM = "support@evosyspro.live"
@@ -539,6 +579,99 @@ def restland_belinda_patrick(db: Session, prog, now: datetime) -> Dict:
     return out
 
 
+def restland_emailed_replies_2(db: Session, prog, now: datetime) -> Dict:
+    from app.models.models import Lead
+    from app.models.work_models import LeadNote
+    from app.models.program_models import ProgramResponse
+    from app.services import cadence_service as CS
+    from app.services.programs import ai_setter
+    from app.services.programs import responses as R
+    org_id = prog.organization_id
+    run, item = _open_run(db, org_id, REPLIES2_KEY)
+    out: Dict = {"inbox": 0, "set": 0, "missing": [], "beverly": None}
+
+    def note(lead_id, body):
+        db.add(LeadNote(organization_id=org_id, lead_id=lead_id, body=body[:4000], kind="internal"))
+
+    def to_inbox(lead, said, when, key):
+        # Same path as a real emailed reply: it shows under Conversations > Email.
+        # No AI reply to an old email, no alert pages for it.
+        rid = "manual-email:%s:%s" % (key, lead.id)
+        if db.query(ProgramResponse).filter(ProgramResponse.organization_id == org_id,
+                                            ProgramResponse.reply_id == rid).first() is not None:
+            return
+        R.on_inbound(db, lead, said, "email", reply_id=rid, now=when, staff_alerts=False, run_setter=False)
+        out["inbox"] += 1
+
+    def set_state(lead, state, why, when_fu, before_note):
+        conv = ai_setter.conversation_for(db, lead)
+        before = {"state": conv.state, "handoff_reason": conv.handoff_reason, "next_followup_at": conv.next_followup_at,
+                  "followup_reason": conv.followup_reason}
+        if state:
+            conv.state = state
+            if state == "waiting_future":
+                conv.followup_reason, conv.next_followup_at, conv.followups_sent = why, when_fu, 0
+            else:
+                conv.handoff_reason, conv.next_followup_at = (why or "")[:250] or None, None
+            item("program_conversation", conv.id, "emailed_reply_2", before, {"state": state, "why": why},
+                 "owner Nov 23: " + before_note)
+            out["set"] += 1
+        return conv
+
+    for lead_id, state, why, when_fu, said, received, extra in EMAILED_2:
+        lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == org_id).first()
+        if lead is None:
+            out["missing"].append(lead_id)
+            continue
+        conv = ai_setter.conversation_for(db, lead)
+        ai_setter._turn(db, conv, "family", said, action="received",
+                        reason="email reply that reached Mike's NSMG inbox, entered Nov 23")
+        to_inbox(lead, said, received, "nov23b")
+        set_state(lead, state, why, when_fu, "emailed reply")
+        if lead.status in ("new", "sent"):
+            lead.status = "replied"
+        if lead_id in EMAIL_ONLY_2:
+            lead.contact_channel = "email_only"
+        CS.stop_cadence_for_lead(db, lead.id, "stopped_replied")
+        note(lead.id, "Owner, Nov 23: their email reply reached Mike's NSMG inbox, not the system - entered by hand. "
+             "They said: %s%s" % (said, (" | %s" % extra) if extra else ""))
+        db.commit()
+    # The 17 entered earlier: into the inbox too (their state stays as set).
+    for lead_id, state, why, when_fu, said, channel, extra in EMAILED:
+        if channel != "email":
+            continue
+        lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == org_id).first()
+        if lead is None:
+            continue
+        conv = ai_setter.conversation_for(db, lead)
+        keep = (conv.state, conv.handoff_reason, conv.next_followup_at, conv.followup_reason, conv.callback_window)
+        to_inbox(lead, said, now, "nov23a")
+        conv.state, conv.handoff_reason, conv.next_followup_at, conv.followup_reason, conv.callback_window = keep
+        db.commit()
+    # Beverly Schmedthorst - not in the system: add her as a Restland family.
+    b = BEVERLY
+    lead = (db.query(Lead).filter(Lead.organization_id == org_id, Lead.email == b["email"]).first()
+            or db.query(Lead).filter(Lead.organization_id == org_id, Lead.phone == b["phone"]).first())
+    if lead is None:
+        lead = Lead(organization_id=org_id, status="replied", source="email_reply",
+                    source_detail="Emailed Mike Aug 13 2026 - entered by hand Nov 23", contact_channel="sms", **b)
+        db.add(lead)
+        db.flush()
+        item("lead", lead.id, "created", None, {"name": "Beverly Schmedthorst"}, "owner Nov 23: Beverly's email")
+        out["beverly"] = "added"
+    else:
+        out["beverly"] = "already there"
+    conv = ai_setter.conversation_for(db, lead)
+    ai_setter._turn(db, conv, "family", BEVERLY_SAID, action="received",
+                    reason="email (Aug 13) that reached Mike's NSMG inbox, entered Nov 23")
+    to_inbox(lead, BEVERLY_SAID, datetime(2026, 8, 14, 2, 11), "aug13")
+    set_state(lead, "human", BEVERLY_WHY, None, "Beverly's email")
+    note(lead.id, BEVERLY_NOTE)
+    run.status, run.finished_at, run.summary_json = "applied", datetime.utcnow(), json.dumps(out, default=str)
+    db.commit()
+    return out
+
+
 def restland_book_carmelita(db: Session, prog, now: datetime, key: str = CARMELITA_KEY,
                             slot: datetime = CARMELITA_SLOT) -> Dict:
     from app.models.models import BookingLink, Lead
@@ -754,6 +887,8 @@ def apply_pending(db: Session, now: Optional[datetime] = None) -> Dict:
                     res["carmelita_3pm"] = restland_book_carmelita(db, prog, now)
                 if now < EMAILED_UNTIL and _ledger(db, prog.organization_id, EMAILED_KEY) is None:
                     res["emailed_replies"] = restland_emailed_replies(db, prog, now)
+                if now < REPLIES2_UNTIL and _ledger(db, prog.organization_id, REPLIES2_KEY) is None:
+                    res["emailed_replies_2"] = restland_emailed_replies_2(db, prog, now)
                 if now < TWO_UNTIL and _ledger(db, prog.organization_id, TWO_KEY) is None:
                     res["belinda_patrick"] = restland_belinda_patrick(db, prog, now)
                 if now < CARMELITA_330_UNTIL and _ledger(db, prog.organization_id, CARMELITA_330_KEY) is None:
