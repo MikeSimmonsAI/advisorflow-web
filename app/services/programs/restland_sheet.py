@@ -1195,10 +1195,10 @@ def ensure_person_tabs(db: Session, prog, client, sid: str) -> bool:
     """Give the person tabs their current look, once per version."""
     pol = json.loads(prog.booking_policy_json or "{}")
     cfg = pol.get("handoff_sheet") or {}
-    if cfg.get("person_tabs_v3"):
+    if cfg.get("person_tabs_v4"):
         return False
     client.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": person_tab_layout_requests()}).execute()
-    cfg["person_tabs_v3"] = True
+    cfg["person_tabs_v4"] = True
     pol["handoff_sheet"] = cfg
     prog.booking_policy_json = json.dumps(pol)
     db.commit()
