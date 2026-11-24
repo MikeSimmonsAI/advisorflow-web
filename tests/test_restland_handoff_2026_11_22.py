@@ -738,20 +738,21 @@ def test_a_person_tab_lists_their_work_and_their_edits_reach_the_main_tab_and_th
     fus = [_fu("FU-x1")]
     _run_team(db, prog, sheet, appts, fus, now)                   # appointment -> Ann, follow-up -> Ann
     ann = sheet["Ann"]
-    assert ann[4][0] == b.id and ann[4][3] == "Fam " + b.id          # Ann's list, row 5
-    assert ann[4][15] == "FU-x1"                                     # her follow-ups start at P
+    a0, f0 = RS.PT_APPT_FIRST - 1, RS.PT_FU_FIRST - 1
+    assert ann[a0][0] == b.id and ann[a0][3] == "Fam " + b.id        # MY APPOINTMENTS block
+    assert ann[f0][0] == "FU-x1"                                     # MY FOLLOW-UPS block, below it
     # Ann types on HER tab: outcome, sold, what was sold, notes
-    row = _pad(ann[4], 30)
-    row[9], row[10], row[11], row[12] = "Showed", "Yes", "Lawn crypt", "Great visit"
+    row = _pad(ann[a0], 14)
+    row[8], row[9], row[10], row[12] = "Showed", "Yes", "Lawn crypt", "Great visit"
     out = _run_team(db, prog, sheet, appts, fus, now + timedelta(minutes=2))
     assert out["person_tab_edits"] == 4
     main = _pad(sheet[RS.APPOINTMENTS][1], 19)
     assert (main[14], main[16], main[17], main[15]) == ("Showed", "Yes", "Lawn crypt", "Great visit")
     notes = " ".join(n.body for n in db.query(LeadNote).filter_by(lead_id=lead.id))
     assert "SOLD: Lawn crypt" in notes and "Great visit" in notes
-    # a quiet pass writes nothing new to her tab and keeps her entries
+    # a quiet pass keeps her entries
     _run_team(db, prog, sheet, appts, fus, now + timedelta(minutes=4))
-    assert sheet["Ann"][4][11] == "Lawn crypt"
+    assert sheet["Ann"][a0][10] == "Lawn crypt"
 
 
 def test_person_tab_layout_is_valid_and_applied_once(setter):
