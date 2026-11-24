@@ -453,3 +453,18 @@ def test_gate_sends_a_missed_first_text_via_the_new_rule(rl, sender):
     _run(db, utc(2026, 11, 16, 8, 34))
     r = OS.reservation(db, st.id, 1)
     assert r is not None and r.slot_at > utc(2026, 11, 16, 8, 34)
+
+
+def test_a_day_the_owner_opened_books_even_on_a_closed_sunday_past_the_window(rl):
+    db = rl["db"]
+    configured(rl)
+    from app.services.programs import booking_policy as BP
+    pol = dict(BP.for_program(prog_of(rl)), days="012345")         # Sundays closed
+    free = lambda d, a, t: ([], None)                               # noqa: E731
+    today = date(2026, 11, 23)
+    opened = BP.day_slots(db, rl["mike"], date(2026, 12, 13), pol, today=today, busy_reader=free, any_time=15)
+    assert "2026-12-13T14:00:00" in opened["slots"]
+    other = BP.day_slots(db, rl["mike"], date(2026, 12, 6), pol, today=today, busy_reader=free)
+    assert other["slots"] == [] and other["reason"] == "No appointments on this day"
+    far = BP.day_slots(db, rl["mike"], date(2026, 12, 14), pol, today=today, busy_reader=free)
+    assert far["slots"] == [] and "days out" in far["reason"]
