@@ -107,12 +107,16 @@ def _lead(db: Session, s, o: Opportunity) -> EvoSysLead:
     return db.get(EvoSysLead, o.id) or G.ensure(db, s, o)
 
 
+_IN_CHUNK = 5000  # keeps every "id IN (...)" well under the database's limit
+
+
 def _states(db: Session, ids: Iterable[str]) -> Dict[str, EvoSysOutreachState]:
     ids = list(ids)
-    if not ids:
-        return {}
-    return {x.opportunity_id: x for x in db.query(EvoSysOutreachState)
-            .filter(EvoSysOutreachState.opportunity_id.in_(ids)).all()}
+    out: Dict[str, EvoSysOutreachState] = {}
+    for i in range(0, len(ids), _IN_CHUNK):
+        out.update({x.opportunity_id: x for x in db.query(EvoSysOutreachState)
+                    .filter(EvoSysOutreachState.opportunity_id.in_(ids[i:i + _IN_CHUNK])).all()})
+    return out
 
 
 def _camps(db: Session, s) -> Dict[str, EvoSysCampaign]:
@@ -240,9 +244,12 @@ def _pick(db: Session, c: Ctx, s, pick: dict) -> List[Opportunity]:
         if len(rows) != len(set(ids)):
             raise HTTPException(404, "Some of those contacts were not found.")
         return rows
+    # limit=None: picking a list for a campaign must see EVERY matching lead.
+    # It used to stop at the 3,000 newest, so older leads of a big list were
+    # silently left out (owner, 2026-11-23).
     return _filtered(db, c, s, view=pick.get("view") or "all", q=pick.get("q") or "",
                      source=pick.get("source") or "", campaign=pick.get("campaign") or "",
-                     batch=pick.get("batch") or "")[0]
+                     batch=pick.get("batch") or "", limit=None)[0]
 
 
 def _audience(db: Session, c: Ctx, s, camp: EvoSysCampaign, opps: List[Opportunity]) -> dict:
@@ -632,13 +639,29 @@ def edit_contact(opp_id: str, body: ContactPatch, c: Ctx = Depends(ctx), db: Ses
 VIEWS = ("all", "unassigned", "followup", "no_email", "replied", "booked", "review", "stopped")
 
 
-def _filtered(db: Session, c: Ctx, s, *, view: str, q: str, source: str, campaign: str, batch: str):
+_IMPORT_LABEL = re.compile(r"^Import ([0-9a-f]{8})$")
+
+
+def _filtered(db: Session, c: Ctx, s, *, view: str, q: str, source: str, campaign: str, batch: str,
+              limit: Optional[int] = 3000):
+    """Leads matching the Leads-screen filters. The screen keeps its 3,000
+    newest cap for speed; picking leads into a campaign passes limit=None."""
     camps = _camps(db, s)
-    rows = _leads_q(db, c).order_by(Opportunity.created_at.desc()).limit(3000).all()
+    base = _leads_q(db, c)
+    m = _IMPORT_LABEL.match(batch or "")
+    if m:
+        # One import's leads: let the database find them (the exact label
+        # check below still decides), so no cap can cut the list short.
+        base = base.filter(Opportunity.import_batch_id.like(m.group(1) + "%"))
+        limit = None
+    base = base.order_by(Opportunity.created_at.desc())
+    rows = (base.limit(limit) if limit else base).all()
     ids = [o.id for o in rows]
     states = _states(db, ids)
-    lrows = {l.opportunity_id: l for l in db.query(EvoSysLead).filter(EvoSysLead.opportunity_id.in_(ids)).all()} \
-        if ids else {}
+    lrows = {}
+    for i in range(0, len(ids), _IN_CHUNK):
+        lrows.update({l.opportunity_id: l for l in db.query(EvoSysLead)
+                      .filter(EvoSysLead.opportunity_id.in_(ids[i:i + _IN_CHUNK])).all()})
     booked = _booked_ids(db, c.bso)
     t = (q or "").strip().lower()
     out = []
