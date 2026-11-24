@@ -1038,7 +1038,7 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
         <div className="cmd-send">
           {mode !== 'note' && f.suggested_reply && text !== f.suggested_reply && <button className="link" onClick={() => setText(f.suggested_reply)}>Use suggested reply</button>}
           {mode === 'email' && !f.is_demo && !text.includes('{GUIDE}') && <button className="link" onClick={() => setText(t => `${t.trim()}${t.trim() ? ' ' : ''}{GUIDE}`)}>Add guide link</button>}
-          {mode === 'text' && !f.is_demo && !text.includes('{BOOKING}') && <button className="link" onClick={() => setText(t => `${t.trim()}${t.trim() ? ' ' : ''}Pick a time that works for you here: {BOOKING}`)}>Add booking link</button>}
+          {(mode === 'text' || mode === 'email') && !f.is_demo && !text.includes('{BOOKING}') && <button className="link" onClick={() => setText(t => `${t.trim()}${t.trim() ? ' ' : ''}Pick a time that works for you here: {BOOKING}`)}>Add booking link</button>}
           {mode !== 'note' && !f.is_demo && <button disabled={busy || !text.trim() || !canSend} onClick={() => send('human')}
             title="The AI will not reply until someone switches AI Handling back on.">Send &amp; keep human control</button>}
           <button className="primary" disabled={busy || !text.trim() || (mode !== 'note' && !f.is_demo && !canSend)} onClick={() => send('ai')}

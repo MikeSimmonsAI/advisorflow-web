@@ -400,3 +400,23 @@ def test_email_entered_by_hand_is_answered_with_a_new_email(setter, sample_advis
     em = db.query(EmailMessage).filter_by(lead_id=lead.id, status="sent").order_by(EmailMessage.sent_at.desc()).first()
     db.refresh(resp)
     assert resp.handling_status == "responded"
+
+
+def test_a_persons_email_can_carry_the_booking_link(setter, sample_advisor, client, monkeypatch):
+    """Owner, Nov 24: the Email box has "Add booking link" too - {BOOKING} becomes
+    the family's own pick-a-time link, the same as in a text."""
+    db, org = setter["db"], setter["org"]
+    setter["prog"].ai_setter_mode = "off"
+    db.commit()
+    lead = _estes(db, org, sample_advisor)
+    resp = _email_in(db, lead)
+    monkeypatch.setattr("app.services.programs.identity.program_booking_url",
+                        lambda db_, l: "https://parkhill.evosyspro.live/abc")
+    body = {"lead_id": lead.id, "channel": "email", "idempotency_key": "bk1", "response_id": resp.id,
+            "text": "Hi Ailene. Pick a time that works for you here: {BOOKING}"}
+    with patch("app.services.inbound_mailbox_service._access_token_send", return_value="tok"), \
+         patch("app.services.programs.email_reply.httpx.post", return_value=_graph_ok()) as post:
+        r = client.post("/program/command/reply", headers=_h(db, setter["admin"]), json=body)
+    assert r.status_code == 200, r.text
+    sent = post.call_args.kwargs["json"]["comment"]
+    assert "https://parkhill.evosyspro.live/abc" in sent and "{BOOKING}" not in sent
