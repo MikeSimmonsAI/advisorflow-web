@@ -175,6 +175,7 @@ EXPECTED_INTERVAL_MINUTES = {
     JobName.ACQUISITION_WORKFORCE: 5,
     JobName.SERVICE_OPS_RECURRING: 15,
     JobName.EVOSYS_SALES_OUTREACH: 5,
+    JobName.PROGRAM_TEXT_SLOTS: 1,        # app/main.py TEXT_SLOT_PASS_SECONDS = 30
     JobName.CADENCE_CRON: 24 * 60,        # render.yaml: "0 14 * * *"
     JobName.EMAIL_POLLER: 5,              # render.yaml: "*/5 * * * *"
     # ai_conversation_cron is RETIRED (see RETIRED_JOB_NAMES): no interval, so
