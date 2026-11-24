@@ -111,6 +111,19 @@ def cancel(db: Session, prog, booking, actor, *, acknowledge: bool = True, now: 
     if lead is not None and (lead.status or "") == "booked":
         lead.status = "new"           # free to be helped again; history keeps the cancellation
     res = AN.on_cancelled(db, booking, now=now, acknowledge=acknowledge)
+    # Owner, Nov 24: a cancelled family usually wants a new date - it goes back
+    # to a person with that reason, never left looking "booked".
+    if lead is not None:
+        try:
+            from app.services.programs import ai_setter
+            conv = ai_setter.set_owner(db, lead, ai_setter.HUMAN_OWNER, actor=getattr(actor, "id", None),
+                                       note="Appointment cancelled - needs a new time", at=now)
+            if conv is not None and conv.state == "booked":
+                conv.state = "human"
+            if conv is not None:
+                conv.handoff_reason = "Appointment cancelled - needs a new time"
+        except Exception:                                # noqa: BLE001 - the cancel itself always stands
+            pass
     _audit(db, prog, actor, "program.appointment_cancel", booking, before, {"status": "cancelled"})
     db.commit()
     AN.run(db, prog.organization_id, now=now, booking_id=booking.id)
