@@ -32,7 +32,7 @@ def _kind(m) -> str:
         return "ai_answer"
     if lab == "booking_confirmation":
         return "booking_confirmation"
-    if lab.startswith(("rd:", "r1:")):
+    if lab.startswith(("rd:", "r1:", "rm:")):
         return "reminder"
     return "person" if m.actor_user_id else "other"
 

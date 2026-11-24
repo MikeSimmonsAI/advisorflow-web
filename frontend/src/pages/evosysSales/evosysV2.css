@@ -333,3 +333,4 @@
   .evs.v2 .v2-pastmain { grid-column: 1 / -1; grid-template-columns: 84px minmax(0, 1fr); gap: 8px; }
   .evs.v2 .v2-pastrow .v2-tag { justify-self: start; }
 }
+.evs.v2 .evs-callstatus { gap: 6px; margin: 6px 0 10px; flex-wrap: wrap; }

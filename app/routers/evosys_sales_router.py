@@ -670,7 +670,9 @@ def _host(db: Session, c: Ctx, host_id: Optional[str]):
 
 def _call_row(db: Session, a, c: Ctx) -> dict:
     from app.routers.sales_scheduling_router import _appt_out
+    from app.services.evosys_sales import booking_page as BP
     out = jsonable_encoder(_appt_out(db, a, c.user))
+    out["reminders"] = BP.reminder_status(db, a)        # which reminder texts went for this time
     return out
 
 
@@ -874,6 +876,36 @@ def calls_detail(appt_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_
     return out
 
 
+@router.post("/calls/{appt_id}/remind")
+def calls_remind(appt_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """Text the business a reminder right now, with its confirm / new-time link."""
+    from app.services.evosys_sales import booking_page as BP
+    a = _brand_appt(db, c, appt_id)
+    if not _live_call(a):
+        raise HTTPException(409, "This call is over or cancelled.")
+    out = BP.send_reminder_now(db, a)
+    if not out["ok"]:
+        raise HTTPException(409, out["error"])
+    return {"ok": True, "call": _call_row(db, a, c)}
+
+
+class CallConfirmIn(BaseModel):
+    confirmed: bool = True
+
+
+@router.post("/calls/{appt_id}/confirm")
+def calls_confirm(appt_id: str, body: CallConfirmIn, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    """The owner marks a call confirmed (e.g. they said so on the phone), or undoes it."""
+    a = _brand_appt(db, c, appt_id)
+    if body.confirmed:
+        a.confirmation_status, a.confirmation_source = "confirmed", "staff_manual"
+        a.confirmed_at, a.confirmed_by = datetime.utcnow(), c.user.id
+    else:
+        a.confirmation_status, a.confirmation_source, a.confirmed_at, a.confirmed_by = "pending", None, None, None
+    db.commit()
+    return {"ok": True, "call": _call_row(db, a, c)}
+
+
 class CallNotesIn(BaseModel):
     notes: str = ""
 
@@ -922,6 +954,8 @@ def calls_settings(host_id: Optional[str] = None, c: Ctx = Depends(ctx), db: Ses
                            "connected": bool(x.is_connected)} for x in conns],
             "zoom": {"ready": bool(zoom_ready), "detail": zoom_why},
             "reminders": ["Text the day before (9 AM - 7 PM Central)", "Text 1 hour before",
+                          "Each reminder has their own link: one tap confirms they'll be there or picks a new time",
+                          "You get a text and email when they confirm or move the call",
                           "Calendar invite by email when the guest has an email"],
             "alerts": recips, "calling": V.status(s)}
 
@@ -1299,6 +1333,17 @@ def booking_book(token: str, body: BookPublicIn, db: Session = Depends(get_db)):
     if SDNC.for_opportunity(db, o):
         return {"status": "error", "message": "Please text us back to set a time."}
     return BP.reschedule(db, o, body.starts_at) if body.reschedule else BP.book(db, o, body.starts_at)
+
+
+@public_router.post("/book/{token}/confirm")
+def booking_confirm(token: str, db: Session = Depends(get_db)):
+    """One tap from the reminder link: "I'll be there"."""
+    from app.services.evosys_sales import booking_page as BP
+    oid = BP.read(token)
+    o = db.get(Opportunity, oid) if oid else None
+    if o is None:
+        raise HTTPException(404, "Not found.")
+    return BP.confirm(db, o)
 
 
 @public_router.get("/stop/{token}", response_class=HTMLResponse)

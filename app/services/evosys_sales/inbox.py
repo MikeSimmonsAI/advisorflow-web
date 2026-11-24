@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.models.evosys_sales_models import EvoSysOutreachMessage as M
 
-REMINDER_PREFIXES = ("rd:", "r1:")
+REMINDER_PREFIXES = ("rd:", "r1:", "rm:")
 DUPLICATE_DAYS = 14
 AI_QUIET_MINUTES = 5           # no AI text if anything went to this lead this recently
 
