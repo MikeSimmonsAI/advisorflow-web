@@ -32,3 +32,20 @@ def test_replies_land_in_the_email_inbox_and_beverly_is_added(rl, monkeypatch):
     bev = db.query(Lead).filter(Lead.organization_id == org, Lead.email == "bev@gsteps.com").one()
     assert bev.last_name == "Schmedthorst" and bev.city == "Flower Mound"
     assert OC._ledger(db, org, OC.REPLIES2_KEY) is not None          # runs once
+
+
+def test_anne_visit_becomes_a_phone_call(rl, monkeypatch):
+    from datetime import timedelta
+    from app.models.models import BookingLink
+    _launch(rl)
+    db, org = rl["db"], rl["org"].id
+    prog = db.query(OutreachProgram).filter(OutreachProgram.organization_id == org).first()
+    lead = db.query(Lead).filter(Lead.organization_id == org).first()
+    now = datetime(2026, 11, 24, 3, 0)
+    bk = BookingLink(lead_id=lead.id, user_id=rl["mike"].id, status="booked", booked_time=now + timedelta(hours=13),
+                     meeting_type="office", appt_label="Family File Review")
+    db.add(bk); db.commit()
+    monkeypatch.setattr(OC, "ANNE", lead.id)
+    out = OC.restland_anne_phone(db, prog, now)
+    db.refresh(bk)
+    assert out.get("changed") and bk.meeting_type == "remote" and "phone" in bk.appt_label

@@ -216,6 +216,11 @@ TWO_KEY = "restland-belinda-patrick-2026-11-23"
 TWO_UNTIL = datetime(2026, 11, 26, 6, 0)
 BELINDA = ("cb375146-276e-4076-9d00-49744b3438df", datetime(2026, 12, 13, 14, 0))
 PATRICK = ("b152343e-4f35-43c9-8f9b-bb27ce8714c5", [date(2026, 12, 1), date(2026, 12, 2)])
+# Owner, Nov 23 9:45 PM: Anne Wehler is not in Texas - her Tue Nov 24 10 AM
+# visit becomes a phone call at the same time (Laura calls 817-946-9594).
+ANNE_KEY = "restland-anne-phone-2026-11-23"
+ANNE_UNTIL = datetime(2026, 11, 24, 15, 0)
+ANNE = "dbcf4b2f-45d9-40a8-8501-eecd8d28ef33"
 CARMELITA_FU = ("4f7ef8fe-5007-4ccb-aadb-7957154eec00", _DEC7,
                 "Team follow-up Mon Dec 7 (Neoso Walker's note after her visit)")
 # Owner, Nov 22 8:18 PM: these four "after the holidays" families are followed
@@ -672,6 +677,40 @@ def restland_emailed_replies_2(db: Session, prog, now: datetime) -> Dict:
     return out
 
 
+def restland_anne_phone(db: Session, prog, now: datetime) -> Dict:
+    from app.models.models import BookingLink, Lead
+    from app.models.work_models import LeadNote
+    from app.services.programs import ai_setter
+    from app.services.programs import appointments as A
+    from app.services.programs import booking_policy as BP
+    org_id = prog.organization_id
+    run, item = _open_run(db, org_id, ANNE_KEY)
+    out: Dict = {}
+    lead = db.query(Lead).filter(Lead.id == ANNE, Lead.organization_id == org_id).first()
+    bk = (db.query(BookingLink).filter(BookingLink.lead_id == ANNE, BookingLink.status.in_(("booked", "confirmed")),
+                                       BookingLink.booked_time >= now - timedelta(hours=12))
+          .order_by(BookingLink.booked_time).first()) if lead is not None else None
+    if bk is None:
+        out["skipped"] = "no upcoming booking"
+    else:
+        before = {"meeting_type": bk.meeting_type, "appt_label": bk.appt_label, "visit_address": bk.visit_address,
+                  "appt_duration": bk.appt_duration}
+        bk.meeting_type, bk.visit_address = BP.REMOTE, None
+        bk.appt_label = BP.REMOTE_OPTION["appt_label"]
+        bk.appt_duration = A.visit_minutes(prog, A.PHONE)
+        item("booking_link", bk.id, "to_phone", before,
+             {"meeting_type": BP.REMOTE, "appt_label": bk.appt_label}, "owner Nov 23: Anne is not in Texas")
+        conv = ai_setter.conversation_for(db, lead)
+        conv.booked_time = bk.booked_time
+        db.add(LeadNote(organization_id=org_id, lead_id=lead.id, kind="internal",
+                        body="Owner, Nov 23: she is not in Texas - her %s appointment is now a PHONE CALL at the same "
+                             "time. Call her at 817-946-9594 (email lokilani888@hotmail.com)." % A.describe(bk.booked_time)))
+        out["changed"] = bk.booked_time.isoformat()
+    run.status, run.finished_at, run.summary_json = "applied", datetime.utcnow(), json.dumps(out, default=str)
+    db.commit()
+    return out
+
+
 def restland_book_carmelita(db: Session, prog, now: datetime, key: str = CARMELITA_KEY,
                             slot: datetime = CARMELITA_SLOT) -> Dict:
     from app.models.models import BookingLink, Lead
@@ -887,6 +926,8 @@ def apply_pending(db: Session, now: Optional[datetime] = None) -> Dict:
                     res["carmelita_3pm"] = restland_book_carmelita(db, prog, now)
                 if now < EMAILED_UNTIL and _ledger(db, prog.organization_id, EMAILED_KEY) is None:
                     res["emailed_replies"] = restland_emailed_replies(db, prog, now)
+                if now < ANNE_UNTIL and _ledger(db, prog.organization_id, ANNE_KEY) is None:
+                    res["anne_phone"] = restland_anne_phone(db, prog, now)
                 if now < REPLIES2_UNTIL and _ledger(db, prog.organization_id, REPLIES2_KEY) is None:
                     res["emailed_replies_2"] = restland_emailed_replies_2(db, prog, now)
                 if now < TWO_UNTIL and _ledger(db, prog.organization_id, TWO_KEY) is None:
