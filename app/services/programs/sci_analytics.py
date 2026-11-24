@@ -399,20 +399,39 @@ class Ledger:
                 times = [A.describe(s) for s in A.offered(c)]
             except Exception:                             # noqa: BLE001
                 times = []
+            text = "Offered " + (" or ".join(times) if times else "visit times")
+            if (c.state or "") == "booked" and c.booked_time:
+                # Owner, Nov 24: a family who booked shows as BOOKED, with the time.
+                bt = c.booked_time.replace(tzinfo=None) if getattr(c.booked_time, "tzinfo", None) else c.booked_time
+                text = "BOOKED %s  (%s)" % (A.describe(bt), text)
             self.offers.append(stamp({"kind": "offer", "id": c.id, "lead_id": lid, "at": c.offered_at, "channel": None,
-                                      "text": "Offered " + (" or ".join(times) if times else "visit times"),
+                                      "text": text,
                                       "result": c.state, "touch": touch_before(lid, c.offered_at),
                                       "location_id": self.families[lid]["location_id"]}))
 
         # confirmed appointments: on the calendar, real family, not opted out
         lap("offers")
         self.bookings = []
+        # WHEN A FAMILY BOOKED (owner, Nov 24): the moment of the booking - the
+        # newest "booked" event on its link - not when the link was created
+        # (that is usually the day of the first text, days earlier).
+        booked_at: Dict[str, datetime] = {}
+        try:
+            from app.models.program_models import BookingPageEvent
+            for link_id, at in (db.query(BookingPageEvent.booking_link_id, BookingPageEvent.created_at)
+                                .filter(BookingPageEvent.organization_id == org_id,
+                                        BookingPageEvent.event == "booked",
+                                        BookingPageEvent.booking_link_id.isnot(None)).all()):
+                if at is not None and (link_id not in booked_at or at > booked_at[link_id]):
+                    booked_at[link_id] = at
+        except Exception:                                 # noqa: BLE001 - fall back to the link's own dates
+            booked_at = {}
         for b in (db.query(BookingLink).filter(BookingLink.lead_id.in_(ids), BookingLink.status.in_(BOOKED),
                                                BookingLink.booked_time.isnot(None),
                                                BookingLink.calendar_event_id.isnot(None)).all()):
             if b.lead_id not in fam_ids or b.lead_id in self.opted_out_ids:
                 continue
-            at = b.confirmed_at or b.created_at
+            at = booked_at.get(b.id) or b.confirmed_at or b.rescheduled_at or b.created_at
             self.bookings.append(stamp({"kind": "appointment", "id": b.id, "lead_id": b.lead_id, "at": at,
                                   "channel": None,
                                   # booked_time is the advisor's LOCAL wall time (booking_time.py):
@@ -430,6 +449,20 @@ class Ledger:
                                                                             EmailMessage.status == "sent").distinct()}
         self.contacted_ever = ((ever_texted | ever_emailed) & set(fam_ids)) | set(self.attempts_by_lead)
         lap("contacted")
+
+
+def booked_moment(db: Session, b) -> Optional[datetime]:
+    """When the family booked this appointment (owner, Nov 24): the newest
+    "booked" event on the link, else its confirmation/reschedule date, else
+    when the link was created."""
+    try:
+        from sqlalchemy import func
+        from app.models.program_models import BookingPageEvent
+        at = (db.query(func.max(BookingPageEvent.created_at))
+              .filter(BookingPageEvent.booking_link_id == b.id, BookingPageEvent.event == "booked").scalar())
+    except Exception:                                     # noqa: BLE001
+        at = None
+    return at or b.confirmed_at or b.rescheduled_at or b.created_at
 
 
 _CACHE: Dict[str, "Ledger"] = {}
@@ -1133,7 +1166,7 @@ def journey(db: Session, org_id: str, lead_id: str) -> Optional[Dict]:
             add(t.created_at, "ai", "AI draft held (not sent)", t.text, result=t.delivery)
     for b in (db.query(BookingLink).filter(BookingLink.lead_id == lead.id).all()):
         if (b.status or "") in BOOKED and b.booked_time:
-            add(b.confirmed_at or b.created_at, "booked",
+            add(booked_moment(db, b), "booked",
                 "Appointment confirmed" if b.calendar_event_id else "Appointment booked (not yet on calendar)",
                 "%s · %s" % (b.appt_label or "Visit",
                              _booked_ct(b).strftime("%a %b %-d, %-I:%M %p CT")),
