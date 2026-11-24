@@ -235,6 +235,22 @@ def main(argv=None) -> int:
     except Exception as e:                                   # noqa: BLE001
         log.error("Owner changes errored (deploy continues): %s: %s", type(e).__name__, str(e)[:200])
 
+    # ── 3e3. EVOSYS SALES ONE-TIME OWNER CHANGES (Nov 23) ──
+    # Gov-list campaigns: booking link instead of "Reply YES". Inert once done;
+    # the campaigns stay off until the owner approves. Never changes the exit code.
+    try:
+        from app.deps import SessionLocal
+        from app.services.evosys_sales import owner_changes as es_owner_changes
+        _db = SessionLocal()
+        try:
+            res = es_owner_changes.apply_pending(_db)
+            if res:
+                log.info("evosys sales owner changes: %s", json.dumps(res, default=str)[:800])
+        finally:
+            _db.close()
+    except Exception as e:                                   # noqa: BLE001
+        log.error("EvoSys Sales owner changes errored (deploy continues): %s: %s", type(e).__name__, str(e)[:200])
+
     # ── 3f. WORKSPACE DATA RESET (#507) - inert unless switched on ──
     # WORKSPACE_RESET="<organization id>:<plan|apply|configure>:<run key>" or
     # "<organization id>:rollback:<run id>". `apply` is idempotent per run key
