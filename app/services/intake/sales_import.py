@@ -24,10 +24,11 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import func, or_
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.sales_models import BrandSalesOrg, Opportunity, OpportunityEvent, STAGE_PROSPECT
@@ -64,32 +65,124 @@ def _brand(db: Session, b) -> BrandSalesOrg:
     return org
 
 
-def find_existing(db: Session, b, n: Dict[str, Any]) -> Optional[Tuple[str, str]]:
-    bid = BI.target_id(b)
-    q = db.query(Opportunity).filter(Opportunity.brand_sales_org_id == bid)
+# ── "Is this business already a lead?" ─────────────────────────────────────
+#
+# SPEED (owner request 2026-11-23). This check runs for every row, twice (when
+# the file is checked and again when it is saved). It used to make five passes
+# over the team's whole lead table per row - "contains" searches the database
+# cannot shortcut - each loading up to 200 full lead records to compare one
+# field. Imports slowed down as the table grew.
+#
+# Now the team's leads are read ONCE per request (id + the five compared
+# fields only) into a lookup kept on the database session. Leads this import
+# creates are added to it as they are written, and it is re-read every
+# _INDEX_TTL seconds so leads added meanwhile by anyone else are picked up.
+# A hit is never trusted from the list alone: the lead is re-read by id and
+# the same rule checked again on its current values, so a stale list can't
+# wrongly block a new lead. The old 200/50/20 caps are gone (they could hide a
+# real duplicate), so this finds at least what the old check found.
+
+_INDEX_TTL = 60.0
+
+
+class _DupIndex:
+    def __init__(self, db: Session, bid: str):
+        self.bid, self.built_at = bid, time.monotonic()
+        self.sid: Dict[str, str] = {}
+        self.sources: List[Tuple[str, str, str]] = []      # (id, source, source lowercased)
+        self.phone: Dict[str, str] = {}
+        self.domain: Dict[str, str] = {}
+        self.name: Dict[str, List[Tuple[str, str]]] = {}   # company_key -> [(id, company_name)]
+        for row in (db.query(Opportunity.id, Opportunity.source_record_id, Opportunity.source, Opportunity.phone,
+                             Opportunity.website, Opportunity.company_name)
+                    .filter(Opportunity.brand_sales_org_id == bid)
+                    .order_by(Opportunity.created_at, Opportunity.id).all()):
+            self.add(*row)
+
+    def add(self, oid, sid, source, phone, website, company_name) -> None:
+        if sid:
+            self.sid.setdefault(sid.lower(), oid)
+        if source:
+            self.sources.append((oid, source, source.lower()))
+        p10 = BI.digits10(phone)
+        if p10:
+            self.phone.setdefault(p10, oid)
+        dom = BI.domain_of(website)
+        if dom:
+            self.domain.setdefault(dom, oid)
+        ck = BI.company_key(company_name)
+        if ck:
+            self.name.setdefault(ck, []).append((oid, company_name or ""))
+
+
+def _index(db: Session, bid: str) -> _DupIndex:
+    store = db.info.setdefault("sales_import_dup_index", {})
+    ix = store.get(bid)
+    if ix is None or time.monotonic() - ix.built_at > _INDEX_TTL:
+        ix = store[bid] = _DupIndex(db, bid)
+    return ix
+
+
+def _ilike_prefix(prefix: str):
+    """Python twin of SQL `ILIKE prefix || '%'` (the old name check)."""
+    pat = "".join(".*" if ch == "%" else "." if ch == "_" else re.escape(ch) for ch in prefix)
+    return re.compile(pat, re.IGNORECASE | re.DOTALL)
+
+
+def _rules(b, n: Dict[str, Any], o) -> Optional[str]:
+    """The old checks, in the old order, on ONE lead's current values."""
+    sid = n.get("source_record_id")
+    if sid and (o.source_record_id or "").lower() == sid.lower():
+        return "same source record ID (%s)" % sid
+    if sid and sid.lower() in (o.source or "").lower() and BI.id_in_text(sid, o.source):
+        return "source text already names %s" % sid
+    if n.get("phone10") and BI.digits10(o.phone) == n["phone10"]:
+        return "same phone"
+    if n.get("domain") and BI.domain_of(o.website) == n["domain"]:
+        return "same website"
+    ck = BI.company_key(n.get("business_name"))
+    first = (n.get("business_name") or "").strip()[:3]
+    if ck and _ilike_prefix(first).match(o.company_name or "") and BI.company_key(o.company_name) == ck:
+        return "same company name"
+    return None
+
+
+def _candidates(ix: _DupIndex, n: Dict[str, Any]) -> List[str]:
+    """Lead ids the list says could match, best (old check order) first."""
+    out: List[str] = []
     sid = n.get("source_record_id")
     if sid:
-        hit = q.filter(func.lower(Opportunity.source_record_id) == sid.lower()).first()
-        if hit:
-            return hit.id, "same source record ID (%s)" % sid
-        for o in q.filter(Opportunity.source.ilike("%" + sid + "%")).limit(20).all():
-            if BI.id_in_text(sid, o.source):
-                return o.id, "source text already names %s" % sid
-    if n.get("phone10"):
-        tail = n["phone10"][-4:]
-        for o in q.filter(Opportunity.phone.ilike("%" + tail + "%")).limit(200).all():
-            if BI.digits10(o.phone) == n["phone10"]:
-                return o.id, "same phone"
-    if n.get("domain"):
-        for o in q.filter(Opportunity.website.ilike("%" + n["domain"] + "%")).limit(50).all():
-            if BI.domain_of(o.website) == n["domain"]:
-                return o.id, "same website"
+        if sid.lower() in ix.sid:
+            out.append(ix.sid[sid.lower()])
+        low = sid.lower()
+        out.extend(oid for oid, src, srcl in ix.sources if low in srcl and BI.id_in_text(sid, src))
+    if n.get("phone10") and n["phone10"] in ix.phone:
+        out.append(ix.phone[n["phone10"]])
+    if n.get("domain") and n["domain"] in ix.domain:
+        out.append(ix.domain[n["domain"]])
     ck = BI.company_key(n.get("business_name"))
-    if ck:
-        first = (n.get("business_name") or "").strip()[:3]
-        for o in q.filter(Opportunity.company_name.ilike(first + "%")).limit(200).all():
-            if BI.company_key(o.company_name) == ck:
-                return o.id, "same company name"
+    if ck and ck in ix.name:
+        rx = _ilike_prefix((n.get("business_name") or "").strip()[:3])
+        out.extend(oid for oid, nm in ix.name[ck] if rx.match(nm))
+    return out
+
+
+def find_existing(db: Session, b, n: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+    bid = BI.target_id(b)
+    ix = _index(db, bid)
+    seen = set()
+    for oid in _candidates(ix, n):
+        if oid in seen:
+            continue
+        seen.add(oid)
+        o = (db.query(Opportunity.id, Opportunity.source_record_id, Opportunity.source, Opportunity.phone,
+                      Opportunity.website, Opportunity.company_name)
+             .filter(Opportunity.id == oid, Opportunity.brand_sales_org_id == bid).first())
+        if o is None:
+            continue
+        why = _rules(b, n, o)
+        if why:
+            return o.id, why
     return None
 
 
@@ -167,6 +260,9 @@ def write(db: Session, b, user, n: Dict[str, Any], row) -> str:
     db.flush()
     _add_events(db, opp, user, b, n, created=True)
     _evosys_group(db, org, opp, n)
+    ix = db.info.get("sales_import_dup_index", {}).get(org.id)
+    if ix is not None:  # later rows of this import see it at once (a failed row is re-checked by id)
+        ix.add(opp.id, opp.source_record_id, opp.source, opp.phone, opp.website, opp.company_name)
     return opp.id
 
 
