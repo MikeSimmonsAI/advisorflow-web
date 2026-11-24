@@ -767,9 +767,16 @@ def test_person_tab_layout_is_valid_and_applied_once(setter):
             return self
 
         def batchUpdate(self, spreadsheetId, body):
-            calls.append(len(body["requests"]))
+            calls.append(body["requests"])
             return _Exec({})
+
+        def get(self, spreadsheetId, fields=None):
+            return _Exec({"sheets": [{"properties": {"sheetId": 3}, "bandedRanges": [{"bandedRangeId": 77}],
+                                      "conditionalFormats": [{}, {}]},
+                                     {"properties": {"sheetId": 1}, "bandedRanges": [{"bandedRangeId": 5}]}]})
     assert RS.ensure_person_tabs(db, prog, C(), "sid") is True
+    assert calls[0][0] == {"deleteBanding": {"bandedRangeId": 77}}               # only the person tab's
+    assert calls[0][1] == calls[0][2] == {"deleteConditionalFormatRule": {"sheetId": 3, "index": 0}}
     assert RS.ensure_person_tabs(db, prog, C(), "sid") is False and len(calls) == 1
 
 

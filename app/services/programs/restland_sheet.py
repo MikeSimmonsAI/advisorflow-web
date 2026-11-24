@@ -1101,7 +1101,10 @@ def person_tab_layout_requests() -> List[Dict]:
     for sid in PERSON_TAB_IDS:
         a_end = PT_APPT_FIRST + PT_APPT_MAX - 1
         f_end = PT_LAST_ROW
-        # clear the old layout first (it may be wider and taller), then size the tab
+        # clear the old layout first (it may be wider and taller - or smaller than
+        # the range cleared, so make room first), then size the tab
+        r.append({"updateSheetProperties": {"properties": {"sheetId": sid, "gridProperties": {
+            "rowCount": 500, "columnCount": 30}}, "fields": "gridProperties.rowCount,gridProperties.columnCount"}})
         r.append({"unmergeCells": {"range": g(sid, 1, 500, 0, 30)}})
         r.append({"setDataValidation": {"range": g(sid, 3, 500, 0, 30)}})
         r.append({"repeatCell": {"range": g(sid, 1, 500, 0, 30), "cell": {},
@@ -1195,10 +1198,27 @@ def ensure_person_tabs(db: Session, prog, client, sid: str) -> bool:
     """Give the person tabs their current look, once per version."""
     pol = json.loads(prog.booking_policy_json or "{}")
     cfg = pol.get("handoff_sheet") or {}
-    if cfg.get("person_tabs_v4"):
+    if cfg.get("person_tabs_v5"):
         return False
-    client.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": person_tab_layout_requests()}).execute()
-    cfg["person_tabs_v4"] = True
+    # A layout applied before leaves its row striping and color rules behind:
+    # Google refuses to stripe a range twice, so take the old ones off first.
+    first: List[Dict] = []
+    try:
+        meta = client.spreadsheets().get(
+            spreadsheetId=sid, fields="sheets(properties.sheetId,bandedRanges.bandedRangeId,conditionalFormats)"
+        ).execute()
+        for sh in meta.get("sheets") or []:
+            sheet_id = (sh.get("properties") or {}).get("sheetId")
+            if sheet_id not in PERSON_TAB_IDS:
+                continue
+            first += [{"deleteBanding": {"bandedRangeId": b["bandedRangeId"]}} for b in sh.get("bandedRanges") or []]
+            first += [{"deleteConditionalFormatRule": {"sheetId": sheet_id, "index": 0}}
+                      for _ in sh.get("conditionalFormats") or []]
+    except Exception:                                    # noqa: BLE001 - a fresh sheet has nothing to remove
+        first = []
+    client.spreadsheets().batchUpdate(spreadsheetId=sid,
+                                      body={"requests": first + person_tab_layout_requests()}).execute()
+    cfg["person_tabs_v5"] = True
     pol["handoff_sheet"] = cfg
     prog.booking_policy_json = json.dumps(pol)
     db.commit()
