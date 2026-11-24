@@ -49,3 +49,19 @@ def test_anne_visit_becomes_a_phone_call(rl, monkeypatch):
     out = OC.restland_anne_phone(db, prog, now)
     db.refresh(bk)
     assert out.get("changed") and bk.meeting_type == "remote" and "phone" in bk.appt_label
+
+
+def test_nov24_nsmg_replies_enter_the_inbox_once(rl, monkeypatch):
+    _launch(rl)
+    db, org = rl["db"], rl["org"].id
+    prog = db.query(OutreachProgram).filter(OutreachProgram.organization_id == org).first()
+    a, b = db.query(Lead).filter(Lead.organization_id == org).limit(2).all()
+    monkeypatch.setattr(OC, "NSMG3", [(a.id, "Wants the form", "Please send me the form.", datetime(2026, 11, 24, 17)),
+                                      (b.id, "Meet next week", "Can we meet next week?", datetime(2026, 11, 24, 18))])
+    out = OC.restland_nsmg_replies(db, prog, datetime(2026, 11, 24, 18, 30))
+    assert sorted(out["entered"]) == sorted([a.id, b.id])
+    assert db.query(ProgramResponse).filter(ProgramResponse.organization_id == org,
+                                            ProgramResponse.channel == "email").count() == 2
+    from app.services.programs import ai_setter
+    assert ai_setter.conversation_for(db, a).state == "human"
+    assert OC._ledger(db, org, OC.NSMG3_KEY) is not None

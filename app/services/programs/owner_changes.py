@@ -215,6 +215,18 @@ COLLEEN = ("fa0cd5b6-d595-4c41-9644-f32aad0b7f74", datetime(2026, 11, 25, 13, 0)
 # Owner, Nov 24 11:19 AM: morning visits get an 8:30 AM "see you today" text;
 # the booking confirmation no longer cancels a reminder. Re-plans the
 # reminders of every upcoming Restland appointment once, at deploy.
+# Owner, Nov 24 12:14 PM: two more email replies that reached Mike's work inbox
+# (emails sent before 5 PM Nov 23 carry his NSMG address as Reply-To). Each
+# goes into the app like a real emailed reply: the Inbox, the Follow-Ups tab,
+# automatic texts stopped, a note. No AI reply to them (a person answers).
+NSMG3_KEY = "restland-nsmg-replies-2026-11-24"
+NSMG3_UNTIL = datetime(2026, 11, 27, 6, 0)
+NSMG3 = [
+    ("ee463e85-e587-4cba-9d9d-0398f38362a0", "Wants the Permission to Access form emailed to review",
+     "Hello Mike, Please send me the form to review. Thank you", datetime(2026, 11, 24, 17, 34)),
+    ("7d595d50-1063-4386-96bf-ed2fd37a0a70", "Wants to schedule a meeting next week - offer times",
+     "Can we schedule a meeting next week? Steven Kinder", datetime(2026, 11, 24, 18, 10)),
+]
 # Owner, Nov 24 11:51 AM: David Ahmad asked for a call ("you can call me at
 # 817.723.4630") - his Sat Nov 28 10 AM appointment is a PHONE CALL, on the
 # app, the sheet and the calendar. Nothing is sent to him by this change.
@@ -896,6 +908,46 @@ def restland_followups_and_remote(db: Session, prog, now: datetime) -> Dict:
     return summary
 
 
+def restland_nsmg_replies(db: Session, prog, now: datetime) -> Dict:
+    from app.models.models import Lead
+    from app.models.work_models import LeadNote
+    from app.models.program_models import ProgramResponse
+    from app.services import cadence_service as CS
+    from app.services.programs import ai_setter
+    from app.services.programs import responses as R
+    org_id = prog.organization_id
+    run, item = _open_run(db, org_id, NSMG3_KEY)
+    out: Dict = {"entered": [], "missing": []}
+    for lead_id, why, said, received in NSMG3:
+        lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == org_id).first()
+        if lead is None:
+            out["missing"].append(lead_id)
+            continue
+        rid = "manual-email:nov24:%s" % lead.id
+        if db.query(ProgramResponse).filter(ProgramResponse.organization_id == org_id,
+                                            ProgramResponse.reply_id == rid).first() is not None:
+            continue
+        conv = ai_setter.conversation_for(db, lead)
+        ai_setter._turn(db, conv, "family", said, action="received",
+                        reason="email reply that reached Mike's NSMG inbox, entered Nov 24")
+        R.on_inbound(db, lead, said, "email", reply_id=rid, now=received, staff_alerts=True, run_setter=False)
+        before = {"state": conv.state, "handoff_reason": conv.handoff_reason}
+        conv.state, conv.handoff_reason, conv.next_followup_at = "human", why[:250], None
+        item("program_conversation", conv.id, "nsmg_reply", before, {"state": "human", "why": why},
+             "owner Nov 24: emailed reply entered")
+        if lead.status in ("new", "sent"):
+            lead.status = "replied"
+        CS.stop_cadence_for_lead(db, lead.id, "stopped_replied")
+        db.add(LeadNote(organization_id=org_id, lead_id=lead.id, kind="internal",
+                        body=("Owner, Nov 24: their email reply reached Mike's NSMG inbox, not the system - "
+                              "entered by hand. They said: %s" % said)[:4000]))
+        db.commit()
+        out["entered"].append(lead_id)
+    run.status, run.finished_at, run.summary_json = "applied", datetime.utcnow(), json.dumps(out)
+    db.commit()
+    return out
+
+
 def restland_david_phone(db: Session, prog, now: datetime) -> Dict:
     from app.models.models import BookingLink, Lead
     from app.services.programs import booking_policy as BP
@@ -944,7 +996,7 @@ def apply_pending(db: Session, now: Optional[datetime] = None) -> Dict:
     from app.services.programs import outreach_slots as OS
     now = now or datetime.utcnow()
     out: Dict = {}
-    if now >= max(APPLY_UNTIL, SUNDAYS_APPLY_UNTIL, MORNING_UNTIL, DAVID_UNTIL):
+    if now >= max(APPLY_UNTIL, SUNDAYS_APPLY_UNTIL, MORNING_UNTIL, DAVID_UNTIL, NSMG3_UNTIL):
         return out
     for prog in db.query(OutreachProgram).all():
         try:
@@ -978,6 +1030,8 @@ def apply_pending(db: Session, now: Optional[datetime] = None) -> Dict:
                 if now < CARMELITA_330_UNTIL and _ledger(db, prog.organization_id, CARMELITA_330_KEY) is None:
                     res["carmelita_330pm"] = restland_book_carmelita(db, prog, now, CARMELITA_330_KEY,
                                                                      CARMELITA_330_SLOT)
+                if now < NSMG3_UNTIL and _ledger(db, prog.organization_id, NSMG3_KEY) is None:
+                    res["nsmg_replies"] = restland_nsmg_replies(db, prog, now)
                 if now < DAVID_UNTIL and _ledger(db, prog.organization_id, DAVID_KEY) is None:
                     res["david_phone"] = restland_david_phone(db, prog, now)
                 if now < MORNING_UNTIL and _ledger(db, prog.organization_id, MORNING_KEY) is None:
