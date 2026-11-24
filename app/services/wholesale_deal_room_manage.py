@@ -98,7 +98,7 @@ def investors(db, org_id: str, include_test: bool = False, q: Optional[str] = No
             continue
         name = a.preferred_name or a.legal_name or u.full_name
         if needle and needle not in " ".join(x for x in (name, a.legal_name, a.company_legal_name, u.email,
-                                                           b.company_name) if x).lower():
+                                                           b.company_name, b.email) if x).lower():
             continue
         ents = (db.query(InvestorEntityRole, WholesaleBuyerEntity)
                 .join(WholesaleBuyerEntity, WholesaleBuyerEntity.id == InvestorEntityRole.entity_id)
@@ -120,7 +120,7 @@ def investors(db, org_id: str, include_test: bool = False, q: Optional[str] = No
                                                             WholesaleBuyerOutreach.channel == "deal_room").count())
         out.append({
             "account_id": a.id, "buyer_id": b.id, "name": name, "legal_name": a.legal_name, "email": u.email,
-            "phone": a.phone, "kind": a.kind, "company": a.company_legal_name, "entity_type": a.entity_type,
+            "phone": a.phone, "preferred_name": a.preferred_name, "contact_email": b.email, "kind": a.kind, "company": a.company_legal_name, "entity_type": a.entity_type,
             "position": a.position, "status": a.status, "identity_complete": bool(a.identity_completed_at),
             "email_verified": bool(a.email_verified_at), "joined_at": _iso(a.created_at),
             "entities": [{"name": e.legal_name, "status": e.status, "position": r.position, "authority": r.authority}

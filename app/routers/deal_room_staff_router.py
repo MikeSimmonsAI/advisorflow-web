@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_not_observation, require_tenant_or_observer, require_tenant_user
 from app.models.models import User
-from app.models.wholesale_investor_models import DealListing, ExclusiveHold, InvestorInvite
+from app.models.wholesale_investor_models import DealListing, ExclusiveHold, InvestorAccount, InvestorInvite
 from app.models.wholesale_models import WholesaleBuyer, WholesaleFile
 from app.services import wholesale_deal_room as DR
 from app.services import wholesale_deal_room_chat as CH
@@ -561,3 +561,112 @@ def owner_feed(kind: str = Query("activity"), include_test: bool = False, limit:
     if kind not in ("activity", "holds", "signups", "messages"):
         raise HTTPException(status_code=400, detail="kind must be activity, holds, signups or messages")
     return {"rows": MG.feed(db, _read(db, user), kind, include_test, limit)}
+
+
+def _manage_investors(db, user):
+    org_id = svc.write_org_id(db, user)
+    if user.role not in DR.STAFF_ROLES and not DR._is_wholesale_manager(db, user):
+        raise HTTPException(403, "Only an owner or manager can manage Deal Room investor records.")
+    return org_id
+
+
+class InvestorProfileIn(BaseModel):
+    name: str
+    email: Optional[str] = None
+    company: Optional[str] = None
+    phone: Optional[str] = None
+    preferred_name: Optional[str] = None
+    position: Optional[str] = None
+    is_test: bool = False
+
+
+@router.get("/manual-investors")
+def manual_investors(include_test: bool = False, db: Session = Depends(get_db),
+                     user: User = Depends(require_tenant_or_observer)):
+    org_id = _read(db, user)
+    query = db.query(WholesaleBuyer).filter(
+        WholesaleBuyer.organization_id == org_id, WholesaleBuyer.source == DR.MANUAL_INVESTOR_SOURCE,
+        ~db.query(InvestorAccount.id).filter(
+            InvestorAccount.organization_id == org_id, InvestorAccount.buyer_id == WholesaleBuyer.id,
+        ).exists(),
+    )
+    if not include_test:
+        query = query.filter(WholesaleBuyer.is_test.is_(False))
+    return {"investors": [
+        {"buyer_id": b.id, "name": b.contact_name, "email": b.email, "phone": b.phone,
+         "company": b.company_name, "is_test": b.is_test}
+        for b in query.order_by(WholesaleBuyer.contact_name, WholesaleBuyer.id).all()
+    ]}
+
+
+@router.post("/manual-investors")
+def create_manual_investor(payload: InvestorProfileIn, db: Session = Depends(get_db),
+                           user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    buyer = DR.save_manual_investor(db, _manage_investors(db, user), user, payload.model_dump())
+    buyer_id = buyer.id
+    db.commit()
+    return {"id": buyer_id}
+
+
+@router.patch("/manual-investors/{buyer_id}")
+def edit_manual_investor(buyer_id: str, payload: InvestorProfileIn, db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    DR.save_manual_investor(db, _manage_investors(db, user), user, payload.model_dump(), buyer_id)
+    db.commit()
+    return {"id": buyer_id}
+
+
+@router.patch("/accounts/{account_id}")
+def edit_investor_account(account_id: str, payload: InvestorProfileIn, db: Session = Depends(get_db),
+                          user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    DR.update_investor_profile(db, _manage_investors(db, user), account_id, user, payload.model_dump())
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/accounts/{account_id}")
+def delete_investor_account(account_id: str, db: Session = Depends(get_db),
+                            user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    DR.delete_investor_account(db, _manage_investors(db, user), account_id, user)
+    db.commit()
+    return {"ok": True}
+
+
+@router.patch("/invites/{invite_id}")
+def edit_invitation(invite_id: str, payload: InvestorProfileIn, db: Session = Depends(get_db),
+                    user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    invitation = DR.edit_invite(db, _manage_investors(db, user), invite_id, user, payload.model_dump())
+    out = DR.invite_json(invitation)
+    db.commit()
+    return out
+
+
+@router.delete("/invites/{invite_id}")
+def delete_invitation(invite_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user),
+                      _g: User = Depends(require_not_observation)):
+    DR.delete_invite(db, _manage_investors(db, user), invite_id, user)
+    db.commit()
+    return {"ok": True}
+
+@router.delete("/manual-investors/{buyer_id}")
+def delete_manual_investor(buyer_id: str, db: Session = Depends(get_db),
+                           user: User = Depends(require_tenant_user), _g: User = Depends(require_not_observation)):
+    from app.routers.wholesale_buyers_router import delete_buyer_record
+
+    org_id = _manage_investors(db, user)
+    invitations = db.query(InvestorInvite).filter_by(
+        organization_id=org_id, buyer_id=buyer_id,
+    ).with_for_update().all()
+    buyer = db.query(WholesaleBuyer).filter_by(
+        organization_id=org_id, id=buyer_id, source=DR.MANUAL_INVESTOR_SOURCE,
+    ).with_for_update().first()
+    if buyer is None:
+        raise HTTPException(404, "Manual investor not found.")
+    if DR.accounts_for_buyer(db, org_id, buyer_id):
+        raise HTTPException(409, "This investor has registered. Open their account to manage it.")
+    for invitation in invitations:
+        if invitation.status in (DR.INVITE_PENDING, DR.INVITE_EXPIRED):
+            DR.revoke_invite(db, org_id, invitation.id, user)
+    out = delete_buyer_record(db, org_id, buyer, user)
+    db.commit()
+    return out

@@ -343,7 +343,13 @@ def delete_buyer(buyer_id: str, request: Request, db: Session = Depends(get_db),
     """
     org_id = svc.write_org_id(db, user)
     buyer = _get_buyer(db, org_id, buyer_id)
+    out = delete_buyer_record(db, org_id, buyer, user)
+    db.commit()
+    return out
 
+
+def delete_buyer_record(db, org_id, buyer, user):
+    buyer_id = buyer.id
     outreach = (db.query(WholesaleBuyerOutreach)
                 .filter(WholesaleBuyerOutreach.organization_id == org_id,
                         WholesaleBuyerOutreach.buyer_id == buyer_id).count())
@@ -381,7 +387,6 @@ def delete_buyer(buyer_id: str, request: Request, db: Session = Depends(get_db),
                   summary="Buyer deleted: %s" % name,
                   before={"buyer_id": buyer_id, "name": name,
                           "buy_boxes": len(boxes)})
-    db.commit()
     return {"ok": True, "deleted": buyer_id, "buy_boxes_deleted": len(boxes)}
 
 
