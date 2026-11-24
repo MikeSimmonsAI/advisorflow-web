@@ -1101,7 +1101,10 @@ def person_tab_layout_requests() -> List[Dict]:
     for sid in PERSON_TAB_IDS:
         a_end = PT_APPT_FIRST + PT_APPT_MAX - 1
         f_end = PT_LAST_ROW
-        # clear the old layout first (it may be wider and taller), then size the tab
+        # clear the old layout first (it may be wider and taller - or smaller than
+        # the range cleared, so make room first), then size the tab
+        r.append({"updateSheetProperties": {"properties": {"sheetId": sid, "gridProperties": {
+            "rowCount": 500, "columnCount": 30}}, "fields": "gridProperties.rowCount,gridProperties.columnCount"}})
         r.append({"unmergeCells": {"range": g(sid, 1, 500, 0, 30)}})
         r.append({"setDataValidation": {"range": g(sid, 3, 500, 0, 30)}})
         r.append({"repeatCell": {"range": g(sid, 1, 500, 0, 30), "cell": {},
