@@ -223,3 +223,42 @@ def test_a_moved_message_with_a_new_id_is_not_handled_twice(db_session, world):
     S.poll_mailbox(db_session, world.box, fetch=lambda since: [m2])
     assert db_session.query(InboundMailboxMessage).count() == 1
     assert db_session.query(Reply).count() == 1
+
+
+# ── Owner, Nov 24: a family's email forwarded in by staff lands on the family ─
+
+def test_a_family_email_forwarded_by_staff_is_filed_on_the_family(db_session, world):
+    from app.models.models import User
+    staff = User(email="Michael.Simmons@nsmg.example", full_name="Mike S", password_hash="x",
+                 organization_id=world.atl.id, is_active=True, role="org_admin")
+    db_session.add(staff)
+    db_session.commit()
+    outlook = ("<div>FYI</div><hr><div><b>From:</b> Joshua S &lt;josh@example.com&gt;<br>"
+               "<b>Sent:</b> Tuesday, November 24, 2026 11:34 AM<br>"
+               "<b>To:</b> Simmons, Michael &lt;michael.simmons@nsmg.example&gt;<br>"
+               "<b>Subject:</b> Re: Explore Your Energy Options</div><div><br></div>"
+               "<div>Please send me the form to review.</div><div>Thank you</div><div><br></div>"
+               "<div>On Nov 23, 2026, at 8:49 AM, Atlantis &lt;support@evosyspro.live&gt; wrote:</div>"
+               "<blockquote>Hi Joshua ...</blockquote>")
+    msgs = [_msg("f1", "michael.simmons@nsmg.example", outlook, subject="FW: Re: Explore Your Energy Options")]
+    res = S.poll_mailbox(db_session, world.box, fetch=lambda since: msgs)
+    assert res["matched"] == 1, res
+    reply = db_session.query(Reply).filter(Reply.lead_id == world.lead.id).one()
+    assert reply.body.startswith("Please send me the form to review.") and "Hi Joshua" not in reply.body
+    row = db_session.query(InboundMailboxMessage).one()
+    assert row.lead_id == world.lead.id and "Forwarded by" in row.detail
+    # a forward from someone who is NOT staff is treated as their own email
+    msgs2 = [_msg("f2", "stranger@else.test", outlook, subject="FW: hi")]
+    S.poll_mailbox(db_session, world.box, fetch=lambda since: msgs2)
+    assert db_session.query(Reply).filter(Reply.lead_id == world.lead.id).count() == 1
+
+
+def test_forwarded_original_reads_gmail_and_outlook_headers():
+    g = {"subject": "Fwd: Re: file", "body": {"content":
+         "---------- Forwarded message ---------\nFrom: Cameron Marmon <cdjmarmon@gmail.com>\n"
+         "Date: Tue, Nov 24, 2026 at 11:34 AM\nSubject: Re: file\nTo: <x@y.com>\n\n"
+         "Hello Mike,\n\nPlease send me the form to review.\n\nThank you\n\nOn Nov 23, 2026 wrote:\n> old"}}
+    out = S.forwarded_original(g)
+    assert out["sender"] == "cdjmarmon@gmail.com" and out["body"].startswith("Hello Mike")
+    assert "old" not in out["body"]
+    assert S.forwarded_original({"subject": "Re: file", "body": {"content": "From: a@b.com"}}) is None
