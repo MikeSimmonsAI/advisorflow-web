@@ -74,7 +74,9 @@ def test_remote_call_is_a_booking_choice_with_its_own_wording():
     pol = BP.parse(json.dumps(BP.RESTLAND_POLICY))
     # Only when the family asks: staff can book it, the family's page never shows it.
     assert [o["key"] for o in BP.public_options(pol)] == [BP.OFFICE, BP.HOME]
-    assert [o["key"] for o in BP.public_options(pol, staff=True)] == [BP.OFFICE, BP.HOME, BP.REMOTE]
+    # Owner, Nov 24: phone call and video call are separate choices for staff;
+    # the old combined "phone or video" choice is kept only for older bookings.
+    assert [o["key"] for o in BP.public_options(pol, staff=True)] == [BP.OFFICE, BP.HOME, BP.PHONE, BP.VIDEO]
     choice = BP.meeting_choice(pol, BP.REMOTE, None)
     assert choice["key"] == BP.REMOTE and "phone or video" in choice["appt_label"]
 
@@ -276,12 +278,15 @@ def test_phone_numbers_read_like_phone_numbers():
     assert RS._phone(None) == ""
 
 
-def test_the_ai_never_suggests_a_call_and_books_one_only_on_request():
+def test_the_ai_offers_a_call_when_they_ask_or_cannot_come_in():
+    # Owner, Nov 24 (replaces Nov 22's "only when they ask"): a family who is out
+    # of town or lives far away is offered a call with real times; someone only
+    # busy this week is not.
     p = ai_setter.SYSTEM_PROMPT if hasattr(ai_setter, "SYSTEM_PROMPT") else None
     import inspect
     src = p or inspect.getsource(ai_setter)
-    assert "ONLY WHEN THEY ASK" in src and "never suggest one yourself" in src
-    assert "lock in a call instead of waiting" not in src
+    assert "A PHONE OR VIDEO CALL WHEN THEY CAN'T COME IN" in src and "out of town" in src
+    assert "Do NOT offer a call to someone who is just busy this week" in src
 
 
 def test_the_board_uses_the_evosys_login_when_it_is_set(monkeypatch):

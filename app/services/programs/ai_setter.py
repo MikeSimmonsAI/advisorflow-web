@@ -409,7 +409,7 @@ MOVING TOWARD AN APPOINTMENT - without pressure:
 
 HONOUR THEIR TIMING:
 - Busy right now / will get back to us / call me later: acknowledge warmly and still work toward a time that suits them - busy is not a no. If they gave a time to be called -> "callback" with callback_window in their words. Busy this week, or "next week is better" -> "offer_times" for a later day (put "next week" or the day in best_times; the system finds real times then). Only a long horizon ("after the holidays", "next month", "in a few weeks") -> "follow_up_later" with follow_up_date (YYYY-MM-DD, Central) and follow_up_about. Never end with a vague "reach out whenever".
-- A PHONE OR VIDEO CALL ONLY WHEN THEY ASK (owner, Nov 22) - for a location whose ways we meet have no phone appointment: never suggest one yourself, whatever they say - not for being out of town, busy or far away (away for a while -> the timing rules here; can't come in -> the ways we meet). ONLY when THEY ask for a call or video meeting as the way they want to meet ("can we do it over the phone?", "I'm in Houston, can we do a Zoom?"): say yes and lock in a real time - "offer_times" with appointment_kind "phone" ("Of course, we can do it by phone or video call. Would {{TIMES}} work?").
+- A PHONE OR VIDEO CALL WHEN THEY CAN'T COME IN (owner, Nov 24) - for a location whose ways we meet have no phone appointment: offer a call when they ask for one ("can we do it over the phone?", "can we Zoom?") OR when they say they can't come in because they live out of town, far away, out of state, or are away and can't travel ("I'm out of town", "I live pretty far away", "I'm not in Texas"). Then lock in a real time the same way as a visit: "offer_times" with appointment_kind "phone" ("No problem - we can do it by phone. Would {{TIMES}} work for a quick call?"; say video call instead if they mentioned video, Zoom or FaceTime). If they give a day and time for the call, "book" with requested_time and appointment_kind "phone". Do NOT offer a call to someone who is just busy this week, or only away for a while and back soon (the timing rules here) - they come in.
 - Not interested (but not STOP): thank them, leave the door open in one sentence -> "close".
 - ARRIVING NOW. They say they are on the way, will "run by", "stop in", "come by" TODAY or within a few hours (not tomorrow or a later day - see COMING IN ON A LATER DAY) ("I'll run by there in about 15 minutes"): this is a live visit - the best outcome there is. Action "handoff" (the advisor is alerted at once to greet them). Reply warmly in one or two sentences: glad they're coming, and I'll be watching for them / the team will be ready for them. Do not offer {{TIMES}}, do not ask them to pick a time, and never say an appointment is booked or confirmed.
 - COMING IN ON A LATER DAY. They say they'll come by / stop in / visit TOMORROW or on another day, without a clock time ("I can come by tomorrow if that is ok"): that is a yes to a visit - lock in the time. Action "offer_times": glad they're coming, then {{TIMES}} as your one question ("Wonderful, I'd be glad to see you tomorrow. Would {{TIMES}} work?"). Put the day in best_times. If they also gave a clock time, use requested_time. NEVER just agree to "see you tomorrow" without a time - nobody would be ready for them.
@@ -747,7 +747,8 @@ def validate_decision(d: Dict, body: str, conv, contact: Optional[str] = None) -
         problems.append("a home visit is arranged personally by the advisor, never booked as a visit at the "
                         "location - use handoff so I confirm the time myself")
     if re.search(r"\b(by phone|over the phone|phone (appointment|call|visit))\b", reply, re.I) \
-            and "phone" not in " ".join(dc.get("appointment_ways") or []) and action in ("offer_times", "answer"):
+            and "phone" not in " ".join(dc.get("appointment_ways") or []) and action in ("offer_times", "answer") \
+            and not (_WANTS_PHONE.search(body or "") or _CANT_COME_IN.search(body or "")):
         problems.append("it offers a phone appointment, and this location does not offer them - offer only "
                         "facts_known_for_certain.appointment_ways_this_location_offers")
     if action == "close" and not _DECLINE.search(body or ""):
@@ -1022,7 +1023,12 @@ def choice_evidence(body: str, slot: datetime, index: Optional[int]) -> bool:
 _DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
 
-_WANTS_PHONE = re.compile(r"\b(phone call|by phone|over the phone|call me|a call\b|phone instead)", re.I)
+# Owner, Nov 24: they can't come in because they live away -> a call is offered.
+_CANT_COME_IN = re.compile(r"\b(out of (town|state|the country)|live (pretty |really |too |very )?far|far away|"
+                           r"not in (texas|dallas|town|the area)|don'?t live (in|near|around) (dallas|texas|the area|town)|"
+                           r"another state|can'?t (travel|make it in|come in)|live in (another|a different) (state|city))",
+                           re.I)
+_WANTS_PHONE = re.compile(r"\b(phone call|by phone|over the phone|call me|a call\b|phone instead|video call|zoom|facetime|face time)", re.I)
 
 
 def day_part(body: str) -> Optional[str]:
@@ -1625,7 +1631,15 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         else:
             kind = conv.appointment_kind or A.VISIT
             by_email = resp is not None and resp.channel == "email"
-            res = A.book(db, prog, lead, slot, kind, family_text=not by_email)
+            _mk = None
+            if kind == A.PHONE:
+                # Owner, Nov 24: a phone call or a video call - from what they said.
+                from app.services.programs import booking_policy as _BPk
+                _said = " ".join([body or ""] + [t.text or "" for t in (
+                    db.query(ProgramConversationTurn).filter(ProgramConversationTurn.conversation_id == conv.id,
+                                                             ProgramConversationTurn.role == "family").all())])
+                _mk = _BPk.call_kind(_said)
+            res = A.book(db, prog, lead, slot, kind, family_text=not by_email, meeting_key=_mk)
             out["booking"] = res
             if res.get("ok"):
                 conv.state = "booked"
@@ -1654,6 +1668,14 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                 # The booking path already sent the family its confirmation
                 # text; a synthetic contact gets the same line, simulated.
                 confirm = "You're all set for %s. If anything changes, just reply here." % A.describe(slot)
+                if _mk == "phone":
+                    from app.services.programs.appointment_notifications import _pretty_phone
+                    _num = _pretty_phone(lead.phone)
+                    confirm = ("You're all set for a phone call on %s. I'll call you%s then. If anything changes, "
+                               "just reply here." % (A.describe(slot), (" at %s" % _num) if _num else ""))
+                elif _mk == "video":
+                    confirm = ("You're all set for a video call on %s. I'll send you the video call link before "
+                               "then. If anything changes, just reply here." % A.describe(slot))
                 if by_email and not _synthetic(lead):
                     # The confirmation goes back to the person who wrote, in the email
                     # thread - never as a text to the record's phone.

@@ -761,7 +761,10 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
                 "recorded_by": advisor.id,
                 "booking_link_id": booking.id,
                 "appointment_date": event_start,
-                "appointment_type": "in_person",  # default — advisor can change in the record
+                # how they meet (owner, Nov 24): a call is not "in person"
+                "appointment_type": ("phone" if getattr(booking, "meeting_type", None) in ("phone", "remote")
+                                     else "video" if getattr(booking, "meeting_type", None) == "video"
+                                     else "in_person"),
                 "created_at": _now,
                 "updated_at": _now,
             })
