@@ -157,19 +157,16 @@ def test_a_reply_alerts_the_owner_by_text_and_email(db_session, brand, manager, 
     o = _lead(db_session, brand, manager, "Alert Co", phone="2145550108")
     texts, mails = [], []
 
-    class _Msgs:
-        def create(self, **kw):
-            texts.append(kw)
-
-    class _Client:
-        messages = _Msgs()
-
     from app.services import sms_programs, email_service
-    monkeypatch.setattr(sms_programs, "sci_sender", lambda: (_Client(), "+18449172171"))
+    # Alerts go out from the SALES line, never SCI's (owner, Nov 23).
+    monkeypatch.setattr(sms_programs, "sci_sender", lambda: (_ for _ in ()).throw(AssertionError("SCI line")))
+    monkeypatch.setattr(O, "_send_text", lambda to, body, st: texts.append(
+        {"to": to, "body": body, "from_": st.sms_from_number}) or {"success": True})
     monkeypatch.setattr(email_service, "send_email_via_provider",
                         lambda to, subj, html, **kw: mails.append((to, subj, kw["org"].from_email)) or {"success": True})
     IN.handle(db_session, from_number="+12145550108", to_number=TEAM_NO, body="Call me", message_sid="SMin4")
     assert texts and texts[0]["to"] == "+18435550199" and "Alert Co" in texts[0]["body"]
+    assert texts[0]["from_"] == s.sms_from_number != "+18449172171"
     assert mails and mails[0][0] == "owner@alerts.test" and mails[0][2] == "support@evosyspro.live"
     # STOP does not page anyone
     texts.clear(); mails.clear()
@@ -499,12 +496,8 @@ def test_alerts_go_to_everyone_on_the_list_and_ai_sees_owner_examples(db_session
     O.run_pass(db_session, MON_10AM, Rec(), Rec())
     texts, mails = [], []
 
-    class _Msgs:
-        def create(self, **kw):
-            texts.append(kw["to"])
-
     from app.services import sms_programs, email_service
-    monkeypatch.setattr(sms_programs, "sci_sender", lambda: (_NS(messages=_Msgs()), "+18449172171"))
+    monkeypatch.setattr(O, "_send_text", lambda to, body, st: texts.append(to) or {"success": True})
     monkeypatch.setattr(email_service, "send_email_via_provider", lambda to, subj, html, **kw: mails.append(to))
     fake = _FakeAI({"category": "pricing", "summary": "", "simple": False, "draft": "Mike will follow up."})
     monkeypatch.setattr(AI, "_get_client", lambda: fake)

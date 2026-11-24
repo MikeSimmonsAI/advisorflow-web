@@ -112,9 +112,5 @@ def run(db: Session, s) -> Dict:
     out["evosys_texts_sent_from"] = by_kind
     froms = {x.get("from") for v in by_kind.values() for x in v if x.get("from")}
     out["all_customer_texts_from_this_number"] = froms <= {num.phone_number} if froms else None
-    try:
-        from app.services import sms_programs
-        out["staff_alerts_sent_from"] = sms_programs.sci_sender_number()
-    except Exception:                                                # noqa: BLE001
-        out["staff_alerts_sent_from"] = None
+    out["staff_alerts_sent_from"] = e164(s.sms_from_number)
     return out
