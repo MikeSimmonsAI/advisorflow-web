@@ -117,11 +117,22 @@ def _case_files(db: Session, org_id: str, lead_id: Optional[str], offset: int, l
         "FROM appointment_case_files c LEFT JOIN leads l ON l.id = c.lead_id AND l.organization_id = c.organization_id "
         + where + " ORDER BY c.appointment_date DESC, c.id LIMIT :lim OFFSET :off"), params).fetchall()
     bl_ids = [r._mapping["booking_link_id"] for r in rows if r._mapping["booking_link_id"]]
-    status = {b.id: b.status for b in db.query(BookingLink.id, BookingLink.status)
-              .filter(BookingLink.id.in_(bl_ids or ["-"])).all()}
+    from app.services import booking_time as _btw
+    links = {b.id: b for b in db.query(BookingLink).filter(BookingLink.id.in_(bl_ids or ["-"])).all()}
+    status = {i: b.status for i, b in links.items()}
+    kind = {"office": "at Restland", "home": "at their home", "phone": "phone call", "video": "video call",
+            "remote": "phone or video call"}
     items = []
     for r in rows:
         j = _case_json(r, status)
+        b = links.get(j.get("booking_link_id"))
+        if b is not None and b.booked_time is not None:
+            # Owner, Nov 24: the case file shows the appointment as booked - its
+            # real time (Central, with its offset; the stored copy was read as
+            # UTC and showed 4 AM for 10 AM) and how they meet.
+            j["appointment_date"] = _btw.wire(db, b)
+            if getattr(b, "meeting_type", None) in kind:
+                j["appointment_type"] = kind[b.meeting_type]
         first, last = j.pop("fam_first", None), j.pop("fam_last", None)
         j["family_missing"] = bool(j.get("family_missing"))
         j["family_name"] = None if j["family_missing"] else (("%s %s" % (first or "", last or "")).strip().title()

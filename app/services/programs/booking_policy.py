@@ -82,6 +82,17 @@ REMOTE_OPTION = {"key": REMOTE, "label": "By phone or video call",
                  "appt_label": "Family File Review by phone or video call",
                  "note": "Only when the family asked for a call", "on_request": True}
 
+# Owner, Nov 24: a PHONE call and a VIDEO call are told apart everywhere (the
+# app, the sheet, the calendar, the messages). "remote" stays only for
+# appointments booked before (it reads "phone or video call") and is no longer
+# offered as a choice.
+PHONE, VIDEO = "phone", "video"
+PHONE_OPTION = {"key": PHONE, "label": "Phone call", "appt_label": "Family File Review by phone call",
+                "note": "We call the family at the number they give", "on_request": True}
+VIDEO_OPTION = {"key": VIDEO, "label": "Video call", "appt_label": "Family File Review by video call",
+                "note": "We send the family the video call link", "on_request": True}
+CALLS = (PHONE, VIDEO, REMOTE)
+
 RESTLAND_ORG_ID = "01fed629-9a95-412b-895a-c8b09f37a98c"
 RESTLAND_ADDRESS = "13005 Greenville Ave, Dallas, TX 75243"
 RESTLAND_POLICY = {
@@ -100,7 +111,7 @@ RESTLAND_POLICY = {
          "note": RESTLAND_ADDRESS, "address": RESTLAND_ADDRESS},
         {"key": HOME, "label": "At your home", "appt_label": "Family File Review at your home",
          "note": "Mike comes to you, if that's more convenient", "needs_address": True},
-        REMOTE_OPTION,
+        REMOTE_OPTION, PHONE_OPTION, VIDEO_OPTION,
     ],
 }
 
@@ -144,7 +155,20 @@ OVERLAP_ORGS = {RESTLAND_ORG_ID}
 def _with_org(policy: Optional[Dict], organization_id: Optional[str]) -> Optional[Dict]:
     if policy is not None and organization_id in OVERLAP_ORGS:
         policy = dict(policy, allow_overlap=True)
+    if policy is not None:
+        opts = list(policy.get("meeting_options") or [])
+        keys = {o.get("key") for o in opts}
+        if REMOTE in keys:
+            # A program that meets by call has a phone call AND a video call.
+            opts += [dict(o) for o in (PHONE_OPTION, VIDEO_OPTION) if o["key"] not in keys]
+            policy = dict(policy, meeting_options=opts)
     return policy
+
+
+def call_kind(text: Optional[str]) -> str:
+    """phone or video, from what the family said ("Zoom", "FaceTime" -> video)."""
+    return VIDEO if re.search(r"(?i)\b(video|zoom|facetime|face time|teams|google meet|webex|skype)\b",
+                              text or "") else PHONE
 
 
 def allows_overlap(policy: Optional[Dict]) -> bool:
@@ -180,9 +204,12 @@ def public_options(policy: Dict, staff: bool = False) -> List[Dict]:
     only on the family's request ("on_request", the remote call) shows to
     staff, never on the family's page."""
     out = []
+    keys = {o.get("key") for o in policy.get("meeting_options") or []}
     for o in policy.get("meeting_options") or []:
         if o.get("on_request") and not staff:
             continue
+        if o.get("key") == REMOTE and PHONE in keys:
+            continue                     # the old combined choice: phone and video are separate now
         out.append({"key": o["key"], "label": o.get("label") or o["key"],
                     "appt_label": o.get("appt_label") or policy.get("label") or "Appointment",
                     "note": o.get("note") or "", "needs_address": bool(o.get("needs_address"))})
@@ -237,6 +264,10 @@ def place_text(booking, policy: Optional[Dict] = None) -> str:
     addr = (getattr(booking, "visit_address", None) or "").strip()
     if getattr(booking, "meeting_type", None) == HOME:
         return "at your home (%s)" % addr if addr else "at your home"
+    if getattr(booking, "meeting_type", None) == PHONE:
+        return "by phone call (we'll call you at your number)"
+    if getattr(booking, "meeting_type", None) == VIDEO:
+        return "by video call (we'll send you the video call link)"
     if getattr(booking, "meeting_type", None) == REMOTE:
         return "by phone or video call (we'll send you the call details)"
     if addr:

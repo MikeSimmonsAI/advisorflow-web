@@ -215,6 +215,12 @@ COLLEEN = ("fa0cd5b6-d595-4c41-9644-f32aad0b7f74", datetime(2026, 11, 25, 13, 0)
 # Owner, Nov 24 11:19 AM: morning visits get an 8:30 AM "see you today" text;
 # the booking confirmation no longer cancels a reminder. Re-plans the
 # reminders of every upcoming Restland appointment once, at deploy.
+# Owner, Nov 24 11:51 AM: David Ahmad asked for a call ("you can call me at
+# 817.723.4630") - his Sat Nov 28 10 AM appointment is a PHONE CALL, on the
+# app, the sheet and the calendar. Nothing is sent to him by this change.
+DAVID_KEY = "restland-david-ahmad-phone-2026-11-24"
+DAVID_UNTIL = datetime(2026, 11, 28, 16, 0)
+DAVID_BOOKING = "2d2d43e6-c9df-4c8a-86a2-2e82c4ae93bd"
 MORNING_KEY = "restland-morning-reminders-2026-11-24"
 MORNING_UNTIL = datetime(2026, 11, 27, 6, 0)
 TWO_KEY = "restland-belinda-patrick-2026-11-23"
@@ -890,6 +896,25 @@ def restland_followups_and_remote(db: Session, prog, now: datetime) -> Dict:
     return summary
 
 
+def restland_david_phone(db: Session, prog, now: datetime) -> Dict:
+    from app.models.models import BookingLink, Lead
+    from app.services.programs import booking_policy as BP
+    run, item = _open_run(db, prog.organization_id, DAVID_KEY)
+    b = (db.query(BookingLink).join(Lead, Lead.id == BookingLink.lead_id)
+         .filter(BookingLink.id == DAVID_BOOKING, Lead.organization_id == prog.organization_id).first())
+    summary = {"changed": False}
+    if b is not None and (b.status or "") in ("booked", "confirmed") and b.meeting_type != BP.PHONE:
+        before = {"meeting_type": b.meeting_type, "appt_label": b.appt_label}
+        b.meeting_type, b.visit_address = BP.PHONE, None
+        b.appt_label = BP.PHONE_OPTION["appt_label"]
+        item("booking_link", b.id, "meeting_type", before,
+             {"meeting_type": b.meeting_type, "appt_label": b.appt_label}, "owner Nov 24: David asked for a call")
+        summary = {"changed": True}
+    run.status, run.finished_at, run.summary_json = "applied", datetime.utcnow(), json.dumps(summary)
+    db.commit()
+    return summary
+
+
 def restland_morning_reminders(db: Session, prog, now: datetime) -> Dict:
     from app.services.programs import appointment_notifications as AN
     run, item = _open_run(db, prog.organization_id, MORNING_KEY)
@@ -919,7 +944,7 @@ def apply_pending(db: Session, now: Optional[datetime] = None) -> Dict:
     from app.services.programs import outreach_slots as OS
     now = now or datetime.utcnow()
     out: Dict = {}
-    if now >= max(APPLY_UNTIL, SUNDAYS_APPLY_UNTIL, MORNING_UNTIL):
+    if now >= max(APPLY_UNTIL, SUNDAYS_APPLY_UNTIL, MORNING_UNTIL, DAVID_UNTIL):
         return out
     for prog in db.query(OutreachProgram).all():
         try:
@@ -953,6 +978,8 @@ def apply_pending(db: Session, now: Optional[datetime] = None) -> Dict:
                 if now < CARMELITA_330_UNTIL and _ledger(db, prog.organization_id, CARMELITA_330_KEY) is None:
                     res["carmelita_330pm"] = restland_book_carmelita(db, prog, now, CARMELITA_330_KEY,
                                                                      CARMELITA_330_SLOT)
+                if now < DAVID_UNTIL and _ledger(db, prog.organization_id, DAVID_KEY) is None:
+                    res["david_phone"] = restland_david_phone(db, prog, now)
                 if now < MORNING_UNTIL and _ledger(db, prog.organization_id, MORNING_KEY) is None:
                     res["morning_reminders"] = restland_morning_reminders(db, prog, now)
                 if res:

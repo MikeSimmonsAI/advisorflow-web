@@ -46,6 +46,7 @@ Retries: a provider failure retries twice (15, then 60 minutes), then FAILED
 with the error, for a person to look at. A refusal (opt-out, texts off) is
 recorded as SKIPPED with the reason - never retried blindly.
 """
+import re
 import logging
 import secrets
 from datetime import datetime, time, timedelta
@@ -456,14 +457,17 @@ def _fields(db: Session, booking, lead, policy) -> Dict:
     who = (adv.full_name if adv and adv.full_name else policy.get("host_name")) or "your advisor"
     bt = booking.booked_time.replace(tzinfo=None) if getattr(booking.booked_time, "tzinfo", None) else booking.booked_time
     home = getattr(booking, "meeting_type", None) == BP.HOME
-    remote = getattr(booking, "meeting_type", None) == BP.REMOTE
+    mt = getattr(booking, "meeting_type", None)
+    remote = mt in BP.CALLS
     addr = (booking.visit_address or "").strip()
     office = (BP.option(policy, BP.OFFICE) or {}).get("address") or ""
     phone = _office_phone(db, lead)
     return {"first_name": (lead.first_name or "").strip().title() or "there", "advisor": who,
             "advisor_first": who.split(" ")[0], "date": bt.strftime("%A, %B %-d"),
             "time": bt.strftime("%-I:%M %p").replace(":00 ", " "), "minutes": int(booking.appt_duration or 45),
-            "home": home, "remote": remote, "address": addr if home else (addr or office), "office_phone": phone,
+            "home": home, "remote": remote, "call": mt if mt in BP.CALLS else None,
+            "family_phone": _pretty_phone(getattr(lead, "phone", None)),
+            "address": addr if home else (addr or office), "office_phone": phone,
             "title": policy.get("label") or "appointment"}
 
 
@@ -483,7 +487,18 @@ def _lead_in(sent: Optional[datetime], start: datetime) -> str:
     return "today" if d == 0 else "tomorrow" if d == 1 else "coming up"
 
 
+def _pretty_phone(raw) -> str:
+    d = re.sub(r"\D", "", str(raw or ""))
+    d = d[1:] if len(d) == 11 and d.startswith("1") else d
+    return "(%s) %s-%s" % (d[:3], d[3:6], d[6:]) if len(d) == 10 else ""
+
+
 def _where(f: Dict) -> str:
+    if f.get("call") == "phone":
+        return "by phone - %s will call you%s" % (f["advisor_first"],
+                                                  (" at %s" % f["family_phone"]) if f.get("family_phone") else "")
+    if f.get("call") == "video":
+        return "by video call - %s will send you the video call link" % f["advisor_first"]
     if f.get("remote"):
         return "by phone or video call - %s will send you the call details" % f["advisor_first"]
     if f["home"]:

@@ -179,3 +179,46 @@ def pending_attendance(db: Session, organization_id: str, now: Optional[datetime
                     BookingLink.booked_time.isnot(None), BookingLink.booked_time < local_now,
                     Lead.is_test.isnot(True)).order_by(BookingLink.booked_time.desc()).limit(200).all())
     return [b for b in rows if b.booked_time + timedelta(minutes=int(b.appt_duration or 45)) <= local_now]
+
+
+
+# ── bookings that never reached the calendar (owner, Nov 24) ────────────────
+
+def add_missing_calendar_events(db: Session, now: Optional[datetime] = None, creator=None) -> Dict:
+    """Every upcoming booked appointment of a program with its own rules that
+    has no calendar event gets one (David Ahmad, Nov 24: booked from an email
+    by the email job, which could not write to Google Calendar). Never
+    duplicates: only rows without calendar_event_id; a failure is reported and
+    retried on the next pass."""
+    from app.models.models import BookingLink, Lead, User
+    from app.models.program_models import OutreachProgram
+    now = now or datetime.utcnow()
+    out = {"added": 0, "failed": 0, "errors": []}
+    org_ids = [o for (o,) in db.query(OutreachProgram.organization_id)
+               .filter(OutreachProgram.booking_policy_json.isnot(None)).all()]
+    if not org_ids:
+        return out
+    if creator is None:
+        from app.services.calendar_service import create_calendar_event_for_booking as creator
+    rows = (db.query(BookingLink).join(Lead, Lead.id == BookingLink.lead_id)
+            .filter(Lead.organization_id.in_(org_ids), Lead.is_test.isnot(True),
+                    BookingLink.status.in_(("booked", "confirmed")), BookingLink.booked_time.isnot(None),
+                    BookingLink.booked_time >= now - timedelta(hours=12),
+                    BookingLink.calendar_event_id.is_(None)).limit(20).all())
+    for b in rows:
+        adv = db.query(User).filter(User.id == b.user_id).first()
+        if adv is None or not getattr(adv, "google_calendar_connected", False):
+            continue
+        start = b.booked_time.replace(tzinfo=None) if getattr(b.booked_time, "tzinfo", None) else b.booked_time
+        try:
+            res = creator(db, b, start, int(b.appt_duration or 45))
+        except Exception as e:                           # noqa: BLE001
+            db.rollback()
+            res = {"success": False, "error": str(e)[:200]}
+        if res.get("success") and getattr(b, "calendar_event_id", None):
+            db.commit()
+            out["added"] += 1
+        else:
+            out["failed"] += 1
+            out["errors"].append({"booking_id": b.id, "error": (res.get("error") or "")[:200]})
+    return out

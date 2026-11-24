@@ -547,3 +547,63 @@ def test_manual_time_any_minute_seven_to_eight_and_far_out(rl):
     # Offers (the booking page, the AI) keep the five set starts.
     res = BP.day_slots(rl["db"], rl["mike"], d, pol, busy_reader=down)
     assert [s[11:16] for s in res["slots"]] == ["10:00", "11:30", "13:00", "14:30", "16:00"]
+
+
+# ── Owner, Nov 24: phone call vs video call vs office vs home ───────────────
+
+def test_phone_and_video_are_separate_choices_and_say_so(rl):
+    db = rl["db"]
+    configured(rl)
+    pol = BP.for_program(prog_of(rl))
+    staff = [o["key"] for o in BP.public_options(pol, staff=True)]
+    assert {"phone", "video"} <= set(staff) and "remote" not in staff
+    assert "phone" not in [o["key"] for o in BP.public_options(pol)]           # never on the family's page
+    d = _next(2)
+    r = _book(rl, rl["leads"][30], datetime(d.year, d.month, d.day, 10, 0), meeting_key="phone")
+    assert r["ok"] is True, r
+    b = db.query(BookingLink).filter_by(id=r["booking_id"]).one()
+    assert b.meeting_type == "phone" and "phone call" in b.appt_label
+    assert BP.place_text(b).startswith("by phone call")
+    from app.services.programs import appointment_notifications as AN
+    policy, lead = AN._policy_for_booking(db, b)
+    assert "will call you" in AN._where(AN._fields(db, b, lead, policy))
+    r2 = _book(rl, rl["leads"][31], datetime(d.year, d.month, d.day, 11, 30), meeting_key="video")
+    b2 = db.query(BookingLink).filter_by(id=r2["booking_id"]).one()
+    assert b2.meeting_type == "video" and "video call link" in BP.place_text(b2)
+    from app.services.programs import restland_sheet as RS
+    assert RS.HOW["phone"] == "Phone Call" and RS.HOW["video"] == "Video Call"
+    assert RS.HOW_CHOICES["Phone Call"][0] == "phone"
+    # a setter booking with kind phone and no place is a phone call
+    from app.services.programs import appointments as A
+    r3 = A.book(db, prog_of(rl), rl["leads"][32], datetime(d.year, d.month, d.day, 13, 0), A.PHONE, family_text=False)
+    assert db.query(BookingLink).filter_by(id=r3["booking_id"]).one().meeting_type == "phone"
+
+
+def test_call_kind_and_cant_come_in():
+    from app.services.programs import ai_setter as S
+    assert BP.call_kind("Can we do a Zoom?") == "video" and BP.call_kind("you can call me at 817") == "phone"
+    for said in ("I'm out of town", "I live pretty far away as well", "I'm not in Texas", "I live in another state"):
+        assert S._CANT_COME_IN.search(said), said
+    assert not S._CANT_COME_IN.search("I'm busy this week")
+
+
+def test_missing_calendar_events_are_added_once(rl):
+    db = rl["db"]
+    configured(rl)
+    from app.services.programs import appointment_ops as OPS
+    d = _next(3)
+    rl["mike"].google_calendar_connected = True
+    db.add(BookingLink(token="t-nocal", lead_id=rl["leads"][33].id, user_id=rl["mike"].id, status="booked",
+                       booked_time=datetime(d.year, d.month, d.day, 10, 0), appt_duration=45))
+    db.commit()
+    calls = []
+
+    def creator(db_, b, start, mins):
+        calls.append((b.id, start, mins))
+        b.calendar_event_id = "ev-%d" % len(calls)
+        return {"success": True}
+    res = OPS.add_missing_calendar_events(db, creator=creator)
+    assert res["added"] >= 1 and calls
+    n = len(calls)
+    OPS.add_missing_calendar_events(db, creator=creator)
+    assert len(calls) == n                                            # never twice

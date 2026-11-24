@@ -77,9 +77,14 @@ START_TIMES = ("10:00 AM", "11:30 AM", "1:00 PM", "2:30 PM", "4:00 PM")
 TIME_CHOICES = tuple(
     "%d:%02d %s" % ((h - 1) % 12 + 1, m, "AM" if h < 12 else "PM")
     for h in range(10, 17) for m in (0, 30) if (h, m) <= (16, 0))
+# Owner, Nov 24: a phone call and a video call are separate choices.
 HOW_CHOICES = {"At Restland": ("office", "visit"), "At Their Home": ("home", "visit"),
+               "Phone Call": ("phone", "phone"), "Video Call": ("video", "phone"),
                "Phone / Video Call": ("remote", "phone")}
-HOW = {"office": "At Restland", "home": "At Their Home", "remote": "Phone / Video Call"}
+HOW = {"office": "At Restland", "home": "At Their Home", "phone": "Phone Call", "video": "Video Call",
+       "remote": "Phone / Video Call"}
+# what the drop-downs offer (the old combined choice only reads back)
+HOW_PICK = ["At Restland", "At Their Home", "Phone Call", "Video Call"]
 APPT_STATUS = {"booked": "Booked", "confirmed": "Confirmed", "completed": "Showed", "no_show": "No-Show",
                "cancelled": "Cancelled"}
 OPEN_STATES = {"waiting_future": "Follow up later", "callback_requested": "Call back",
@@ -458,7 +463,7 @@ def layout_requests() -> List[Dict]:
           _team_list(F, "J2:J2000"), _checkbox(F, "K2:K2000"),
           {"setDataValidation": {"range": _grid(F, "M2:M2000"), "rule": {
               "condition": {"type": "DATE_IS_VALID"}, "strict": False, "showCustomUi": True}}},
-          _list(F, "N2:N2000", list(TIME_CHOICES)), _list(F, "O2:O2000", list(HOW_CHOICES)),
+          _list(F, "N2:N2000", list(TIME_CHOICES)), _list(F, "O2:O2000", HOW_PICK),
           _when(F, "A2:S2000", '=OR($K2=TRUE,$I2<>"Open")', "#EEEEEE", GREY),
           _when(F, "A2:S2000", '=AND($I2="Open",$K2<>TRUE,OR($G2="",$G2<TODAY()+1))', "#FBE3DF"),
           _when(F, "Q2:Q2000", '=LEFT($Q2,6)="Booked"', "#DCEFE3"),
@@ -1219,7 +1224,7 @@ def person_tab_layout_requests() -> List[Dict]:
               {"setDataValidation": {"range": g(sid, PT_FU_FIRST, f_end, 9, 10), "rule": {"condition": {
                   "type": "DATE_IS_VALID"}, "strict": False, "showCustomUi": True}}},
               lst(sid, PT_FU_FIRST, f_end, 10, list(TIME_CHOICES)),
-              lst(sid, PT_FU_FIRST, f_end, 11, list(HOW_CHOICES)),
+              lst(sid, PT_FU_FIRST, f_end, 11, HOW_PICK),
               _when(sid, "J%d:J%d" % (PT_APPT_FIRST, a_end), '=$J%d="Yes"' % PT_APPT_FIRST, "#DCEFE3"),
               _when(sid, "I%d:I%d" % (PT_APPT_FIRST, a_end), '=$I%d="Showed"' % PT_APPT_FIRST, "#DCEFE3"),
               _when(sid, "I%d:I%d" % (PT_APPT_FIRST, a_end), '=$I%d="No-Show"' % PT_APPT_FIRST, "#FBE3DF"),

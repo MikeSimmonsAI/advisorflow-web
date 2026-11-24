@@ -2525,6 +2525,17 @@ async def _program_sla_loop():
                         except Exception as exc:                 # noqa: BLE001
                             db.rollback()
                             _logger.error("appointment messages error: %s", exc, exc_info=True)
+                        # Owner, Nov 24: a booking made by a background job
+                        # that could not reach Google Calendar is put on the
+                        # calendar here (the web service has the calendar keys).
+                        try:
+                            from app.services.programs import appointment_ops as _aops
+                            _cal = _aops.add_missing_calendar_events(db)
+                            if _cal.get("added") or _cal.get("failed"):
+                                out["calendar_repair"] = _cal
+                        except Exception as exc:                 # noqa: BLE001
+                            db.rollback()
+                            _logger.error("calendar repair error: %s", exc, exc_info=True)
                         try:
                             from app.services.programs import email_touches as _et
                             if _et.sending_enabled() and _et.pass_due():
