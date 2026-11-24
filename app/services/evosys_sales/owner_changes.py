@@ -37,7 +37,8 @@ def gov_lists_booking_link(db: Session) -> Dict:
     for c in db.query(EvoSysCampaign).filter(EvoSysCampaign.name.like("Gov List Cleaners%")).all():
         if not any("reply yes" in str((st or {}).get("body") or "").lower() for st in (c.steps or [])):
             continue
-        if CA.save(db, c, {"steps": [dict(s) for s in GOV_STEPS]}, "system:owner-nov23", origin="manual"):
+        # updated_by must be a real user (foreign key): keep whoever last edited it.
+        if CA.save(db, c, {"steps": [dict(s) for s in GOV_STEPS]}, c.updated_by, origin="manual"):
             changed.append(c.name)
     db.commit()
     return {"gov_lists_booking_link": changed} if changed else {}
