@@ -489,26 +489,66 @@ def staff_forwarders(db: Session, org_ids: List[str]) -> set:
     return out
 
 
-def forwarded_original(m: dict) -> Optional[Dict]:
-    """{"sender", "body"} of the email inside a forward, or None."""
+# Banners that mail systems add above a forwarded email - never the family's words.
+_FWD_NOISE = [
+    r"(?is)you don'?t often get email from .*?learn why this is important",
+    r"(?is)please use caution\..*?isupport@nsmg\.com",
+    r"(?i)get outlook for (ios|android)",
+    r"(?is)\*{3}\s*this message has been sent utilizing systems.*",
+]
+# Our own side of a forward chain (staff forwarding to themselves, then on to
+# support): never the family.
+_OWN_DOMAINS = ("nsmg.com", "restlandfuneralhomedallas.com", "evosyspro.live")
+
+
+def _own(addr: str, skip: set) -> bool:
+    a = (addr or "").lower()
+    return a in skip or a.split("@")[-1] in _OWN_DOMAINS
+
+
+def forwarded_by_us(m: dict, sender: str, skip: set) -> bool:
+    """A forward that came from our side: sent by a staff address, or sent from
+    anywhere (Mike's own Gmail) when the email inside was first forwarded by
+    one of ours (Restland / NSMG / EvoSys address) - Restland inbox -> Gmail ->
+    support."""
+    if (sender or "").lower() in skip:
+        return True
     if not _FWD_SUBJECT.match(m.get("subject") or ""):
-        return None
+        return False
     t = _plain((m.get("body") or {}).get("content") or m.get("bodyPreview") or "")
     hit = _FWD_FROM.search(t)
     if not hit:
-        return None
+        return False
     em = _EMAIL.search(hit.group(1)) or _EMAIL.search(t[hit.end():hit.end() + 300])
-    if not em:
+    return bool(em) and _own(em.group(0), skip)
+
+
+def forwarded_original(m: dict, skip: Optional[set] = None) -> Optional[Dict]:
+    """{"sender", "body"} of the family's email inside a forward, or None.
+
+    A forward can be forwarded again (Restland inbox -> Gmail -> support), so
+    the first "From:" is often staff. The family is the first "From:" in the
+    chain that is not one of ours (staff addresses in `skip`, our domains)."""
+    if not _FWD_SUBJECT.match(m.get("subject") or ""):
         return None
-    rest = t[hit.end():]
-    # skip the rest of the forwarded header (Sent/Date/To/Cc/Subject lines)
-    lines = rest.split("\n")
-    i = 0
-    while i < len(lines) and (not lines[i].strip() or re.match(
-            r'(?i)^\s*\*?(sent|date|to|cc|subject|from)\*?\s*:', lines[i])):
-        i += 1
-    body = clean_body("\n".join(lines[i:]))
-    return {"sender": em.group(0).strip().lower(), "body": body}
+    skip = {a.lower() for a in (skip or set())}
+    t = _plain((m.get("body") or {}).get("content") or m.get("bodyPreview") or "")
+    for hit in _FWD_FROM.finditer(t):
+        em = _EMAIL.search(hit.group(1)) or _EMAIL.search(t[hit.end():hit.end() + 300])
+        if not em or _own(em.group(0), skip):
+            continue
+        rest = t[hit.end():]
+        # skip the rest of the forwarded header (Sent/Date/To/Cc/Subject lines)
+        lines = rest.split("\n")
+        i = 0
+        while i < len(lines) and (not lines[i].strip() or re.match(
+                r'(?i)^\s*\*?(sent|date|to|cc|subject|from)\*?\s*:', lines[i])):
+            i += 1
+        body = "\n".join(lines[i:])
+        for pat in _FWD_NOISE:
+            body = re.sub(pat, " ", body)
+        return {"sender": em.group(0).strip().lower(), "body": clean_body(body)}
+    return None
 
 
 def recipients_of(m: dict) -> List[str]:
@@ -891,8 +931,9 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
                     matched += 1 if evs[0] == "evs_reply" else 0
                     continue
                 alias_prof = _alias_location(db, m)
-                fwd = forwarded_original(m) if sender in staff_forwarders(db, org_ids) else None
-                if fwd is not None and fwd["sender"] not in staff_forwarders(db, org_ids):
+                _staff = staff_forwarders(db, org_ids)
+                fwd = forwarded_original(m, _staff) if forwarded_by_us(m, sender, _staff) else None
+                if fwd is not None and fwd["sender"] not in _staff:
                     # Staff forwarded a family's email: it belongs to the family.
                     flead, foutcome, fdetail = route(db, org_ids, fwd["sender"], None)
                     row.detail = ("Forwarded by %s; original from %s. %s" % (sender, fwd["sender"], fdetail or "")).strip()
