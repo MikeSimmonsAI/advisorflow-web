@@ -318,6 +318,29 @@ def _too_close(draft: str, conversation: list) -> bool:
     return False
 
 AUTO_CATEGORIES = ("interested", "question")
+
+# A plain yes is a yes (owner, 2026-11-23): "Yes", "Of course", "Sure", "Sí"...
+# never waits for a person - it gets the booking link right away.
+_YES_WORDS = {"yes", "yes please", "yess", "yesss", "yeah", "yea", "yep", "yup", "sure", "sure thing", "ok", "okay",
+              "of course", "absolutely", "definitely", "interested", "im interested", "i am interested",
+              "very interested", "sounds good", "lets do it", "let s do it", "i want it", "i want them",
+              "i want in", "im in", "yes im interested", "perfect", "please", "yes i am", "yes i would", "yes i do", "yes sir", "yes maam",
+              "count me in", "go ahead", "si", "sí", "claro", "claro que si", "claro que sí", "por supuesto",
+              "me interesa", "si me interesa", "sí me interesa", "dale", "si por favor", "sí por favor", "ok si", "ok sí"}
+
+
+def plain_yes(text) -> bool:
+    """True when the whole reply is just a yes (emoji and punctuation ignored)."""
+    t = re.sub(r"[^\w\sáéíóúñü']", " ", str(text or "").lower()).replace("'", "")
+    t = re.sub(r"\s+", " ", t).strip()
+    return bool(t) and t in _YES_WORDS
+
+
+def yes_text(lang: str, link: str) -> str:
+    if lang == "Spanish":
+        return ("¡Perfecto! Elija un horario en mi calendario para asegurar sus 3 citas gratis en los próximos "
+                "30 días: %s" % link)
+    return "Great! Grab a time on my calendar to lock in your 3 free appointments within the next 30 days: %s" % link
 _ES_WORDS = {"hola", "gracias", "que", "qué", "por", "para", "como", "cómo", "cuánto", "cuanto", "sí", "si", "pues",
              "mándeme", "manda", "trabajos", "limpieza", "usted", "gente", "quiero", "puedo", "nomás", "sea",
              "solo", "ahí", "estaré", "intentémoslo", "también", "dónde", "donde", "negocios", "citas", "gratis",
@@ -434,6 +457,13 @@ def text_reply(db: Session, settings, campaign, opp, reply_msg, conversation: li
         cat = raw.get("category") if raw.get("category") in REPLY_CATEGORIES else "unclear"
         draft = re.sub(r"\s+", " ", str(raw.get("draft") or "")).strip()[:600]
         needs = []
+        link0 = facts.get("booking_link") or ""
+        if plain_yes(reply_msg.body) and not booked and link0:
+            # A plain yes is a yes - never "unclear" (owner, 2026-11-23).
+            cat, raw = "interested", dict(raw, simple=True)
+            if not draft or _too_close(draft, conversation) or MONEY_RE.search(draft) \
+                    or CLAIM_RE.search(draft) or (looks_spanish(draft) != (lang == "Spanish")):
+                draft = yes_text(lang, link0)
         if MONEY_RE.search(draft):
             needs.append("The draft names a price - Mike answers pricing.")
             draft = ""

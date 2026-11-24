@@ -536,3 +536,50 @@ def test_reschedule_moves_the_same_call(db_session, brand, manager, monkeypatch)
     assert out["status"] == "booked" and out["zoom_url"] == "https://zoom.example/j/9" and seen["ex"] == a.id
     assert db_session.query(SalesAppointment).filter_by(opportunity_id=o.id).count() == 1
     assert sent and "moved" in sent[0] and "zoom.example" in sent[0]
+
+
+# ── a plain yes is a yes (owner, 2026-11-23) ─────────────────────────────────
+
+def test_plain_yes_words():
+    for t in ("Yes", "yes!", "Of course", "Sure 👍", "YES PLEASE", "Sí", "claro", "I'm interested", "ok"):
+        assert AI.plain_yes(t), t
+    for t in ("Yes but how much?", "What is this", "no", "Stop", "Yes, what's the catch?"):
+        assert not AI.plain_yes(t), t
+
+
+def test_a_yes_marked_unclear_still_gets_the_link(db_session, brand, manager, monkeypatch):
+    # what happened Nov 23: the model wrote the right text but called "Yes" unclear
+    o, fake, sent = _auto_world(db_session, brand, manager, monkeypatch, {
+        "category": "unclear", "summary": "They said yes to the offer.", "simple": False,
+        "draft": "Hi there! To lock in your 3 free appointments, grab a time here: LINK"})
+    IN.handle(db_session, from_number="+12145550120", to_number=TEAM_NO, body="Yes", message_sid="SMyes1")
+    assert sent, "a plain yes must be answered by itself"
+    link = AI._lead_booking_link(O.get_settings(db_session, brand.id), None, o)
+    assert link and link in sent[0][1]
+    msg = db_session.query(EvoSysOutreachMessage).filter_by(provider_message_id="SMyes1").one()
+    assert AI.latest(db_session, "text_reply", msg.id).output["category"] == "interested"
+
+
+def test_of_course_with_no_draft_gets_the_standard_booking_text(db_session, brand, manager, monkeypatch):
+    o, fake, sent = _auto_world(db_session, brand, manager, monkeypatch, {
+        "category": "unclear", "summary": "", "simple": False, "draft": ""})
+    IN.handle(db_session, from_number="+12145550120", to_number=TEAM_NO, body="Of course", message_sid="SMyes2")
+    assert sent and "Grab a time on my calendar" in sent[0][1]
+
+
+def test_held_yes_is_caught_up_once_on_the_next_pass(db_session, brand, manager, monkeypatch):
+    # a "Yes" that was held for a person earlier gets its link on the next pass, once
+    o, fake, sent = _auto_world(db_session, brand, manager, monkeypatch, {
+        "category": "unclear", "summary": "", "simple": False, "draft": ""}, auto=False)
+    IN.handle(db_session, from_number="+12145550120", to_number=TEAM_NO, body="Yes", message_sid="SMheld")
+    assert not sent
+    msg = db_session.query(EvoSysOutreachMessage).filter_by(provider_message_id="SMheld").one()
+    msg.label = "unclear"
+    s = O.get_settings(db_session, brand.id)
+    s.text_auto_reply = True
+    db_session.commit()
+    fake.answers = [{"category": "unclear", "summary": "", "simple": False, "draft": ""}]
+    from app.services.evosys_sales import sms_inbound as SI
+    assert SI.answer_waiting_yes(db_session, s) == 1
+    assert len(sent) == 1 and "Grab a time" in sent[0][1]
+    assert SI.answer_waiting_yes(db_session, s) == 0     # never twice

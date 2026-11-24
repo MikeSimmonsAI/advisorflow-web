@@ -476,6 +476,12 @@ def run_pass(db: Session, now: Optional[datetime] = None, sender=None, text_send
     if not open_now:
         out["skipped"] = "outside sending hours"
         return out
+    try:                                # a held plain "yes" gets its booking link (2026-11-23)
+        from app.services.evosys_sales import sms_inbound as SI
+        out["yes_answered"] = SI.answer_waiting_yes(db, s, now)
+    except Exception:                   # noqa: BLE001 - never blocks the pass
+        db.rollback()
+        log.exception("[evosys-sales] yes catch-up failed")
     room = {cid: max(0, int(live[cid].daily_limit or 0) - sent_today(db, bso_id, now, cid, live[cid].timezone))
             for cid in open_now}
     due = (db.query(EvoSysOutreachState)
