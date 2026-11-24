@@ -163,3 +163,65 @@ def test_page_uses_icons_not_emoji_and_only_promises_what_is_true():
     assert "Your Zoom link is being prepared" in html and "/event.ics" in html
     # the calendar claim is only rendered with a real link
     assert "ready?'<p class=\"foot\">Zoom link included in your calendar event.</p>'" in html
+
+
+# ── confirm / reschedule from the reminder (owner, 2026-11-24) ────────────────
+
+def test_reminder_has_the_confirm_link_and_tapping_it_confirms(db_session, brand, manager, monkeypatch):
+    from tests.test_evosys_sales_texting import _ready
+    monkeypatch.setenv("PROGRAM_ASSET_BASE_URL", "https://links.example.test")
+    _ready(db_session, brand)
+    o = _lead(db_session, brand, manager, "Confirm Co", phone="2145550301")
+    a = _appt(db_session, brand, o, T0)
+    body = BP.reminder_body(db_session, o, a, "reminder_day")
+    assert "Tap to confirm or pick a new time: https://links.example.test/evosys-sales-public/b" in body
+    assert "reply" not in body.lower()                       # no "reply YES" asks (owner rule)
+    alerts = []
+    monkeypatch.setattr(IN, "notify_owner", lambda s, line, *a: alerts.append(line))
+    out = BP.confirm(db_session, o)
+    db_session.refresh(a)
+    assert out["confirmed"] is True and a.confirmation_status == "confirmed"
+    assert a.confirmation_source == "prospect_link" and a.confirmed_at is not None
+    assert len(alerts) == 1 and "CONFIRMED" in alerts[0]
+    BP.confirm(db_session, o)                                # a second tap: no second alert
+    assert len(alerts) == 1
+
+
+def test_confirm_with_no_upcoming_call_books_nothing(db_session, brand, manager):
+    o = _lead(db_session, brand, manager, "Nothing Booked", phone="2145550302")
+    assert BP.confirm(db_session, o)["status"] == "none"
+
+
+def test_reminder_status_follows_the_current_time_and_send_now(db_session, brand, manager, monkeypatch):
+    from app.models.evosys_sales_models import EvoSysOutreachMessage
+    from tests.test_evosys_sales_texting import _ready
+    _ready(db_session, brand)
+    o = _lead(db_session, brand, manager, "Status Co", phone="2145550303")
+    a = _appt(db_session, brand, o, T0)
+    stamp = T0.strftime("%Y%m%d%H%M")
+    db_session.add(EvoSysOutreachMessage(brand_sales_org_id=brand.id, opportunity_id=o.id, direction="out",
+                                         channel="text", body="x", label="rd:" + stamp, status="sent"))
+    db_session.add(EvoSysOutreachMessage(brand_sales_org_id=brand.id, opportunity_id=o.id, direction="out",
+                                         channel="text", body="x", label="r1:209901010000", status="sent"))
+    db_session.commit()
+    st = BP.reminder_status(db_session, a)
+    assert st["day_before"] and st["hour_before"] is None    # the old time's reminder doesn't count
+    sent = []
+    monkeypatch.setattr(O, "_send_text", lambda to, body, s: sent.append(body) or {"success": True})
+    assert BP.send_reminder_now(db_session, a)["ok"]
+    assert sent and "Tap to confirm or pick a new time" in sent[0]
+    assert BP.reminder_status(db_session, a)["manual"]
+
+
+def test_owner_screen_shows_status_and_can_mark_confirmed(client, db_session, brand, manager, manager_headers, monkeypatch):
+    o = _lead(db_session, brand, manager, "Screen Co", phone="2145550304")
+    a = _appt(db_session, brand, o, T0)
+    r = client.get("/sales/evosys/calls-list?view=upcoming", headers=manager_headers)
+    if r.status_code == 403:
+        pytest.skip("manager is not on the EvoSys Sales team in this fixture")
+    row = next(x for x in r.json()["calls"] if x["id"] == a.id)
+    assert row["reminders"]["day_before"] is None and row["confirmation_status"] != "confirmed"
+    r = client.post("/sales/evosys/calls/%s/confirm" % a.id, json={"confirmed": True}, headers=manager_headers)
+    assert r.status_code == 200 and r.json()["call"]["confirmation_status"] == "confirmed"
+    r = client.post("/sales/evosys/calls/%s/confirm" % a.id, json={"confirmed": False}, headers=manager_headers)
+    assert r.json()["call"]["confirmation_status"] == "pending"

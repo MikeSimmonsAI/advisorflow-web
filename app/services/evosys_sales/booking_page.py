@@ -147,7 +147,8 @@ def current(db: Session, opp: Opportunity):
 def booked_out(db: Session, a) -> dict:
     """The confirmation the page shows, read back from the saved appointment."""
     out = {"status": "booked", "starts_at": a.starts_at.isoformat() + "Z", "ends_at": a.ends_at.isoformat() + "Z",
-           "duration_minutes": int((a.ends_at - a.starts_at).total_seconds() // 60), "title": CALL_TITLE}
+           "duration_minutes": int((a.ends_at - a.starts_at).total_seconds() // 60), "title": CALL_TITLE,
+           "confirmed": a.confirmation_status == "confirmed"}
     out.update(zoom_state(db, a))
     return out
 
@@ -574,16 +575,17 @@ async function book(){
  if(busy||!sel)return; busy=true; render();
  let j; try{const r=await fetch(U,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({starts_at:sel,reschedule:resched})}); j=await r.json()}catch(e){j={status:'error',message:'We couldn’t reach the booking system. Please try again.'}}
  busy=false;
- if(j.status==='booked'){const moved=resched;resched=false;done(j,moved);return}
+ if(j.status==='booked'){const moved=resched;resched=false;done(j,moved,true);return}
  const keepDay=dayKey; render(); document.getElementById('msg').textContent=j.message||'Something went wrong. Please pick another time.';
  if(j.status==='taken')setTimeout(()=>{dayKey=keepDay;load(from).then(()=>{const m=document.getElementById('msg');if(m)m.textContent=j.message})},900);
 }
-function done(b,moved){
+function done(b,moved,fresh){
  last=b; clearTimeout(pollT);
  const s=b.starts_at, e=b.ends_at, ready=b.zoom_status==='ready'&&b.zoom_url;
  let h='<div class="ok"><div class="ring">'+ic('check')+'</div><div class="eyebrow">Business Growth</div>';
- h+='<span class="pill">'+ic('check')+(moved?'Confirmed · moved to your new time':'Confirmed')+'</span>';
+ h+='<span class="pill">'+ic('check')+(b.confirmed?'You confirmed · see you then':moved?'Booked · moved to your new time':'Booked')+'</span>';
  h+='<h1>You’re on Mike’s calendar.</h1>';
+ if(!b.confirmed&&!fresh)h+='<button class="go" id="cf" style="margin:0 0 16px">'+ic('check')+'I’ll be there</button><p class="msg" id="cfm" role="alert"></p>';
  h+='<div class="det"><div class="m-hide">'+ic('brief')+'Business Growth Call</div><div class="m-first">'+ic('cal')+fDay(s,{weekday:'long',month:'long',day:'numeric'})+'</div><div>'+ic('clock')+fT(s)+'–'+fT(e)+' '+zAbbr(s)+'</div><div class="m-hide">'+ic('video')+'Zoom video meeting</div></div>';
  h+='<div class="zoomwrap">';
  if(ready)h+='<a class="go" href="'+esc(b.zoom_url)+'" target="_blank" rel="noopener noreferrer">'+ic('video')+'Join Zoom Meeting</a>';
@@ -595,7 +597,9 @@ function done(b,moved){
  h+='<p class="foot d-only"><i>No cost. No obligation.</i></p></div>';
  app.innerHTML=h;
  document.getElementById('rs').onclick=()=>{resched=true;starts=[];clearTimeout(pollT);load(null)};
- if(!ready&&b.zoom_status!=='unavailable'&&polls<16){polls++;pollT=setTimeout(async()=>{try{const r=await fetch(U+'/slots');const j=await r.json();if(j.booked&&!resched)done(j.booked,moved)}catch(e){}},15000)}
+ const cf=document.getElementById('cf'); if(cf)cf.onclick=async()=>{cf.disabled=true;cf.innerHTML=ic('load','spin')+'Confirming…';let j;try{const r=await fetch(U+'/confirm',{method:'POST'});j=await r.json()}catch(e){j=null}
+  if(j&&j.status==='booked'){done(j,false)}else{cf.disabled=false;cf.innerHTML=ic('check')+'I’ll be there';document.getElementById('cfm').textContent='We couldn’t save that. Please try again or text us back.'}};
+ if(!ready&&b.zoom_status!=='unavailable'&&polls<16){polls++;pollT=setTimeout(async()=>{try{const r=await fetch(U+'/slots');const j=await r.json();if(j.booked&&!resched)done(j.booked,moved,fresh)}catch(e){}},15000)}
 }
 load(null);
 </script></body></html>
@@ -667,17 +671,7 @@ def send_reminders(db: Session, now: Optional[datetime] = None) -> dict:
                 EvoSysOutreachMessage.opportunity_id == opp.id,
                 EvoSysOutreachMessage.label == "r1:" + stamp).first():
             continue
-        t = _local(a.starts_at).strftime("%-I:%M %p")
-        z = zoom_link(db, a.id)
-        if is_spanish(db, opp):
-            when = ("mañana a las %s (hora del centro)" % t) if kind == "reminder_day" else \
-                ("en una hora, a las %s (hora del centro)" % t)
-            body = ("Recordatorio: su llamada con Mike de EvoSys Pro sobre sus 3 citas gratis es %s. %s"
-                    "¿Necesita otro horario? Solo responda." % (when, ("Por Zoom: %s " % z) if z else ""))
-        else:
-            when = ("tomorrow at %s Central" % t) if kind == "reminder_day" else ("in about an hour, at %s Central" % t)
-            body = ("Reminder: your call with Mike from EvoSys Pro about your 3 free appointments is %s. %s"
-                    "Need a different time? Just text back." % (when, ("Join on Zoom: %s " % z) if z else ""))
+        body = reminder_body(db, opp, a, kind)
         try:
             r = O._send_text(to, body, s)
         except Exception as e:                               # noqa: BLE001
@@ -690,3 +684,108 @@ def send_reminders(db: Session, now: Optional[datetime] = None) -> dict:
         db.commit()
         out["reminders_sent" if ok else "reminders_failed"] += 1
     return out
+
+
+def reminder_body(db: Session, opp: Opportunity, a, kind: str) -> str:
+    """The reminder text. Every reminder carries the business's own link, where
+    one tap confirms they'll be there or picks a new time (owner, 2026-11-24)."""
+    t = _local(a.starts_at).strftime("%-I:%M %p")
+    z = zoom_link(db, a.id)
+    link = short_url_for(opp)
+    if is_spanish(db, opp):
+        when = {"reminder_day": "mañana a las %s (hora del centro)" % t,
+                "reminder_1h": "en una hora, a las %s (hora del centro)" % t}.get(kind, _ct(a.starts_at, True))
+        return ("Recordatorio: su llamada con Mike de EvoSys Pro sobre sus 3 citas gratis es %s. %s"
+                "Confirme o cambie el horario aquí: %s" % (when, ("Por Zoom: %s " % z) if z else "", link))
+    when = {"reminder_day": "tomorrow at %s Central" % t,
+            "reminder_1h": "in about an hour, at %s Central" % t}.get(kind, _ct(a.starts_at))
+    return ("Reminder: your call with Mike from EvoSys Pro about your 3 free appointments is %s. %s"
+            "Tap to confirm or pick a new time: %s" % (when, ("Join on Zoom: %s " % z) if z else "", link))
+
+
+REMINDER_LABELS = {"rd": "day_before", "r1": "hour_before", "rm": "manual"}
+
+
+def reminder_status(db: Session, a) -> dict:
+    """What reminders went to this business for this call's CURRENT time
+    (a moved call starts fresh), for the owner's Appointments screen."""
+    from app.models.evosys_sales_models import EvoSysOutreachMessage as M
+    out = {"day_before": None, "hour_before": None, "manual": None, "failed": []}
+    if not a.opportunity_id:
+        return out
+    stamp = a.starts_at.strftime("%Y%m%d%H%M")
+    rows = (db.query(M).filter(M.opportunity_id == a.opportunity_id,
+                               M.label.in_([k + ":" + stamp for k in REMINDER_LABELS]))
+            .order_by(M.created_at).all())
+    for m in rows:
+        key = REMINDER_LABELS[m.label.split(":", 1)[0]]
+        if m.status == "sent":
+            out[key] = m.created_at.isoformat() + "Z"
+        else:
+            out["failed"].append({"which": key, "error": (m.error or "")[:200]})
+    return out
+
+
+def send_reminder_now(db: Session, a) -> dict:
+    """Owner taps "Send reminder now": the same reminder text, with the
+    confirm / new-time link, sent right away from the Sales number."""
+    from app.models.evosys_sales_models import EvoSysOutreachMessage, EvoSysOutreachState
+    from app.services import sales_suppression as SDNC
+    from app.services.evosys_sales import outreach as O
+    opp = db.get(Opportunity, a.opportunity_id) if a.opportunity_id else None
+    if opp is None:
+        return {"ok": False, "error": "This call isn't tied to a lead, so there is no number to text."}
+    to = O.e164(opp.phone)
+    if not to:
+        return {"ok": False, "error": "No mobile number on this lead."}
+    st = db.get(EvoSysOutreachState, opp.id)
+    if (st is not None and st.opted_out_at) or SDNC.for_opportunity(db, opp) \
+            or SDNC.find(db, opp.brand_sales_org_id, opp.phone, opp.email):
+        return {"ok": False, "error": "This business opted out or is on Do Not Contact."}
+    s = O.get_settings(db, opp.brand_sales_org_id)
+    if not O.e164(s.sms_from_number):
+        return {"ok": False, "error": "The Sales texting number isn't set."}
+    left = a.starts_at - datetime.utcnow()
+    kind = "reminder_1h" if left <= timedelta(minutes=75) else \
+        "reminder_day" if _local(a.starts_at).date() == (_local(datetime.utcnow()) + timedelta(days=1)).date() else "manual"
+    body = reminder_body(db, opp, a, kind)
+    try:
+        r = O._send_text(to, body, s)
+    except Exception as e:                                   # noqa: BLE001
+        r = {"success": False, "error": str(e)}
+    ok = bool(r.get("success"))
+    db.add(EvoSysOutreachMessage(brand_sales_org_id=opp.brand_sales_org_id, opportunity_id=opp.id,
+                                 direction="out", channel="text", to_address=to, body=body,
+                                 label="rm:" + a.starts_at.strftime("%Y%m%d%H%M"),
+                                 status="sent" if ok else "failed",
+                                 error=None if ok else str(r.get("error") or "")[:500],
+                                 provider_message_id=r.get("provider_message_id"), created_at=datetime.utcnow()))
+    db.commit()
+    return {"ok": ok, "error": None if ok else (r.get("error") or "The text didn't go through.")}
+
+
+def confirm(db: Session, opp: Opportunity) -> dict:
+    """The business taps "I'll be there" on its own page. Recorded on the
+    call (source: their link) and the owner gets the same text + email alert
+    as a booking."""
+    from app.services.evosys_sales import outreach as O
+    from app.services.evosys_sales import sms_inbound as SI
+    a = current(db, opp)
+    if a is None:
+        return {"status": "none", "message": "We couldn't find an upcoming call. Pick a time below."}
+    if a.confirmation_status != "confirmed":
+        a.confirmation_status = "confirmed"
+        a.confirmation_source = "prospect_link"
+        a.confirmed_at = datetime.utcnow()
+        a.confirmed_by = None
+        db.add(OpportunityEvent(opportunity_id=opp.id, event_type="intro_call_confirmed",
+                                summary="Confirmed they'll be on their intro call",
+                                detail=a.starts_at.isoformat() + "Z", occurred_at=datetime.utcnow()))
+        db.commit()
+        who = opp.company_name or opp.contact_name or "A prospect"
+        SI.notify_owner(O.get_settings(db, opp.brand_sales_org_id),
+                        "EvoSys Sales - CONFIRMED: %s confirmed their call for %s" % (who, _ct(a.starts_at)),
+                        "EvoSys Sales - %s confirmed their call" % who,
+                        "<p><b>%s</b> confirmed they'll be on their call <b>%s</b>.</p>"
+                        % (__import__("html").escape(who), _ct(a.starts_at)))
+    return booked_out(db, a)

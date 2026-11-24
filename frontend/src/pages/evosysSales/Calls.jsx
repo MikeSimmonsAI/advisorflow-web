@@ -47,6 +47,29 @@ function CallsNav({ here }) {
   )
 }
 const joinUrl = c => c?.video?.join_url || c?.meeting_url
+// Did they confirm, and which reminder texts went for this time?
+const isConfirmed = c => c.confirmation_status === 'confirmed'
+const confirmedBy = c => c.confirmation_source === 'staff_manual' ? 'marked by you' : 'they tapped the link'
+function remindLines(c) {
+  const r = c.reminders || {}
+  const out = []
+  if (r.day_before) out.push(['Day-before text sent', r.day_before])
+  if (r.manual) out.push(['Reminder sent by you', r.manual])
+  if (r.hour_before) out.push(['1-hour text sent', r.hour_before])
+  return out
+}
+function CallStatus({ c }) {
+  const sent = remindLines(c)
+  const failed = (c.reminders?.failed || []).length > 0
+  return (
+    <div className="v2-chips evs-callstatus">
+      <span className={'v2-tag ' + (isConfirmed(c) ? 'evs-good' : '')}>{isConfirmed(c) ? '✓ Confirmed' : 'Not confirmed yet'}</span>
+      {sent.length ? sent.map(([l, at]) => <span key={l} className="v2-tag grey">{l} {ctDay(utc(at))} {ctTime(utc(at))}</span>)
+        : <span className="v2-tag grey">No reminder sent yet</span>}
+      {failed && <span className="v2-tag evs-bad">A reminder didn't go through</span>}
+    </div>
+  )
+}
 
 // ── list ─────────────────────────────────────────────────────────────────────
 const PAGE = 25
@@ -146,6 +169,7 @@ export function CallsList() {
               <div className="v2-eyebrow">{ctDay(utc(c.starts_at))} · {ctTime(utc(c.starts_at))}–{ctTime(utc(c.ends_at))} CT</div>
               <h3 className="v2-serif">{company(c)}</h3>
               <div className="v2-sub">{c.title}{c.video?.label ? ' · ' + c.video.label : ''}</div>
+              <CallStatus c={c} />
               <div className="v2-row">
                 {joinUrl(c) && <a className="v2-btn v2-primary" href={joinUrl(c)} target="_blank" rel="noopener noreferrer">Join Zoom</a>}
                 <Link className="v2-btn" to={`${BASE}/appointments/${c.id}`}>Open appointment</Link>
@@ -419,6 +443,8 @@ export function CallDetail() {
           {join && !past && <a className="v2-btn v2-primary" href={join} target="_blank" rel="noopener noreferrer">Join Zoom</a>}
           {join && <button className="v2-btn" onClick={() => navigator.clipboard?.writeText(join).then(() => setToast('Zoom link copied.'))}>Copy invite link</button>}
           {!past && <button className="v2-btn" onClick={() => act(() => api.post(`/sales/appointments/${c.id}/resend-invitation`, {}), 'Invite sent again.')} disabled={!c.prospect?.email}>Resend invite</button>}
+          {!past && c.opportunity_id && <button className="v2-btn" onClick={() => act(() => api.post(`${API}/calls/${c.id}/remind`, {}), 'Reminder texted with their confirm / new-time link.')}>Send reminder now</button>}
+          {!past && <button className="v2-btn" onClick={() => act(() => api.post(`${API}/calls/${c.id}/confirm`, { confirmed: !isConfirmed(c) }), isConfirmed(c) ? 'Marked not confirmed.' : 'Marked confirmed.')}>{isConfirmed(c) ? 'Undo confirmed' : 'Mark confirmed'}</button>}
           {!past && <button className="v2-btn" onClick={() => setMode('move')}>Reschedule</button>}
           {!past && <button className="v2-btn" onClick={() => setConfirmCancel(true)}>Cancel appointment</button>}
           {past && <button className="v2-btn v2-primary" onClick={() => setMode('outcome')}>Record outcome</button>}
@@ -442,6 +468,8 @@ export function CallDetail() {
           <dl className="v2-dl">
             <dt>Calendar and host</dt><dd>{host} · {(c.participants || []).some(p => p.calendar_synced) ? 'on the connected calendar' : (c.participants || [])[0]?.sync_label || 'calendar not synced'}</dd>
             <dt>Zoom</dt><dd>{join ? 'Participant link ready' : (v.label || 'No Zoom meeting yet')}{v.needs_attention ? ' · needs attention' : ''}{!join && !past && !cancelled ? <> · <button className="v2-linkbtn" onClick={() => act(() => api.post(`/sales/appointments/${c.id}/video/retry`, {}), 'Zoom link requested again.')}>Try again</button></> : null}</dd>
+            {!cancelled && <><dt>Confirmed</dt><dd>{isConfirmed(c) ? `Yes · ${confirmedBy(c)}${c.confirmed_at ? ' · ' + ctDay(utc(c.confirmed_at)) + ' ' + ctTime(utc(c.confirmed_at)) : ''}` : 'Not yet. Each reminder text has a link where they tap "I\'ll be there" or pick a new time.'}</dd>
+              <dt>Reminders</dt><dd>{remindLines(c).length ? remindLines(c).map(([l, at]) => <div key={l}>{l} · {ctDay(utc(at))} {ctTime(utc(at))}</div>) : 'None yet. Texts go the day before (9 AM–7 PM) and 1 hour before.'}{(c.reminders?.failed || []).map((f, k) => <div key={k} className="v2-err">Not delivered: {f.error || 'unknown error'}</div>)}</dd></>}
             <dt>Invitation</dt><dd>{c.prospect_invite_sent_at ? 'Sent ' + ctDay(utc(c.prospect_invite_sent_at)) + ' ' + ctTime(utc(c.prospect_invite_sent_at)) + (c.prospect?.email ? ' to ' + c.prospect.email : '') : c.prospect_invite_error ? 'Not delivered: ' + c.prospect_invite_error : c.prospect?.email ? 'Not sent' : 'No email on file'}</dd>
             {c.outcome_state?.outcome && <><dt>Outcome</dt><dd>{c.outcome_state.outcome_label || c.outcome_state.outcome}</dd></>}
           </dl>
