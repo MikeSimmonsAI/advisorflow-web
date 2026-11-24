@@ -302,9 +302,24 @@ function PercentageScoreboard({ rates, m, period }) {
     ['booked_after_offer_rate', 'Offered families who booked', rates.booked_offered, rates.offered_families,
       'Families offered times and booked in this period'],
   ]
+  const booking = [
+    ['replied_booking_rate', 'Booking rate', rates.booked_families, rates.replied_families,
+      'Families who booked, out of the families who replied in this period'],
+    ['contacted_booking_rate', 'Booked out of everyone contacted', rates.booked_families, rates.engagement_denominator,
+      'Families who booked, out of every family contacted in this period'],
+  ]
   return <section className="pf-scoreboard" aria-label="Performance percentages">
     <div className="pf-scoreboard-head"><h3>{period} · engagement percentages</h3>
       <p>Real families · percentages have an auditable denominator</p></div>
+    <div className="pf-scoregrid pf-scoregrid-booking">
+      {booking.map(([key, title, numerator, denominator, description]) =>
+        <div key={key} className="pf-score-item pf-score-booking">
+          <span>{title}</span><b>{percentText(rates[key])}</b>
+          <small>{numerator != null && denominator != null && denominator > 0
+            ? `${n(numerator)} booked of ${n(denominator)}` : 'No qualifying data yet'}</small>
+          <p>{description}</p>
+        </div>)}
+    </div>
     <div className="pf-scoregrid">
       {entries.map(([key, title, numerator, denominator, description]) =>
         <div key={key} className="pf-score-item">

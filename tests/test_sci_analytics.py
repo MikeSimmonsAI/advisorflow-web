@@ -101,6 +101,11 @@ def test_opted_out_and_test_bookings_are_not_appointment_results(program, sample
     SA._CACHE.clear()
     s = client.get("/program/command/analytics?range=today", headers=_h(db, program["admin"])).json()
     assert s["metrics"]["appointments"]["value"] == 1                    # only Lester
+    # Booking rate: Lester replied and booked; Marion never replied (test family excluded).
+    r = client.get("/program/command/analytics?range=7d", headers=_h(db, program["admin"])).json()["rates"]
+    assert r["booked_families"] == 1 and r["replied_families"] == 1
+    assert r["replied_booking_rate"] == 100.0
+    assert r["contacted_booking_rate"] == 50.0                           # 1 of 2 contacted
 
 
 def test_journey_shows_the_complete_history(program, sample_advisor, client):

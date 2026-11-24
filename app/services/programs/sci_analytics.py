@@ -816,6 +816,13 @@ def summary(L: Ledger, w: Dict, location_id: Optional[str] = None, daily_batch: 
                   "offered_families": len(offered_ids),
                   "offer_rate": _pct(counts["offers"], counts["repliers"]),
                   "booking_rate": _pct(counts["appointments"], counts["families_contacted"]),
+                  # Headline booking rates, in families (not appointments):
+                  # of the families who replied in this period, how many booked;
+                  # and of every family contacted, how many booked.
+                  "booked_families": len(booked_ids),
+                  "replied_booking_rate": _pct(len(booked_ids), len(replying_ids)),
+                  "replied_families": len(replying_ids),
+                  "contacted_booking_rate": _pct(len(booked_ids), len(contacted_ids)),
                   "avg_touches_per_family": avg, "avg_touches_per_family_all_time": avg_all},
         "touches": touches,
         "funnel": funnel,
