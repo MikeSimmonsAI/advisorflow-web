@@ -277,3 +277,27 @@ def test_engagement_rate_only_uses_families_contacted_in_same_window(program, sa
     assert result["metrics"]["responses_total"]["value"] >= 1
     assert 0 <= result["rates"]["engagement_rate"] <= 100
     assert result["rates"]["opt_out_share"] == 0.0
+
+
+def test_appointment_counts_on_the_day_the_family_booked(program, sample_advisor, client):
+    """Owner, Nov 24: Carol's link was made yesterday (first text) but she
+    booked this morning - she is today's appointment, not yesterday's."""
+    from app.models.program_models import BookingPageEvent
+    db, a, b, t = _seed(program, sample_advisor)
+    link = BookingLink(token="tok-carol", lead_id=a.id, user_id=sample_advisor.id, status="booked",
+                       booked_time=datetime.utcnow() + timedelta(days=7), calendar_event_id="ev-carol",
+                       created_at=datetime.utcnow() - timedelta(days=2))
+    db.add(link)
+    db.flush()
+    db.add(BookingPageEvent(organization_id=a.organization_id, booking_link_id=link.id, lead_id=a.id,
+                            event="booked", detail="x", created_at=_today_at()))
+    db.commit()
+    SA._CACHE.clear()
+    h = _h(db, program["admin"])
+    s = client.get("/program/command/analytics?range=today", headers=h).json()
+    assert s["metrics"]["appointments"]["value"] == 1
+    d = client.get("/program/command/analytics/records?metric=appointments&range=today", headers=h).json()
+    assert d["count"] == 1
+    j = client.get("/program/command/analytics/journey/%s" % a.id, headers=h).json()
+    booked = [e for e in j["events"] if e["kind"] == "booked"][0]
+    assert booked["at"][:10] == _today_at().isoformat()[:10]

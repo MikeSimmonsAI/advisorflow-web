@@ -379,9 +379,16 @@ def report(db: Session, prog: OutreachProgram, family_key: str, now: Optional[da
                 ProgramConversationTurn.action.in_(("handoff", "callback")),
                 ProgramConversationTurn.created_at >= since).all():
             _bump("handoffs", tat)
-        for (bat,) in db.query(func.coalesce(BookingLink.confirmed_at, BookingLink.created_at)).filter(
+        # Counted on the day the family BOOKED (the link's newest "booked"
+        # event), not the day the link was created (owner, Nov 24).
+        from app.models.program_models import BookingPageEvent as _BPE
+        _ev = (db.query(_BPE.booking_link_id, func.max(_BPE.created_at).label("at"))
+               .filter(_BPE.event == "booked", _BPE.lead_id.in_(chunk))
+               .group_by(_BPE.booking_link_id).subquery())
+        for (bat,) in db.query(func.coalesce(_ev.c.at, BookingLink.confirmed_at, BookingLink.created_at)).outerjoin(
+                _ev, _ev.c.booking_link_id == BookingLink.id).filter(
                 BookingLink.lead_id.in_(chunk), BookingLink.status.in_(("booked", "confirmed", "completed")),
-                func.coalesce(BookingLink.confirmed_at, BookingLink.created_at) >= since).all():
+                func.coalesce(_ev.c.at, BookingLink.confirmed_at, BookingLink.created_at) >= since).all():
             _bump("appointments", bat)
     week = {k: sum(daily[d][k] for d in days) for k in daily[days[0]]}
 
