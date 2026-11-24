@@ -37,7 +37,7 @@ Sundays ... I want everything to stop on Sundays, only on Sundays"):
 import json
 import re
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
@@ -169,6 +169,13 @@ REPLY_TO_SYSTEM = "support@evosyspro.live"
 # Colleen Crawford emailed 4:56 PM: "1pm WEDNESDAY...by phone. I am in Indiana. 765 327 1488"
 COLLEEN = ("fa0cd5b6-d595-4c41-9644-f32aad0b7f74", datetime(2026, 11, 25, 13, 0), "17653271488",
            "1pm WEDNESDAY...by phone. I am in Indiana. 765 327 1488")
+# Owner, Nov 23 6:47 PM: "Sun Dec 13 is available, make the appointment" (Belinda
+# Williams, 2 PM - her first choice, with her mom) and book Patrick Bartell
+# for the afternoon he asked for (Dec 1 or 2).
+TWO_KEY = "restland-belinda-patrick-2026-11-23"
+TWO_UNTIL = datetime(2026, 11, 26, 6, 0)
+BELINDA = ("cb375146-276e-4076-9d00-49744b3438df", datetime(2026, 12, 13, 14, 0))
+PATRICK = ("b152343e-4f35-43c9-8f9b-bb27ce8714c5", [date(2026, 12, 1), date(2026, 12, 2)])
 CARMELITA_FU = ("4f7ef8fe-5007-4ccb-aadb-7957154eec00", _DEC7,
                 "Team follow-up Mon Dec 7 (Neoso Walker's note after her visit)")
 # Owner, Nov 22 8:18 PM: these four "after the holidays" families are followed
@@ -480,6 +487,58 @@ def restland_emailed_replies(db: Session, prog, now: datetime) -> Dict:
     return out
 
 
+def restland_belinda_patrick(db: Session, prog, now: datetime) -> Dict:
+    from app.models.models import Lead
+    from app.models.work_models import LeadNote
+    from app.services.programs import ai_setter
+    from app.services.programs import appointments as A
+    org_id = prog.organization_id
+    run, item = _open_run(db, org_id, TWO_KEY)
+    out: Dict = {}
+
+    def done(lead, slot, kind, why_note):
+        conv = ai_setter.conversation_for(db, lead)
+        before = {"state": conv.state, "handoff_reason": conv.handoff_reason, "booked_time": conv.booked_time}
+        res = A.book(db, prog, lead, slot, kind)
+        if res.get("ok") and not res.get("simulated"):
+            conv.state, conv.booked_time, conv.handoff_reason = "booked", slot, None
+            if res.get("booking_id"):
+                conv.booking_link_id = res.get("booking_id")
+            db.add(LeadNote(organization_id=org_id, lead_id=lead.id, kind="internal",
+                            body="Owner, Nov 23: booked %s. %s" % (A.describe(slot), why_note)))
+            item("program_conversation", conv.id, "booked", before, {"state": "booked", "booked_time": slot},
+                 "owner Nov 23: " + why_note[:120])
+            try:
+                A.notify_team_booked(db, prog, lead, slot, kind)
+            except Exception:                            # noqa: BLE001
+                log.exception("booked alert failed")
+        db.commit()
+        return res
+
+    lead = db.query(Lead).filter(Lead.id == BELINDA[0], Lead.organization_id == org_id).first()
+    if lead is not None:
+        res = done(lead, BELINDA[1], A.VISIT, "Sunday Dec 13 opened by Mike for her (she asked for 2 PM, with her "
+                   "mom; she lives 2 hours away). Best contact: call or text after 10 PM.")
+        out["belinda"] = res.get("status") if res.get("ok") else "%s: %s" % (res.get("status"), res.get("reason"))
+    lead = db.query(Lead).filter(Lead.id == PATRICK[0], Lead.organization_id == org_id).first()
+    if lead is not None:
+        out["patrick"] = "no afternoon time open Dec 1 or 2"
+        for day in PATRICK[1]:
+            slots, _ = A.all_slots_on_day(db, prog, day)
+            pm = [x for x in slots if x.hour >= 13 and (x.hour, x.minute) in ((13, 0), (14, 30), (16, 0))]
+            if not pm:
+                continue
+            res = done(lead, pm[0], A.VISIT, "He asked for Dec 1 or 2 in the afternoon. He also asked whether his "
+                       "wife needs to be there - Laura, please answer him on that.")
+            out["patrick"] = ("%s %s" % (res.get("status"), pm[0].isoformat()) if res.get("ok")
+                              else "%s: %s" % (res.get("status"), res.get("reason")))
+            if res.get("ok"):
+                break
+    run.status, run.finished_at, run.summary_json = "applied", datetime.utcnow(), json.dumps(out, default=str)
+    db.commit()
+    return out
+
+
 def restland_book_carmelita(db: Session, prog, now: datetime, key: str = CARMELITA_KEY,
                             slot: datetime = CARMELITA_SLOT) -> Dict:
     from app.models.models import BookingLink, Lead
@@ -695,6 +754,8 @@ def apply_pending(db: Session, now: Optional[datetime] = None) -> Dict:
                     res["carmelita_3pm"] = restland_book_carmelita(db, prog, now)
                 if now < EMAILED_UNTIL and _ledger(db, prog.organization_id, EMAILED_KEY) is None:
                     res["emailed_replies"] = restland_emailed_replies(db, prog, now)
+                if now < TWO_UNTIL and _ledger(db, prog.organization_id, TWO_KEY) is None:
+                    res["belinda_patrick"] = restland_belinda_patrick(db, prog, now)
                 if now < CARMELITA_330_UNTIL and _ledger(db, prog.organization_id, CARMELITA_330_KEY) is None:
                     res["carmelita_330pm"] = restland_book_carmelita(db, prog, now, CARMELITA_330_KEY,
                                                                      CARMELITA_330_SLOT)

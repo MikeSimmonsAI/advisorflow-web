@@ -47,6 +47,16 @@ log = logging.getLogger(__name__)
 
 TZ = "America/Chicago"
 HORIZON_DAYS = 14              # same as every program booking page
+# Days the owner opened by hand that the rules would otherwise close (a
+# Sunday, or past the booking window). Owner, Nov 23: "Sun Dec 13 is
+# available". More can be added with OWNER_OPEN_DATES=YYYY-MM-DD,...
+OWNER_OPEN_BUILT_IN = {"2026-12-13"}
+
+
+def owner_open(day: date_cls) -> bool:
+    import os
+    extra = {x.strip() for x in (os.environ.get("OWNER_OPEN_DATES") or "").split(",") if x.strip()}
+    return day.isoformat() in (OWNER_OPEN_BUILT_IN | extra)
 SAME_DAY_NOTICE = timedelta(hours=2)
 LEGACY_MINUTES = 60            # a booking with no recorded length
 
@@ -234,9 +244,10 @@ def day_slots(db: Session, advisor, target_date: date_cls, policy: Dict, *, toda
            "duration_minutes": policy["duration"], "gap_minutes": policy["gap_after"]}
     if target_date < today:
         return dict(out, reason="Date is in the past")
-    if target_date > today + timedelta(days=HORIZON_DAYS):
+    opened = owner_open(target_date)
+    if target_date > today + timedelta(days=HORIZON_DAYS) and not opened:
         return dict(out, reason="Date is more than %d days out" % HORIZON_DAYS)
-    if str(target_date.weekday()) not in policy["days"]:
+    if str(target_date.weekday()) not in policy["days"] and not opened:
         return dict(out, reason="No appointments on this day")
     from app.services import no_contact_days as _ncd
     if _ncd.quiet_on(target_date):
