@@ -31,6 +31,15 @@ made under older rules holds its own recorded length (60 when unknown) plus
 this gap. The connected calendar is read for the same held span and FAILS
 CLOSED: unreadable means no times.
 
+THE CUSTOMER'S TIME COMES FIRST (owner, Nov 24 - Restland): "If a customer
+says 10 o'clock, we book 10 o'clock. I don't care if you double book, triple
+book." A program with allow_overlap (Restland) never loses a time because
+another appointment, its gap or the connected calendar already holds it, and
+a time the family or a person ASKS for (any_time) can be any time 7:00 AM -
+8:00 PM Central, any day, up to a year out, as long as it is not in the past.
+Offers (the booking page, the AI's two suggested times) still use the five
+set starts and the two-week window.
+
 Office or home: both use the same times and the same calendar. A home visit
 needs the family's full address (validated here, never guessed). There is no
 mileage or service-area rule - the owner handles travel and staffing.
@@ -59,6 +68,9 @@ def owner_open(day: date_cls) -> bool:
     return day.isoformat() in (OWNER_OPEN_BUILT_IN | extra)
 SAME_DAY_NOTICE = timedelta(hours=2)
 LEGACY_MINUTES = 60            # a booking with no recorded length
+# A time ASKED for in a program that books on top of other appointments.
+ASKED_FIRST, ASKED_LAST = (7, 0), (20, 0)
+ASKED_HORIZON_DAYS = 366
 
 OFFICE, HOME, REMOTE = "office", "home", "remote"
 # Owner, Nov 22: a REMOTE call (phone or video) at a real date and time, ONLY
@@ -74,6 +86,7 @@ RESTLAND_ORG_ID = "01fed629-9a95-412b-895a-c8b09f37a98c"
 RESTLAND_ADDRESS = "13005 Greenville Ave, Dallas, TX 75243"
 RESTLAND_POLICY = {
     "version": 1,
+    "allow_overlap": True,
     "days": "0123456",
     "starts": ["10:00", "11:30", "13:00", "14:30", "16:00"],
     "duration": 45,
@@ -123,17 +136,34 @@ def _hhmm(s) -> Tuple[int, int]:
     return int(m.group(1)), int(m.group(2))
 
 
+# Programs whose customers' times are always booked, even on top of another
+# appointment (owner, Nov 24). Restland's stored rules may predate the flag.
+OVERLAP_ORGS = {RESTLAND_ORG_ID}
+
+
+def _with_org(policy: Optional[Dict], organization_id: Optional[str]) -> Optional[Dict]:
+    if policy is not None and organization_id in OVERLAP_ORGS:
+        policy = dict(policy, allow_overlap=True)
+    return policy
+
+
+def allows_overlap(policy: Optional[Dict]) -> bool:
+    return bool(policy and policy.get("allow_overlap"))
+
+
 def for_org(db: Session, organization_id: Optional[str]) -> Optional[Dict]:
     if not organization_id:
         return None
     from app.models.program_models import OutreachProgram
     prog = (db.query(OutreachProgram)
             .filter(OutreachProgram.organization_id == organization_id).first())
-    return parse(getattr(prog, "booking_policy_json", None)) if prog else None
+    return _with_org(parse(getattr(prog, "booking_policy_json", None)), organization_id) if prog else None
 
 
 def for_program(prog) -> Optional[Dict]:
-    return parse(getattr(prog, "booking_policy_json", None)) if prog is not None else None
+    if prog is None:
+        return None
+    return _with_org(parse(getattr(prog, "booking_policy_json", None)), getattr(prog, "organization_id", None))
 
 
 def for_advisor(db: Session, advisor) -> Optional[Dict]:
@@ -244,18 +274,25 @@ def day_slots(db: Session, advisor, target_date: date_cls, policy: Dict, *, toda
            "duration_minutes": policy["duration"], "gap_minutes": policy["gap_after"]}
     if target_date < today:
         return dict(out, reason="Date is in the past")
-    opened = owner_open(target_date)
-    if target_date > today + timedelta(days=HORIZON_DAYS) and not opened:
-        return dict(out, reason="Date is more than %d days out" % HORIZON_DAYS)
+    overlap = allows_overlap(policy)
+    asked = bool(any_time) and overlap      # the customer's (or a person's) own time
+    opened = owner_open(target_date) or asked
+    horizon = ASKED_HORIZON_DAYS if asked else HORIZON_DAYS
+    if target_date > today + timedelta(days=horizon) and not owner_open(target_date):
+        return dict(out, reason="Date is more than %d days out" % horizon)
     if str(target_date.weekday()) not in policy["days"] and not opened:
         return dict(out, reason="No appointments on this day")
     from app.services import no_contact_days as _ncd
-    if _ncd.quiet_on(target_date):
+    if _ncd.quiet_on(target_date) and not asked:
         return dict(out, reason="Closed that day (holiday)")
 
     dur, gap = policy["duration"], policy["gap_after"]
     candidates = [datetime(target_date.year, target_date.month, target_date.day, h, m)
                   for h, m in policy["starts"]]
+    if asked:
+        day0 = datetime(target_date.year, target_date.month, target_date.day)
+        candidates = sorted(set(candidates) | {day0.replace(hour=ASKED_FIRST[0], minute=ASKED_FIRST[1]),
+                                               day0.replace(hour=ASKED_LAST[0], minute=ASKED_LAST[1])})
     if any_time and candidates:
         first, last = min(candidates), max(candidates)
         t, extra = first, set(candidates)
@@ -285,6 +322,18 @@ def day_slots(db: Session, advisor, target_date: date_cls, policy: Dict, *, toda
         s0, s1 = _held(s, dur, gap)
         return any(s0 < e and b0 < s1 for b0, e in held)
 
+    if overlap:
+        # Double and triple booking are fine (owner, Nov 24): no other
+        # appointment, gap or calendar entry takes a time away.
+        free = list(candidates)
+        if target_date == now_local.date():
+            cutoff = now_local if asked else now_local + SAME_DAY_NOTICE
+            free = [s for s in free if s >= cutoff]
+        out["slots"] = [s.strftime("%Y-%m-%dT%H:%M:00") for s in free]
+        if not free:
+            out["reason"] = "There are no remaining times on that day."
+        return out
+
     free = [s for s in candidates if not clashes(s)]
 
     # The connected calendar, read once for the day, failing closed.
@@ -309,7 +358,7 @@ def day_slots(db: Session, advisor, target_date: date_cls, policy: Dict, *, toda
 
 
 def is_open(db: Session, advisor, slot: datetime, policy: Dict, *, exclude_booking_id: Optional[str] = None,
-            busy_reader=None, any_time: int = 15) -> bool:
+            busy_reader=None, any_time: int = 5) -> bool:
     """Is this exact time free? Any requested time counts (15-minute steps
     between the first and last start), not only the set starts."""
     res = day_slots(db, advisor, slot.date(), policy, exclude_booking_id=exclude_booking_id,

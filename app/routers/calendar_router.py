@@ -430,7 +430,7 @@ async def booking_confirmed_webhook(request: Request, db: Session = Depends(get_
             # A time the family or a person asked for counts, not only the set
             # starts (owner, Nov 23) - same length, gap and calendar rules.
             _res = compute_day_slots(db, advisor, _prog_slot.date(), program_visit=True, minutes=_mins,
-                                     any_time=15)
+                                     any_time=5)
             if _prog_slot.strftime("%Y-%m-%dT%H:%M:00") not in set(_res.get("slots") or []):
                 logger.warning("booking-confirmed: booking=%s slot %s is not open - refusing", booking.id, slot_display)
                 raise HTTPException(status_code=409, detail="That time is no longer available. Please pick another time.")

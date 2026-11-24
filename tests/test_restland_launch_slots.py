@@ -324,7 +324,10 @@ def test_time_offer_names_two_verified_times_or_asks_for_a_day(rl):
     line = BP.time_offer(db, rl["mike"], pol, now_local=now, busy_reader=lambda d, a, t: ([], None))
     assert "Monday, Nov 16 at 10:30 AM" not in line
     assert line.startswith("I have Monday, Nov 16 at 11:30 AM or Tuesday, Nov 17 at 10:00 AM open")
-    down = BP.time_offer(db, rl["mike"], pol, now_local=now, busy_reader=lambda d, a, t: ([], "unreadable"))
+    # Restland double-books (owner, Nov 24), so an unreadable calendar no longer
+    # stops the offer; a program without that rule still asks for a day.
+    down = BP.time_offer(db, rl["mike"], dict(pol, allow_overlap=False), now_local=now,
+                         busy_reader=lambda d, a, t: ([], "unreadable"))
     assert down == "What day this week works for you to come by?"
 
 
