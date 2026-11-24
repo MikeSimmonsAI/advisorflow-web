@@ -262,3 +262,27 @@ def test_forwarded_original_reads_gmail_and_outlook_headers():
     assert out["sender"] == "cdjmarmon@gmail.com" and out["body"].startswith("Hello Mike")
     assert "old" not in out["body"]
     assert S.forwarded_original({"subject": "Re: file", "body": {"content": "From: a@b.com"}}) is None
+
+
+def test_a_reply_forwarded_twice_through_gmail_is_filed_on_the_family(db_session, world):
+    """Owner, Nov 24: Restland inbox -> Mike's own Gmail -> support. The Gmail
+    address isn't a user; the first From is Mike's Restland address; the family
+    is further down. Mail-system banners are not the family's words."""
+    html = ("<div>---------- Forwarded message ---------<br>From: <strong>Michael Simmons</strong> "
+            "&lt;<a href='mailto:michael.simmons@restlandfuneralhomedallas.com'>michael.simmons@restlandfuneralhomedallas.com</a>&gt;<br>"
+            "Date: Tue, Nov 24, 2026 at 5:15 PM<br>Subject: Fw: [External] Re: file<br>To: me@gmail.example<br></div>"
+            "<p>Warm regards,</p><p><b>Mike Simmons</b></p><hr>"
+            "<div><b>From:</b> Joshua S &lt;<a href='mailto:josh@example.com'>josh@example.com</a>&gt;<br>"
+            "<b>Sent:</b> Tuesday, November 24, 2026 10:04 AM<br>"
+            "<b>To:</b> Michael Simmons &lt;michael.simmons@Restlandfuneralhomedallas.com&gt;<br>"
+            "<b>Subject:</b> [External] Re: file</div>"
+            "<div>You don't often get email from josh@example.com. Learn why this is important</div>"
+            "<p><strong>PLEASE USE CAUTION.</strong> This email arrived from outside of NSMG. contact isupport@nsmg.com</p>"
+            "<div>Hi, I'm here for your call.</div><div>Get Outlook for iOS</div><hr>"
+            "<div><b>From:</b> Mike Simmons | Restland &lt;support@evosyspro.live&gt;<br><b>Sent:</b> Friday<br></div>"
+            "<div>Hi Joshua ...</div>")
+    msgs = [_msg("g2", "someone.personal@gmail.example", html, subject="Fwd: Fw: [External] Re: file")]
+    res = S.poll_mailbox(db_session, world.box, fetch=lambda since: msgs)
+    assert res["matched"] == 1, res
+    reply = db_session.query(Reply).filter(Reply.lead_id == world.lead.id).one()
+    assert reply.body == "Hi, I'm here for your call.", reply.body

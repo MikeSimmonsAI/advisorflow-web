@@ -227,6 +227,12 @@ NSMG3 = [
     ("7d595d50-1063-4386-96bf-ed2fd37a0a70", "Wants to schedule a meeting next week - offer times",
      "Can we schedule a meeting next week? Steven Kinder", datetime(2026, 11, 24, 18, 10)),
 ]
+# Owner, Nov 24 5:18 PM: Anne Wehler's email of Nov 24 10:04 AM reached the
+# Restland inbox (forwarded in through Gmail, which the app could not read yet).
+# Recorded on her file for the team; her booking and conversation are untouched.
+FWD_KEY = "restland-forwarded-anne-2026-11-24"
+FWD_UNTIL = datetime(2026, 11, 27, 6, 0)
+FWD = [("dbcf4b2f-45d9-40a8-8501-eecd8d28ef33", "Hi, I'm here for your call.", datetime(2026, 11, 24, 16, 4))]
 # Owner, Nov 24 11:51 AM: David Ahmad asked for a call ("you can call me at
 # 817.723.4630") - his Sat Nov 28 10 AM appointment is a PHONE CALL, on the
 # app, the sheet and the calendar. Nothing is sent to him by this change.
@@ -948,6 +954,39 @@ def restland_nsmg_replies(db: Session, prog, now: datetime) -> Dict:
     return out
 
 
+def restland_forwarded_anne(db: Session, prog, now: datetime) -> Dict:
+    from app.models.models import Lead
+    from app.models.work_models import LeadNote
+    from app.models.program_models import ProgramResponse
+    from app.services.programs import ai_setter
+    from app.services.programs import responses as R
+    org_id = prog.organization_id
+    run, item = _open_run(db, org_id, FWD_KEY)
+    out: Dict = {"entered": [], "missing": []}
+    for lead_id, said, received in FWD:
+        lead = db.query(Lead).filter(Lead.id == lead_id, Lead.organization_id == org_id).first()
+        if lead is None:
+            out["missing"].append(lead_id)
+            continue
+        rid = "manual-email:nov24fwd:%s" % lead.id
+        if db.query(ProgramResponse).filter(ProgramResponse.organization_id == org_id,
+                                            ProgramResponse.reply_id == rid).first() is not None:
+            continue
+        conv = ai_setter.conversation_for(db, lead)
+        ai_setter._turn(db, conv, "family", said, action="received",
+                        reason="email reply forwarded in from the Restland inbox, entered Nov 24")
+        R.on_inbound(db, lead, said, "email", reply_id=rid, now=received, staff_alerts=False, run_setter=False)
+        item("lead", lead.id, "forwarded_reply", {}, {"said": said}, "owner Nov 24: forwarded reply entered")
+        db.add(LeadNote(organization_id=org_id, lead_id=lead.id, kind="internal",
+                        body=("Owner, Nov 24: their email reached the Restland inbox and was forwarded in. "
+                              "They said (Nov 24, 10:04 AM): %s" % said)[:4000]))
+        db.commit()
+        out["entered"].append(lead_id)
+    run.status, run.finished_at, run.summary_json = "applied", datetime.utcnow(), json.dumps(out)
+    db.commit()
+    return out
+
+
 def restland_david_phone(db: Session, prog, now: datetime) -> Dict:
     from app.models.models import BookingLink, Lead
     from app.services.programs import booking_policy as BP
@@ -996,7 +1035,7 @@ def apply_pending(db: Session, now: Optional[datetime] = None) -> Dict:
     from app.services.programs import outreach_slots as OS
     now = now or datetime.utcnow()
     out: Dict = {}
-    if now >= max(APPLY_UNTIL, SUNDAYS_APPLY_UNTIL, MORNING_UNTIL, DAVID_UNTIL, NSMG3_UNTIL):
+    if now >= max(APPLY_UNTIL, SUNDAYS_APPLY_UNTIL, MORNING_UNTIL, DAVID_UNTIL, NSMG3_UNTIL, FWD_UNTIL):
         return out
     for prog in db.query(OutreachProgram).all():
         try:
@@ -1032,6 +1071,8 @@ def apply_pending(db: Session, now: Optional[datetime] = None) -> Dict:
                                                                      CARMELITA_330_SLOT)
                 if now < NSMG3_UNTIL and _ledger(db, prog.organization_id, NSMG3_KEY) is None:
                     res["nsmg_replies"] = restland_nsmg_replies(db, prog, now)
+                if now < FWD_UNTIL and _ledger(db, prog.organization_id, FWD_KEY) is None:
+                    res["forwarded_anne"] = restland_forwarded_anne(db, prog, now)
                 if now < DAVID_UNTIL and _ledger(db, prog.organization_id, DAVID_KEY) is None:
                     res["david_phone"] = restland_david_phone(db, prog, now)
                 if now < MORNING_UNTIL and _ledger(db, prog.organization_id, MORNING_KEY) is None:

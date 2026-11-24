@@ -65,3 +65,19 @@ def test_nov24_nsmg_replies_enter_the_inbox_once(rl, monkeypatch):
     from app.services.programs import ai_setter
     assert ai_setter.conversation_for(db, a).state == "human"
     assert OC._ledger(db, org, OC.NSMG3_KEY) is not None
+
+
+def test_nov24_forwarded_reply_is_recorded_without_touching_the_booking(rl, monkeypatch):
+    _launch(rl)
+    db, org = rl["db"], rl["org"].id
+    prog = db.query(OutreachProgram).filter(OutreachProgram.organization_id == org).first()
+    a = db.query(Lead).filter(Lead.organization_id == org).first()
+    from app.services.programs import ai_setter
+    before = ai_setter.conversation_for(db, a).state
+    monkeypatch.setattr(OC, "FWD", [(a.id, "Hi, I'm here for your call.", datetime(2026, 11, 24, 16, 4))])
+    out = OC.restland_forwarded_anne(db, prog, datetime(2026, 11, 24, 23, 30))
+    assert out["entered"] == [a.id]
+    assert db.query(ProgramResponse).filter(ProgramResponse.organization_id == org,
+                                            ProgramResponse.channel == "email").count() == 1
+    assert ai_setter.conversation_for(db, a).state == before
+    assert OC._ledger(db, org, OC.FWD_KEY) is not None
