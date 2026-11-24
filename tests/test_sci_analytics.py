@@ -306,3 +306,22 @@ def test_appointment_counts_on_the_day_the_family_booked(program, sample_advisor
     j = client.get("/program/command/analytics/journey/%s" % a.id, headers=h).json()
     booked = [e for e in j["events"] if e["kind"] == "booked"][0]
     assert booked["at"][:10] == _today_at().isoformat()[:10]
+
+
+def test_every_booking_counts_hand_booked_and_no_show(program, sample_advisor, client):
+    """Owner, Nov 24: a booking is a booking - booked by hand or by the system,
+    and still a booking if the family later no-showed."""
+    db, a, b, t = _seed(program, sample_advisor)
+    for lead, status in ((a, "booked"), (b, "no_show")):
+        db.add(BookingLink(token="tok-%s" % lead.id[:8], lead_id=lead.id, user_id=sample_advisor.id,
+                           status=status, booked_time=datetime.utcnow() + timedelta(days=2),
+                           calendar_event_id="ev-%s" % lead.id[:6], created_at=datetime.utcnow()))
+    db.commit()
+    SA._CACHE.clear()
+    s = client.get("/program/command/analytics?range=today", headers=_h(db, program["admin"])).json()
+    r = s["rates"]
+    assert s["metrics"]["appointments"]["value"] == 2                    # the no-show still booked
+    # Neither family was sent times by the system, yet both booked: both count as offered.
+    assert r["offered_families"] == 2 and r["booked_offered"] == 2 and r["booked_after_offer_rate"] == 100.0
+    # Marion booked without replying: the booking counts as her response.
+    assert r["booked_families"] == 2 and r["replied_families"] == 2 and r["replied_booking_rate"] == 100.0
