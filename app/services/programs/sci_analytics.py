@@ -44,7 +44,8 @@ EMAIL_ATTEMPTS = ("sent", "failed", "unknown")          # program_email_touches:
 DELIVERED = ("delivered", "read", "opened", "clicked")
 FAILED = ("failed", "undelivered", "bounced", "provider_failed")
 NOT_GENUINE_REPLY = ("auto_reply", "opt_out")
-BOOKED = ("booked", "confirmed", "completed")
+# A booking is a booking (owner, Nov 24): a family who later no-showed still booked.
+BOOKED = ("booked", "confirmed", "completed", "no_show")
 
 ERR = {"30007": "Carrier filtered (link)", "30003": "Not reached - phone off or no signal, will try again", "30005": "Not reached - number not active right now, will try again",
        "30006": "Landline or unreachable carrier", "30008": "Unknown carrier error", "21610": "Opted out (STOP)",
@@ -743,6 +744,9 @@ def summary(L: Ledger, w: Dict, location_id: Optional[str] = None, daily_batch: 
     replying_ids = {r["lead_id"] for r in rows(L, "repliers", w, f)}
     offered_ids = {r["lead_id"] for r in rows(L, "offers", w, f)}
     booked_ids = {r["lead_id"] for r in rows(L, "appointments", w, f)}
+    # Owner, Nov 24: a family who booked was offered a time, whether the system
+    # sent the times or a person booked them by hand.
+    offered_ids |= booked_ids
     # touch analytics
     touches = []
     for t in ("1", "2", "3", "4+"):
@@ -820,8 +824,9 @@ def summary(L: Ledger, w: Dict, location_id: Optional[str] = None, daily_batch: 
                   # of the families who replied in this period, how many booked;
                   # and of every family contacted, how many booked.
                   "booked_families": len(booked_ids),
-                  "replied_booking_rate": _pct(len(booked_ids), len(replying_ids)),
-                  "replied_families": len(replying_ids),
+                  # Booking IS a response: a family who booked counts as having replied.
+                  "replied_booking_rate": _pct(len(booked_ids), len(replying_ids | booked_ids)),
+                  "replied_families": len(replying_ids | booked_ids),
                   "contacted_booking_rate": _pct(len(booked_ids), len(contacted_ids)),
                   "avg_touches_per_family": avg, "avg_touches_per_family_all_time": avg_all},
         "touches": touches,
