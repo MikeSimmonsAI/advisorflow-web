@@ -762,8 +762,9 @@ def test_a_person_tab_lists_their_work_and_their_edits_reach_the_main_tab_and_th
     main_fu = sheet[RS.FOLLOW_UPS][1]
     assert "Left her a voicemail" in [str(v) for v in main_fu]
     # Ann types on HER tab: outcome, sold, what was sold, notes
-    row = _pad(ann[a0], 14)
-    row[8], row[9], row[10], row[12] = "Showed", "Yes", "Lawn crypt", "Great visit"
+    row = _pad(ann[a0], 15)
+    C = {k: i for i, (k, _) in enumerate(RS.PT_APPT)}
+    row[C["outcome"]], row[C["sold"]], row[C["sold_what"]], row[C["notes"]] = "Showed", "Yes", "Lawn crypt", "Great visit"
     out = _run_team(db, prog, sheet, appts, fus, now + timedelta(minutes=2))
     assert out["person_tab_edits"] == 4
     main = _pad(sheet[RS.APPOINTMENTS][1], 19)
@@ -772,7 +773,7 @@ def test_a_person_tab_lists_their_work_and_their_edits_reach_the_main_tab_and_th
     assert "SOLD: Lawn crypt" in notes and "Great visit" in notes
     # a quiet pass keeps her entries
     _run_team(db, prog, sheet, appts, fus, now + timedelta(minutes=4))
-    assert sheet["Ann"][a0][10] == "Lawn crypt"
+    assert sheet["Ann"][a0][C["sold_what"]] == "Lawn crypt"
 
 
 def test_person_tab_layout_is_valid_and_applied_once(setter):

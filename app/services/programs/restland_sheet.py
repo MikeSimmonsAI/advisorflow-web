@@ -205,7 +205,13 @@ def appointment_rows(db: Session, org_id: str) -> List[List[Any]]:
     q = (db.query(BookingLink, Lead).join(Lead, Lead.id == BookingLink.lead_id)
          .filter(Lead.organization_id == org_id, BookingLink.booked_time.isnot(None))
          .order_by(BookingLink.booked_time))
-    for b, lead in q.all():
+    pairs = q.all()
+    try:
+        notes = office_notes(db, [lead.id for _, lead in pairs])   # owner, Nov 25: notes reach appointments too
+    except Exception:                                    # noqa: BLE001 - the rows still go in
+        log.exception("office notes lookup failed")
+        notes = {}
+    for b, lead in pairs:
         if _skip(lead):
             continue
         first_note = (db.query(AppointmentNotification.created_at)
@@ -220,7 +226,7 @@ def appointment_rows(db: Session, org_id: str) -> List[List[Any]]:
                     round((bt.hour * 60 + bt.minute) / 1440.0, 8), bt.strftime("%A"), safe(_name(lead)),
                     _phone(lead.phone), safe(lead.email), HOW.get(b.meeting_type or "office", "At Restland"),
                     safe(b.visit_address if b.meeting_type == "home" else ""), status,
-                    safe(_last_family_words(db, lead.id))])
+                    safe(_said_with_notes(_last_family_words(db, lead.id), notes.get(lead.id)))])
     return out
 
 
@@ -287,6 +293,22 @@ def office_notes(db: Session, lead_ids) -> Dict[str, List[tuple]]:
             if body and body.strip() and len(out.setdefault(lid, [])) < NOTES_SHOWN:
                 out[lid].append((at, body.strip()))
     return out
+
+
+def _note_lines(notes) -> List[str]:
+    out = []
+    for at, body in notes or []:
+        t = _central(at)
+        out.append("NOTE %d/%d: %s" % (t.month, t.day, " ".join(body.split())[:300]))
+    return out
+
+
+def _said_with_notes(said: str, notes) -> str:
+    """An appointment's last words from the family, under the office's notes."""
+    lines = _note_lines(notes)
+    if not lines:
+        return said or ""
+    return ("\n".join(lines) + ("\nSaid: " + said if said else ""))[:900]
 
 
 def _with_notes(why: str, notes) -> str:
@@ -1014,7 +1036,7 @@ def _pause_alert(db, prog, name: str, since: datetime, now: datetime) -> None:
 # people get new tabs (Team rows 7-16).
 PERSON_TAB_IDS = (3, 4, 7, 8, 9) + tuple(range(101, 111))   # Team rows 2-16, in order
 PT_APPT = (("ref", "Ref"), ("date", "Date"), ("time", "Time"), ("family", "Family"), ("phone", "Phone"),
-           ("how", "How"), ("address", "Home Address"), ("status", "Status"),
+           ("how", "How"), ("address", "Home Address"), ("said", "Notes / What They Said"), ("status", "Status"),
            ("outcome", "Outcome"), ("sold", "Sold?"), ("sold_what", "What Was Sold"),
            ("link", "Call Link / Details"), ("notes", "My Notes"), ("updated", "Last Update"))
 # Owner, Nov 24 9:14 PM ("need dates, last updated, better all around"): the
@@ -1026,7 +1048,7 @@ PT_FU = (("ref", "Ref"), ("due", "Follow Up On"), ("updated", "Last Update"), ("
          ("appt_address", "Home Address"), ("notes", "My Notes"))
 PT_APPT_EDIT = ("link", "outcome", "sold", "sold_what", "notes")
 PT_FU_EDIT = ("done", "fu_date", "fu_result", "appt_date", "appt_time", "appt_how", "appt_address", "notes")
-PT_APPT_INFO = 8                                     # A-H who & when, I-M your update, N last update
+PT_APPT_INFO = 9                                     # A-I who & when, J-N your update, O last update
 PT_FU_INFO = 7                                       # A-G when, who & why; H-O your update
 PT_WIDTH = max(len(PT_APPT), len(PT_FU))             # A..O
 # rows (1-based)
@@ -1178,7 +1200,7 @@ def person_tabs_write(client, sid: str, tabs: List[Dict[str, Any]], rows: Dict[s
             if isinstance(r[2], (int, float)) and r[2] < today_serial - 14:
                 continue                                 # older than two weeks: off the working list
             cur, rec = staff[APPOINTMENTS].get(rid) or {}, known.get(rid)
-            appts.append([rid, r[2], r[3], r[5], r[6], r[8], r[9], cur.get("outcome") or r[10],
+            appts.append([rid, r[2], r[3], r[5], r[6], r[8], r[9], r[11], cur.get("outcome") or r[10],
                           cur.get("outcome", ""), cur.get("sold", ""), cur.get("sold_what", ""),
                           cur.get("link", ""), cur.get("notes", ""),
                           central_serial(rec.staff_changed_at) if _team_touched(rec, PT_APPT_EDIT) else ""])
@@ -1397,7 +1419,7 @@ def person_tab_layout_requests(ids=PERSON_TAB_IDS, kind: str = "appt") -> List[D
                                                         "endIndex": r1}, "properties": {"pixelSize": px},
                                               "fields": "pixelSize"}}
 
-    widths = [24, 118, 78, 165, 118, 150, 175, 150, 120, 74, 190, 190, 260, 130, 130]
+    widths = [24, 112, 78, 160, 115, 110, 160, 300, 110, 120, 70, 170, 170, 240, 130]
     W = PT_WIDTH
     appt = kind == "appt"
 
@@ -1581,11 +1603,12 @@ def person_tab_layout_requests(ids=PERSON_TAB_IDS, kind: str = "appt") -> List[D
             r += [fmt(sid, PT_APPT_FIRST, a_end, 1, 2, num=("DATE", "ddd, mmm d"), bold=True),
                   fmt(sid, PT_APPT_FIRST, a_end, 2, 3, num=("TIME", "h:mm am/pm"), bold=True),
                   fmt(sid, PT_APPT_FIRST, a_end, 3, 4, bold=True),
-                  lst(sid, PT_APPT_FIRST, a_end, 8, ["Showed", "No-Show", "Rescheduled", "Cancelled"]),
-                  lst(sid, PT_APPT_FIRST, a_end, 9, list(SOLD_CHOICES)),
-                  _when(sid, "J%d:J%d" % (PT_APPT_FIRST, a_end), '=$J%d="Yes"' % PT_APPT_FIRST, "#DCEFE3"),
-                  _when(sid, "I%d:I%d" % (PT_APPT_FIRST, a_end), '=$I%d="Showed"' % PT_APPT_FIRST, "#DCEFE3"),
-                  _when(sid, "I%d:I%d" % (PT_APPT_FIRST, a_end), '=$I%d="No-Show"' % PT_APPT_FIRST, "#FBE3DF")]
+                  fmt(sid, PT_APPT_FIRST, a_end, 7, 8, wrap="WRAP", size=9),     # notes / what they said
+                  lst(sid, PT_APPT_FIRST, a_end, 9, ["Showed", "No-Show", "Rescheduled", "Cancelled"]),
+                  lst(sid, PT_APPT_FIRST, a_end, 10, list(SOLD_CHOICES)),
+                  _when(sid, "K%d:K%d" % (PT_APPT_FIRST, a_end), '=$K%d="Yes"' % PT_APPT_FIRST, "#DCEFE3"),
+                  _when(sid, "J%d:J%d" % (PT_APPT_FIRST, a_end), '=$J%d="Showed"' % PT_APPT_FIRST, "#DCEFE3"),
+                  _when(sid, "J%d:J%d" % (PT_APPT_FIRST, a_end), '=$J%d="No-Show"' % PT_APPT_FIRST, "#FBE3DF")]
         else:
             F0 = FT_FIRST
             r += [fmt(sid, F0, f_end, 1, 2, num=("DATE", "ddd, mmm d")),
@@ -1674,14 +1697,14 @@ def ensure_person_tabs(db: Session, prog, client, sid: str, team: Optional[List[
         client.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": reqs}).execute()
     pol = json.loads(prog.booking_policy_json or "{}")
     cfg = pol.get("handoff_sheet") or {}
-    done = set(cfg.get("person_tabs_v6_ids") or ([3, 4, 7, 8, 9] if cfg.get("person_tabs_v6") else []))
+    # v7 (owner, Nov 25): a "Notes / What They Said" column - every tab gets the new look once.
+    done = set(cfg.get("person_tabs_v7_ids") or [])
     todo = [tid for tid in PERSON_TAB_IDS if tid not in done and (tid in props or tid in made)]
     if todo:
         client.spreadsheets().batchUpdate(spreadsheetId=sid, body={
             "requests": _strip_old_look(client, sid, todo) + person_tab_layout_requests(todo)}).execute()
-    if todo or cfg.get("person_tabs_v6_ids") is None:
-        cfg["person_tabs_v6"] = True
-        cfg["person_tabs_v6_ids"] = sorted(done | set(todo))
+    if todo or cfg.get("person_tabs_v7_ids") is None:
+        cfg["person_tabs_v7_ids"] = sorted(done | set(todo))
         pol["handoff_sheet"] = cfg
         prog.booking_policy_json = json.dumps(pol)
         db.commit()
