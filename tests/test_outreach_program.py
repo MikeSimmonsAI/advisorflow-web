@@ -541,6 +541,16 @@ def test_one_flagged_linked_row_holds_the_whole_lead(program):
     b.needs_data_review = True
     db.commit()
     assert identity.send_refusal(db, lead, "manual") == identity.DATA_REVIEW_REFUSAL
+    # Owner, Nov 25: a person may still answer by hand once the family has
+    # written to us ("Wrong number" -> "we'll correct our records") - never
+    # an automated send, and never someone who hasn't written in.
+    assert identity.send_refusal(db, lead, "manual", human_reply=True) == identity.DATA_REVIEW_REFUSAL
+    from app.models.models import Reply
+    db.add(Reply(lead_id=lead.id, body="Wrong number"))
+    db.commit()
+    assert identity.send_refusal(db, lead, "manual", human_reply=True) is None
+    assert identity.send_refusal(db, lead, "cadence") == identity.DATA_REVIEW_REFUSAL
+    assert identity.send_refusal(db, lead, "manual") == identity.DATA_REVIEW_REFUSAL
     b.needs_data_review = False
     b.location_id = db.query(ProgramSourceRecord).filter_by(source_lead_id="L003").one().location_id
     db.commit()
