@@ -73,8 +73,10 @@ def reply_counts_for_cadence(db: Session, lead) -> bool:
     rec = identity.source_record_for_lead(db, lead)
     if rec is None or rec.campaign_family not in (F.CAMPAIGN_KEY, F.RETURN_KEY):
         return True
+    # Owner, Nov 24: "number_changed" - someone at an old number who passed
+    # on the family's new one (Gun Maran). Not the family answering.
     auto = {rid for (rid,) in db.query(ProgramResponse.reply_id).filter(
-        ProgramResponse.lead_id == lead.id, ProgramResponse.response_class == "auto_reply",
+        ProgramResponse.lead_id == lead.id, ProgramResponse.response_class.in_(("auto_reply", "number_changed")),
         ProgramResponse.reply_id.isnot(None)).all()}
     return any(r.id not in auto for r in db.query(Reply).filter(Reply.lead_id == lead.id).all())
 
