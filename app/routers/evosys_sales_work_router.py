@@ -1,4 +1,4 @@
-"""EvoSys Sales - the work behind the six screens (PR #663).
+"""EvoSys BookIt - the work behind the six screens (PR #663).
 
 Same door as evosys_sales_router (/sales/evosys/*, the EvoSys Pro sales team
 only; reps see their own leads; managers change campaigns and lead groups).
@@ -504,7 +504,7 @@ def _send_text_reply(db: Session, c: Ctx, s, o, st, body: ReplyIn):
     if not to:
         raise HTTPException(409, "This lead has no phone number we can text.")
     if not O.e164(s.sms_from_number):
-        raise HTTPException(409, "EvoSys Sales has no texting number.")
+        raise HTTPException(409, "EvoSys BookIt has no texting number.")
     if not text:
         raise HTTPException(422, "Write a message.")
     if len(text) > 640:
@@ -638,7 +638,7 @@ def signed_up(opp_id: str, c: Ctx = Depends(ctx), db: Session = Depends(get_db))
     lead = _lead_row(db, s, o)
     st = db.get(EvoSysOutreachState, o.id)
     camp = db.get(EvoSysCampaign, st.campaign_id) if st and st.campaign_id else None
-    attribution = "EvoSys Sales - source: %s; campaign: %s; group: %s" % (
+    attribution = "EvoSys BookIt - source: %s; campaign: %s; group: %s" % (
         G.SOURCE_LABEL.get(lead.source_channel or "", "Other"), camp.name if camp else "none",
         G.group_label(s, lead.industry_key, lead.market_key))
     data = {"sales_opportunity_id": o.id, "name": o.company_name, "contact_phone": o.phone}

@@ -626,7 +626,7 @@ COLUMNS_TO_ADD = [
     # app/services/evosys_sales/logos.py. NULL on every existing row, which
     # means "no logo" and leaves every email exactly as it was.
     ("opportunities", "logo_png", "BYTEA"),
-    # EvoSys Sales texting number (owner request 2026-11-17). NULL = text steps
+    # EvoSys BookIt texting number (owner request 2026-11-17). NULL = text steps
     # stay held exactly as before.
     ("evosys_outreach_settings", "sms_from_number", "VARCHAR(20)"),
     ("evosys_outreach_settings", "alert_phone", "VARCHAR(20)"),
@@ -1682,7 +1682,7 @@ COLUMNS_TO_ADD = [
     ("leads", "pipeline_lost_at", "TIMESTAMP"),
     ("leads", "pipeline_lost_reason", "VARCHAR"),
     ("leads", "enrolled_at", "TIMESTAMP"),
-    # #470 Stage B: EvoSys Sales import provenance on opportunities
+    # #470 Stage B: EvoSys BookIt import provenance on opportunities
     ("opportunities", "source_system", "VARCHAR"),
     ("opportunities", "source_record_id", "VARCHAR"),
     ("opportunities", "import_batch_id", "VARCHAR"),

@@ -1,8 +1,8 @@
-/* EvoSys Sales v2 (owner, 2026-11-20): "EvoSys Sales Workflow Mockups" PDF.
+/* EvoSys BookIt v2 (owner, 2026-11-20): "EvoSys BookIt Workflow Mockups" PDF.
    Midnight navy #0B1B38, champagne gold #C9A24A, warm ivory #F7F2E8, white
    cards; Cormorant Garamond headings, Inter body; 16 px corners, thin
    outlines, gold only for the one action that matters. Scoped under .evs.v2
-   so nothing outside EvoSys Sales changes. */
+   so nothing outside EvoSys BookIt changes. */
 /* Fonts are added by the shell as a <link> (a failed font must never break the screen). */
 
 .evs.v2 { --navy: #0b1b38; --navy-2: #13284d; --navy-3: #1c3563; --gold: #c9a24a; --gold-d: #a8812c; --gold-soft: #f6ecd2;

@@ -1,4 +1,4 @@
-"""EvoSys Sales campaigns: one follow-up per industry + market group.
+"""EvoSys BookIt campaigns: one follow-up per industry + market group.
 
 WHAT A CAMPAIGN OWNS: its audience (industry_key / market_key; None = any),
 its email steps, offer, booking link, daily limit, send days and hours, and

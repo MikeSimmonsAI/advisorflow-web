@@ -92,7 +92,7 @@ class JobName:
     # messages, invoices or charges anyone. Unique (schedule, date) keys make
     # a second instance or a retried pass a no-op.
     SERVICE_OPS_RECURRING = "service_ops_recurring_loop"
-    # EvoSys Sales automatic follow-up email (approved + switched on only).
+    # EvoSys BookIt automatic follow-up email (approved + switched on only).
     EVOSYS_SALES_OUTREACH = "evosys_sales_outreach_loop"
 
     # Render cron SERVICES. Separate names on purpose, even where the work

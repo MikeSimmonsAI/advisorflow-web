@@ -1,10 +1,10 @@
-"""EvoSys Sales 'Calls': Business Growth Calls on the existing scheduler
+"""EvoSys BookIt 'Calls': Business Growth Calls on the existing scheduler
 (owner, 2026-11-20, design pages 11-18).
 
 Everything books through `sales_scheduling_router.create_appointment`, so the
 real double-booking checks (our own calendar + the host's connected calendar),
 the Zoom room and the calendar invitation all come from the code that already
-runs every other booking. This module only adds what EvoSys Sales needs on
+runs every other booking. This module only adds what EvoSys BookIt needs on
 top: hosts, a day view, an availability check before booking, "book without
 sending", and a text confirmation from the team number.
 """
@@ -25,7 +25,7 @@ TITLE = "Business Growth Call"
 
 
 def hosts(db: Session, bso: str) -> List[Dict]:
-    """People who can host: active members of the EvoSys Sales team."""
+    """People who can host: active members of the EvoSys BookIt team."""
     rows = (db.query(User).join(Membership, Membership.user_id == User.id)
             .filter(Membership.scope_id == bso, Membership.is_active.is_(True)).all())
     seen, out = set(), []
@@ -40,7 +40,7 @@ def hosts(db: Session, bso: str) -> List[Dict]:
 def default_host_id(db: Session, bso: str, user: User) -> str:
     """Whose calendar and hours the Calls screens use.
 
-    The signed-in person when they own any EvoSys Sales leads (the booking page
+    The signed-in person when they own any EvoSys BookIt leads (the booking page
     books each lead with its owner), else whoever owns the most leads. It used
     to be "the owner of the newest lead", so one test lead owned by another
     login made Settings show that login's hours instead of Mike's."""

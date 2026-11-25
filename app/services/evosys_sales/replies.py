@@ -1,4 +1,4 @@
-"""EvoSys Sales: a lead's emailed reply stops their follow-up by itself.
+"""EvoSys BookIt: a lead's emailed reply stops their follow-up by itself.
 
 HOW A REPLY FINDS ITS LEAD (no AI, no guessing)
   Every follow-up email carries a Reply-To unique to the lead:
@@ -11,7 +11,7 @@ HOW A REPLY FINDS ITS LEAD (no AI, no guessing)
 
   Without a tag (the person wrote a fresh email, or a client dropped the
   Reply-To) the sender's address may still name the lead: only if exactly ONE
-  EvoSys Sales lead has that address AND was emailed by the follow-up. Two or
+  EvoSys BookIt lead has that address AND was emailed by the follow-up. Two or
   more such leads is recorded as ambiguous and attached to nobody.
 
 WHAT IS IGNORED
@@ -113,7 +113,7 @@ def match(db: Session, recipients: List[str], sender: str,
     if code:
         st = db.query(EvoSysOutreachState).filter(EvoSysOutreachState.reply_code == code).first()
         if st is None:
-            return None, "unknown_tag", "Reply tag evs-%s matches no EvoSys Sales lead." % code
+            return None, "unknown_tag", "Reply tag evs-%s matches no EvoSys BookIt lead." % code
         opp = db.get(Opportunity, st.opportunity_id)
         return opp, "reply_address", "Matched by the lead's reply address (evs-%s)." % code
     if not allow_sender or not sender:
@@ -126,9 +126,9 @@ def match(db: Session, recipients: List[str], sender: str,
                .distinct().all())
     ids = [r[0] for r in emailed]
     if len(ids) == 1:
-        return db.get(Opportunity, ids[0]), "sender", "Matched by sender: the only EvoSys Sales lead emailed at this address."
+        return db.get(Opportunity, ids[0]), "sender", "Matched by sender: the only EvoSys BookIt lead emailed at this address."
     if len(ids) > 1:
-        return None, "ambiguous", "%d EvoSys Sales leads were emailed at %s; attached to none." % (len(ids), sender)
+        return None, "ambiguous", "%d EvoSys BookIt leads were emailed at %s; attached to none." % (len(ids), sender)
     return None, "none", ""
 
 
@@ -169,7 +169,7 @@ def handle(db: Session, msg: dict, *, sender: str, received_at: datetime, body: 
            allow_sender: bool, headers_for: Optional[Callable[[], Optional[List[dict]]]] = None
            ) -> Optional[Tuple[str, str, Optional[str]]]:
     """Process one mailbox message. Returns (outcome, detail, lead_id) when it
-    belongs to EvoSys Sales, else None (the mailbox's own routing carries on)."""
+    belongs to EvoSys BookIt, else None (the mailbox's own routing carries on)."""
     from app.services.inbound_mailbox_service import recipients_of
     opp, method, detail = match(db, recipients_of(msg), sender, allow_sender=allow_sender)
     if method in ("none",):
@@ -181,7 +181,7 @@ def handle(db: Session, msg: dict, *, sender: str, received_at: datetime, body: 
         try:
             headers = headers_for()
         except Exception:  # noqa: BLE001 - the subject check still runs
-            log.exception("reading headers for an EvoSys Sales reply failed")
+            log.exception("reading headers for an EvoSys BookIt reply failed")
     why = is_auto_reply(msg.get("subject"), headers)
     if why:
         return "evs_auto_reply", "Automatic reply ignored (%s). %s" % (why, detail), opp.id

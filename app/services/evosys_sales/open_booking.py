@@ -1,4 +1,4 @@
-"""EvoSys Sales: ONE booking link Mike can send to anybody (owner request 2026-11-18).
+"""EvoSys BookIt: ONE booking link Mike can send to anybody (owner request 2026-11-18).
 
 The lead booking page (booking_page.py) needs a signed link that names one
 lead. This is the front door for people who are not a lead yet:

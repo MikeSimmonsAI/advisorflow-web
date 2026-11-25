@@ -383,7 +383,7 @@ async def inbound_webhook(
     # subaccount is held to its own organization. Checked BEFORE any side effect.
     _check_tenant_owns_called_number(db, _resolved, To)
 
-    # EVOSYS SALES (owner request 2026-11-17). A text to the EvoSys Sales
+    # EVOSYS SALES (owner request 2026-11-17). A text to the EvoSys BookIt
     # texting number is a prospect business answering our outreach: it is
     # recorded on that lead (STOP -> opted out + Do Not Contact) and never
     # reaches the customer-side pipeline below. Every other number returns

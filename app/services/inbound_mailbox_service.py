@@ -921,7 +921,7 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
             elif not sender or sender == box.address:
                 row.outcome, row.detail = "own_mail", "Sent by the mailbox itself."
             else:
-                # EvoSys Sales: a reply to a lead's tagged Reply-To is theirs,
+                # EvoSys BookIt: a reply to a lead's tagged Reply-To is theirs,
                 # whatever else the sender matches (evosys_sales/replies.py).
                 evs = _evosys_sales_reply(db, m, sender, received, token, allow_sender=False)
                 if evs is not None:
@@ -966,7 +966,7 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
                 row.outcome, row.detail = outcome, detail
                 if lead is None and alias_prof is None:
                     # Nothing else claimed it: the sender alone may name exactly
-                    # one emailed EvoSys Sales lead (never a guess between two).
+                    # one emailed EvoSys BookIt lead (never a guess between two).
                     evs = _evosys_sales_reply(db, m, sender, received, token, allow_sender=True)
                     if evs is not None:
                         row.outcome, row.detail = evs[0], evs[1][:1000]
@@ -1064,10 +1064,10 @@ def poll_mailbox(db: Session, box: InboundMailbox, *, fetch=None, now: Optional[
 
 def _evosys_sales_reply(db: Session, m: dict, sender: str, received: datetime, token: Optional[str],
                         allow_sender: bool):
-    """EvoSys Sales reply handling (evosys_sales/replies.py). Returns
+    """EvoSys BookIt reply handling (evosys_sales/replies.py). Returns
     (outcome, detail, opportunity_id) or None when the message is not theirs.
     Headers (for automatic-reply detection) are read only for a message that
-    did match an EvoSys Sales lead."""
+    did match an EvoSys BookIt lead."""
     from app.services.evosys_sales import replies as _evs
 
     def headers_for():
@@ -1086,10 +1086,10 @@ def _evosys_sales_reply(db: Session, m: dict, sender: str, received: datetime, t
                           allow_sender=allow_sender, headers_for=headers_for)
     except Exception:  # noqa: BLE001 - the mailbox's own routing carries on
         db.rollback()
-        log.exception("EvoSys Sales reply handling failed for %s", m.get("id"))
+        log.exception("EvoSys BookIt reply handling failed for %s", m.get("id"))
         return None
     if out is not None and out[2]:
-        out = (out[0], "%s [EvoSys Sales lead %s]" % (out[1], out[2]), out[2])
+        out = (out[0], "%s [EvoSys BookIt lead %s]" % (out[1], out[2]), out[2])
     return out
 
 

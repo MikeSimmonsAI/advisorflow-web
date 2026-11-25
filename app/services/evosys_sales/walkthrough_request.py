@@ -7,10 +7,10 @@ Linked from Mike's LinkedIn profile, Featured section and page buttons. The
 person asking is a facility or property manager who wants a cleaning quote.
 
 RULES
-  * Saved as a WalkthroughRequest, never as an EvoSys Sales opportunity, and
+  * Saved as a WalkthroughRequest, never as an EvoSys BookIt opportunity, and
     never enrolled in any automatic outreach. Nothing is sent to the person.
-  * Mike and everyone on the EvoSys Sales alert list get a text and an email
-    (the same path as every other EvoSys Sales alert). A failed alert never
+  * Mike and everyone on the EvoSys BookIt alert list get a text and an email
+    (the same path as every other EvoSys BookIt alert). A failed alert never
     loses the request: the row is committed first.
   * The page promises nothing the system can't back: no price, no date. It
     says Mike will reach out to set the time.
@@ -80,13 +80,13 @@ def _ct(dt: datetime) -> str:
 
 
 def _alert(db: Session, r: WalkthroughRequest) -> None:
-    """Text + email everyone on the EvoSys Sales alert list. Never raises."""
+    """Text + email everyone on the EvoSys BookIt alert list. Never raises."""
     try:
         from app.services.evosys_sales import outreach as O
         from app.services.evosys_sales import sms_inbound as SI
         bso = O.brand_id(db)
         if not bso:
-            log.warning("[walkthrough request] %s saved but EvoSys Sales is not set up; no alert", r.id)
+            log.warning("[walkthrough request] %s saved but EvoSys BookIt is not set up; no alert", r.id)
             return
         s = O.get_settings(db, bso)
         db.commit()

@@ -1160,7 +1160,7 @@ app.include_router(intake_router,
 # #470 Stage B: God-only master prospect pool destination (platform_acquisition_pool)
 from app.routers import platform_pool_intake_router  # noqa: E402
 app.include_router(platform_pool_intake_router.router)
-# #470 Stage B: explicit import destinations; EvoSys Sales and customer Acquisition imports
+# #470 Stage B: explicit import destinations; EvoSys BookIt and customer Acquisition imports
 from app.routers import business_intake_router  # noqa: E402
 app.include_router(business_intake_router.router)
 # RESTORED alongside it. Deliberately NOT behind require_feature: qualification
@@ -1286,7 +1286,7 @@ from app.routers.evosys_bd_router import router as evosys_bd_router  # noqa: E40
 app.include_router(evosys_bd_router)            # /sales/evosys/* - today, contacts, picked campaigns, inbox, calls
 from app.routers.evosys_sales_router import router as evosys_sales_router  # noqa: E402
 from app.routers.evosys_sales_router import public_router as evosys_sales_public_router  # noqa: E402
-app.include_router(evosys_sales_router)         # /sales/evosys/* - EvoSys Sales program (EvoSys sales team)
+app.include_router(evosys_sales_router)         # /sales/evosys/* - EvoSys BookIt program (EvoSys sales team)
 from app.routers.evosys_sales_work_router import router as evosys_sales_work_router  # noqa: E402
 app.include_router(evosys_sales_work_router)    # /sales/evosys/* - campaigns, lead review, AI help, intro calls
 app.include_router(evosys_sales_public_router)  # /evosys-sales-public/* - opt-out link in outreach email
@@ -2189,7 +2189,7 @@ async def _acquisition_workforce_loop():
 
 
 async def _evosys_sales_outreach_loop():
-    """EvoSys Sales automatic follow-up: every 5 minutes, one claimed pass.
+    """EvoSys BookIt automatic follow-up: every 5 minutes, one claimed pass.
     Sends only when Mike approved the messages AND the switch is on, only on
     weekdays 8 AM - 6 PM Central, within the daily limit (outreach.run_pass)."""
     from app.services.job_run_service import record_job_run
@@ -2218,14 +2218,14 @@ async def _evosys_sales_outreach_loop():
                             out.update(_BP.send_reminders(db))
                         except Exception:                    # noqa: BLE001 - never blocks the outreach pass
                             db.rollback()
-                            _logger.exception("EvoSys Sales reminders failed")
+                            _logger.exception("EvoSys BookIt reminders failed")
                         return out
                     finally:
                         db.close()
                 summary = await _off_loop(_one_pass)
                 _m.update(summary or {})
         except Exception:                                    # noqa: BLE001
-            _logger.exception("EvoSys Sales outreach pass failed")
+            _logger.exception("EvoSys BookIt outreach pass failed")
         await asyncio.sleep(interval)
 
 

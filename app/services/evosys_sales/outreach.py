@@ -1,4 +1,4 @@
-"""EvoSys Sales automatic follow-up (owner request 2026-11-16).
+"""EvoSys BookIt automatic follow-up (owner request 2026-11-16).
 
 Every lead on the EvoSys Pro sales team that has an email address gets a short
 series of emails. The series stops by itself when the lead replies (logged on
@@ -9,7 +9,7 @@ Nothing sends unless BOTH are true for the team:
     * the team's switch is on (sending_on).
 Editing the steps clears the approval. Sends happen only on weekdays between
 8:00 AM and 6:00 PM Central, at most `daily_limit` a day. Text steps are held
-(never sent) until EvoSys Sales has a texting number of its own; the screen
+(never sent) until EvoSys BookIt has a texting number of its own; the screen
 says so.
 
 Texting (owner request 2026-11-17): once the team's `sms_from_number` is saved,
@@ -512,7 +512,7 @@ def run_pass(db: Session, now: Optional[datetime] = None, sender=None, text_send
             db.add(EvoSysOutreachMessage(brand_sales_org_id=bso_id, opportunity_id=opp.id, direction="out",
                                          channel="text", step_no=st.next_step + 1, to_address=opp.phone,
                                          body=fill(step.get("body"), opp, s, c), status="held", campaign_id=c.id,
-                                         error="EvoSys Sales has no texting number yet.", created_at=now))
+                                         error="EvoSys BookIt has no texting number yet.", created_at=now))
             out["held"] += 1
             _advance(st, steps, now)
             continue

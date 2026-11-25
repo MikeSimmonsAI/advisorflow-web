@@ -1,4 +1,4 @@
-"""EvoSys Sales program API (owner request 2026-11-16).
+"""EvoSys BookIt program API (owner request 2026-11-16).
 
 /sales/evosys/*        the EvoSys Pro sales team only (managers see every lead,
                        reps their own); outreach settings, approval and the
@@ -46,7 +46,7 @@ class Ctx:
 def ctx(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> Ctx:
     bso = O.brand_id(db)
     if not bso or not sales_access.is_sales_member(user, db, bso):
-        raise HTTPException(403, "EvoSys Sales is for the EvoSys Pro sales team.")
+        raise HTTPException(403, "EvoSys BookIt is for the EvoSys Pro sales team.")
     return Ctx(user, bso, sales_access.is_sales_manager(user, db, bso))
 
 
@@ -661,7 +661,7 @@ def _host(db: Session, c: Ctx, host_id: Optional[str]):
     from app.services.evosys_sales import calls as CL
     hid = host_id or CL.default_host_id(db, c.bso, c.user)
     if hid not in {h["id"] for h in CL.hosts(db, c.bso)} and hid != c.user.id:
-        raise HTTPException(422, "That person isn't on the EvoSys Sales team.")
+        raise HTTPException(422, "That person isn't on the EvoSys BookIt team.")
     u = db.get(User, hid)
     if u is None:
         raise HTTPException(404, "Host not found.")
@@ -1051,7 +1051,7 @@ async def voice_status_cb(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/texting/audit")
 def texting_audit(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
-    """What Twilio itself says about the EvoSys Sales number (read-only).
+    """What Twilio itself says about the EvoSys BookIt number (read-only).
     Owner (god) only: it reads provider logs across the platform account."""
     from app.services.evosys_sales import number_audit
     from app.services.support_authority import is_god

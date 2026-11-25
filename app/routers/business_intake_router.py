@@ -1,7 +1,7 @@
 """Explicit import destinations and the business-import routes (#470 Stage B).
 
 GET  /intake/destinations                  where THIS person may import, server-decided
-     /intake/sales/{brand_sales_org_id}/...  EvoSys Sales (Opportunity)
+     /intake/sales/{brand_sales_org_id}/...  EvoSys BookIt (Opportunity)
      /intake/acquisition/{org_id}/...        one cleaning customer's Acquisition pipeline
 
 The target is in the URL of every call and is re-checked against the actor
@@ -50,8 +50,8 @@ def destinations(db: Session = Depends(get_db), user: User = Depends(get_current
     out.append({"key": "tenant_contacts", "label": "A customer's contacts and leads",
                 "description": "People and leads for one customer's own CRM.", "targets": tenant,
                 "path": "/imports/new"})
-    # 2. EvoSys Sales - companies EvoSys sells its software to.
-    out.append({"key": SI.DESTINATION, "label": "EvoSys Sales prospects",
+    # 2. EvoSys BookIt - companies EvoSys sells its software to.
+    out.append({"key": SI.DESTINATION, "label": "EvoSys BookIt prospects",
                 "description": "Companies EvoSys sells its own software to (for example cleaning companies for the Growth Pilot).",
                 "targets": SI.targets(db, user), "profiles": [{"key": k, "label": v["label"]} for k, v in SI.PROFILES.items()],
                 "path": "/imports/sales"})

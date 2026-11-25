@@ -1,13 +1,13 @@
-"""EvoSys Sales: texts that come back to the team's texting number.
+"""EvoSys BookIt: texts that come back to the team's texting number.
 
 Called from the authenticated Twilio inbound webhook (sms_router) BEFORE the
 customer-side pipeline. Returns False for any number that is not the EvoSys
 Sales texting number, so every other program's replies are untouched.
 
-For a text to the EvoSys Sales number:
+For a text to the EvoSys BookIt number:
   * STOP / UNSUBSCRIBE / CANCEL / END / QUIT / STOPALL / "remove me" ...
         -> the lead's follow-up stops for good (opted out) and its phone and
-           email go on the EvoSys Sales Do Not Contact list.
+           email go on the EvoSys BookIt Do Not Contact list.
   * anything else
         -> stored on the lead, the automatic follow-up stops, and the lead is
            flagged "needs a person" on its timeline. Nothing is auto-answered.
@@ -66,7 +66,7 @@ def _find_lead(db: Session, bso_id: str, from_number: str) -> Optional[Opportuni
 
 
 def handle(db: Session, *, from_number: str, to_number: str, body: str, message_sid: str) -> bool:
-    """True when this text belonged to EvoSys Sales (handled here)."""
+    """True when this text belonged to EvoSys BookIt (handled here)."""
     if not is_team_number(db, to_number):
         return False
     from app.services.evosys_sales import outreach as O
@@ -206,7 +206,7 @@ def recipients(s) -> list:
 
 
 def notify_owner(s, line: str, subject: str, html_body: str) -> None:
-    """Text + email everyone who gets EvoSys Sales alerts (same path as SCI
+    """Text + email everyone who gets EvoSys BookIt alerts (same path as SCI
     and Restland alerts). Never raises: a failed alert loses nothing."""
     from app.services.evosys_sales.outreach import e164
     phones, emails = [], []
@@ -248,16 +248,16 @@ def _alert_owner(db: Session, s, opp: Opportunity, text: str, answered: Optional
     who = opp.company_name or opp.contact_name or "A prospect"
     phone = opp.phone or ""
     if answered:
-        line = "EvoSys Sales - %s (%s) texted: \"%s\" AI answered: \"%s\"" % (who, phone, (text or "")[:110], answered[:120])
+        line = "EvoSys BookIt - %s (%s) texted: \"%s\" AI answered: \"%s\"" % (who, phone, (text or "")[:110], answered[:120])
     else:
-        line = "EvoSys Sales - NEEDS A PERSON: %s (%s) texted back: \"%s\" (draft ready on the lead)" % (
+        line = "EvoSys BookIt - NEEDS A PERSON: %s (%s) texted back: \"%s\" (draft ready on the lead)" % (
             who, phone, (text or "")[:150])
-    body = ("<p><b>%s</b> (%s) texted back to the EvoSys Sales number:</p><blockquote>%s</blockquote>"
+    body = ("<p><b>%s</b> (%s) texted back to the EvoSys BookIt number:</p><blockquote>%s</blockquote>"
             % (_html.escape(who), _html.escape(phone), _html.escape(text or "")))
     body += (("<p>AI answered for you:</p><blockquote>%s</blockquote>" % _html.escape(answered)) if answered else
-             "<p>The automatic follow-up has stopped. A draft answer is ready on the lead in EvoSys Sales.</p>")
-    subj = ("EvoSys Sales - %s texted back (AI answered)" if answered
-            else "EvoSys Sales - NEEDS A PERSON: %s texted back") % who
+             "<p>The automatic follow-up has stopped. A draft answer is ready on the lead in EvoSys BookIt.</p>")
+    subj = ("EvoSys BookIt - %s texted back (AI answered)" if answered
+            else "EvoSys BookIt - NEEDS A PERSON: %s texted back") % who
     notify_owner(s, line, subj, body)
 
 
@@ -271,7 +271,7 @@ def _do_not_contact(db: Session, opp: Opportunity, text: str) -> None:
                   "follow-up is stopped but the Do Not Contact row was not written", opp.id)
         return
     try:
-        SDNC.record(db, opp, user, "Texted STOP to the EvoSys Sales number: %s" % text[:200])
+        SDNC.record(db, opp, user, "Texted STOP to the EvoSys BookIt number: %s" % text[:200])
     except ValueError:
         log.exception("[evosys-sales sms] could not record Do Not Contact for lead %s", opp.id)
 

@@ -1,4 +1,4 @@
-"""EvoSys Sales AI: suggestions a person reviews. Never decisions.
+"""EvoSys BookIt AI: suggestions a person reviews. Never decisions.
 
 Through the platform's one AI door (app.services.ai_gateway): manual mode,
 named after the person who pressed the button, existing capabilities and

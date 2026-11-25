@@ -123,7 +123,7 @@ export function Box({ error, data, children }) {
 }
 
 export function CallBtn({ lead, label = 'Call' }) {
-  // Calls go through the EvoSys Sales number in the browser, never tel:.
+  // Calls go through the EvoSys BookIt number in the browser, never tel:.
   const [open, setOpen] = useState(false)
   if (!lead?.phone || lead?.outreach?.key === 'opted_out') return null
   return (
@@ -162,10 +162,10 @@ export default function EvoSysSalesShell() {
   }, [])
   return (
     <div className="evs v2">
-      <aside className="evs-side" aria-label="EvoSys Sales">
+      <aside className="evs-side" aria-label="EvoSys BookIt">
         <div className="evs-logo">
           <span className="v2-ep">EP</span>
-          <div><b>EvoSys Sales</b></div>
+          <div><b>EvoSys BookIt</b></div>
         </div>
         <nav className="evs-nav">
           {NAV.map(n => (
@@ -183,14 +183,14 @@ export default function EvoSysSalesShell() {
 
       <header className="evs-mtop">
         <span className="v2-ep">EP</span>
-        <b>EvoSys Sales</b>
+        <b>EvoSys BookIt</b>
         <span className="v2-mtop-me">{(name || '').split(' ')[0]}</span>
         <AiSwitch />
       </header>
 
       <main className="evs-main"><Outlet /></main>
 
-      <nav className="evs-tabbar" aria-label="EvoSys Sales sections">
+      <nav className="evs-tabbar" aria-label="EvoSys BookIt sections">
         {NAV.map(n => (
           <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => 'evs-tab' + (isActive ? ' on' : '')}>
             <Icon name={n.icon} size={20} /><span>{n.short || n.label}</span>

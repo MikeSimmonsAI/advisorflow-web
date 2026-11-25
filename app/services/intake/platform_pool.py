@@ -26,7 +26,7 @@ HARD RULES
   * Rollback removes only this batch's prospects that have NOT been assigned.
 
 EvoSys's own cleaning-company RECRUITMENT leads are a different population and
-belong in EvoSys Sales (`evosys_sales`), never here.
+belong in EvoSys BookIt (`evosys_sales`), never here.
 """
 from __future__ import annotations
 

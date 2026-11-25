@@ -1,4 +1,4 @@
-"""EvoSys Sales: each lead's own booking page (owner request 2026-11-18).
+"""EvoSys BookIt: each lead's own booking page (owner request 2026-11-18).
 
 A cleaning business taps the link in our text and lands on a page on our own
 domain - not the EvoSys website's demo form - showing Mike's open times for
@@ -303,9 +303,9 @@ def _zoom_failed_alert(db: Session, appt) -> None:
         return
     try:
         who = opp.company_name or opp.phone or "A business"
-        SI.notify_owner(s, "EvoSys Sales - ZOOM LINK FAILED: %s's call %s has no Zoom link. Please send them one."
+        SI.notify_owner(s, "EvoSys BookIt - ZOOM LINK FAILED: %s's call %s has no Zoom link. Please send them one."
                         % (who, _ct(appt.starts_at)),
-                        "EvoSys Sales - Zoom link failed for %s" % who,
+                        "EvoSys BookIt - Zoom link failed for %s" % who,
                         "<p>%s's call on %s has no Zoom link (the Zoom room could not be created). "
                         "Please send them a link before the call.</p>" % (who, _ct(appt.starts_at)))
     except Exception:                                                # noqa: BLE001
@@ -406,8 +406,8 @@ def _after_booking(db: Session, opp: Opportunity, when: datetime, appt_id: Optio
         db.commit()
     who = opp.company_name or opp.contact_name or "A prospect"
     verb = "MOVED their call to" if moved else "BOOKED an intro call for"
-    SI.notify_owner(s, "EvoSys Sales - %s: %s (%s) %s %s" % ("MOVED" if moved else "BOOKED", who, opp.phone or "", verb, _ct(when)),
-                    "EvoSys Sales - %s %s" % (who, "moved their call" if moved else "booked an intro call"),
+    SI.notify_owner(s, "EvoSys BookIt - %s: %s (%s) %s %s" % ("MOVED" if moved else "BOOKED", who, opp.phone or "", verb, _ct(when)),
+                    "EvoSys BookIt - %s %s" % (who, "moved their call" if moved else "booked an intro call"),
                     "<p><b>%s</b> (%s) booked an intro call for <b>%s</b> from their booking link.</p>"
                     "<p>It's on your calendar. Their automatic texts have stopped.</p>"
                     % (__import__("html").escape(who), __import__("html").escape(opp.phone or ""), _ct(when)))
@@ -784,8 +784,8 @@ def confirm(db: Session, opp: Opportunity) -> dict:
         db.commit()
         who = opp.company_name or opp.contact_name or "A prospect"
         SI.notify_owner(O.get_settings(db, opp.brand_sales_org_id),
-                        "EvoSys Sales - CONFIRMED: %s confirmed their call for %s" % (who, _ct(a.starts_at)),
-                        "EvoSys Sales - %s confirmed their call" % who,
+                        "EvoSys BookIt - CONFIRMED: %s confirmed their call for %s" % (who, _ct(a.starts_at)),
+                        "EvoSys BookIt - %s confirmed their call" % who,
                         "<p><b>%s</b> confirmed they'll be on their call <b>%s</b>.</p>"
                         % (__import__("html").escape(who), _ct(a.starts_at)))
     return booked_out(db, a)

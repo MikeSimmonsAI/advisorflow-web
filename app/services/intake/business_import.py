@@ -1,5 +1,5 @@
 """Shared core for importing BUSINESSES into a destination other than a tenant
-CRM (#470 Stage B): EvoSys Sales and a customer's Acquisition pipeline.
+CRM (#470 Stage B): EvoSys BookIt and a customer's Acquisition pipeline.
 
     UPLOAD -> MAP -> NORMALIZE/VALIDATE -> GEOGRAPHY -> DUPLICATES -> REVIEW -> COMMIT -> (ROLLBACK)
 
@@ -97,7 +97,7 @@ class Adapter:
     related(db, batch, n) -> [notes]                    the same business in ANOTHER area, for information
     undo(db, batch, record_id) -> True if removed, False if kept (worked on since import)
 
-    A business can legitimately be an EvoSys Sales prospect and, separately, a
+    A business can legitimately be an EvoSys BookIt prospect and, separately, a
     prospect in a cleaning customer's pipeline - for different reasons. So a
     record elsewhere never blocks a row, is never copied or moved, and is only
     shown to the platform owner (who may see every area); a sales manager or an

@@ -1,11 +1,11 @@
-"""Destination: EvoSys Sales (#470 Stage B).
+"""Destination: EvoSys BookIt (#470 Stage B).
 
 Businesses EvoSys sells ITS OWN software to - for example cleaning companies
 for the $250 Growth Pilot - land as `Opportunity` rows in one brand sales
 organization, stage Prospect, owned by the person importing.
 
   * Who: God, or a sales MANAGER of that brand sales org. Checked on every call.
-  * Purpose, not industry: an EvoSys Sales prospect is a company EvoSys sells
+  * Purpose, not industry: an EvoSys BookIt prospect is a company EvoSys sells
     its own software to. The same business may separately be in a cleaning
     customer's pipeline (as someone who might buy cleaning); that never blocks
     the row and nothing is copied or moved - the platform owner just sees a note.
@@ -267,7 +267,7 @@ def write(db: Session, b, user, n: Dict[str, Any], row) -> str:
 
 
 def _evosys_group(db: Session, org, opp: Opportunity, n: Dict[str, Any]) -> None:
-    """EvoSys Sales: give the new lead its industry + market group (by rule)
+    """EvoSys BookIt: give the new lead its industry + market group (by rule)
     and flag a possible duplicate for a person to resolve. Never blocks the row."""
     try:
         from app.services.evosys_sales import grouping as G, outreach as O
@@ -278,7 +278,7 @@ def _evosys_group(db: Session, org, opp: Opportunity, n: Dict[str, Any]) -> None
                  extra_text=" ".join(x for x in (n.get("industry"), n.get("notes")) if x), duplicate_of=dup)
     except Exception:  # noqa: BLE001 - grouping can be redone from the Leads screen
         import logging
-        logging.getLogger(__name__).exception("EvoSys Sales grouping failed for %s", opp.id)
+        logging.getLogger(__name__).exception("EvoSys BookIt grouping failed for %s", opp.id)
 
 
 def attach_to_matched(db: Session, b, user) -> Dict[str, Any]:
@@ -338,7 +338,7 @@ PROFILES: Dict[str, Dict[str, Any]] = {
     "cleaning_services": {"label": "Cleaning company (Growth Pilot prospect)", "industry": "Cleaning Services"},
 }
 
-ADAPTER = BI.Adapter(pipeline=PIPELINE, destination=DESTINATION, label="EvoSys Sales",
+ADAPTER = BI.Adapter(pipeline=PIPELINE, destination=DESTINATION, label="EvoSys BookIt",
                      find_existing=find_existing, write=write, related=related, undo=undo)
 
 

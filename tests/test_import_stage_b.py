@@ -360,7 +360,7 @@ def test_acquisition_import_goes_to_one_customer_only_and_sends_nothing(pilot):
     assert a["ready"] == 2 and a["held_for_review"] == 1 and a["excluded"] == 1 and a["invalid"] == 0
     rows = {r["business"]["source_record_id"]: r for r in p["c"].get(base + "/rows", headers=_h(db, p["god"])).json()["items"]}
     # Also an EvoSys Sales prospect: a note for the owner, not a refusal.
-    assert rows["ACQ-4"]["outcome"] == "ready" and "EvoSys Sales" in rows["ACQ-4"]["related"][0]
+    assert rows["ACQ-4"]["outcome"] == "ready" and "EvoSys BookIt" in rows["ACQ-4"]["related"][0]
     rep = p["c"].post(base + "/commit", json={"confirm_target_id": p["shine"].id}, headers=_h(db, p["god"])).json()
     assert rep["created"] == 2 and rep["messages_sent"] == 0
     assert db.query(Opportunity).filter(Opportunity.phone == "813-555-0299").count() == 1     # Sales record untouched

@@ -64,7 +64,7 @@ class AcquisitionProfile(Base):
     # free_pilot (Divine Shine) | growth_pilot_250 - a business decision, set by the owner only.
     offer_type = Column(String(30), nullable=True)
     offer_terms = Column(Text, nullable=True)            # what was agreed, in words; no billing is created
-    # The EvoSys Sales opportunity this client was converted from (rapid onboarding).
+    # The EvoSys BookIt opportunity this client was converted from (rapid onboarding).
     sales_opportunity_id = Column(String, nullable=True, index=True)
     # Client-filled setup (2026-11-18): which setup steps the client has saved,
     # when they finished, and when / who agreed to the offer EvoSys set.

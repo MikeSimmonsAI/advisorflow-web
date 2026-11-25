@@ -84,7 +84,7 @@ def _refuse_guided(b) -> None:
     them from here would bypass all of that. Reading them is harmless.
 
     Any batch with a pipeline is someone else's: the guided importer
-    ("universal"), the master pool ("platform_pool"), EvoSys Sales
+    ("universal"), the master pool ("platform_pool"), EvoSys BookIt
     ("evosys_sales") and customer Acquisition ("acquisition_import"). Only
     the old importer creates batches with no pipeline."""
     if getattr(b, "pipeline", None) or getattr(b, "source_system", None) == "program":
