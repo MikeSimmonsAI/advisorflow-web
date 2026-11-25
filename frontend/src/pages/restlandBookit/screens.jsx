@@ -64,17 +64,33 @@ function openParam() { try { return new URLSearchParams(window.location.search).
 
 // ── My Day ──────────────────────────────────────────────────────────────────
 
-const ACT_ICON = { appointment: 'calendar', missing_outcome: 'clip', sale_amounts: 'dollar', follow_up: 'repeat',
-  pending_sale: 'hourglass', evo6: 'network', add_lead: 'heart', service: 'wrench' }
 
+function greeting() {
+  const h = Number(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hour12: false }))
+  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
+}
+
+// My Day — laid out like the owner's mockup: greeting, six numbers, the
+// follow-up alert, today's appointments, the follow-up queue, then the show
+// rate. Every number is real (/my-day, /work, /performance).
 export function MyDay() {
   const { me, go } = useBk()
   const [person, setPerson] = useState('')
-  const [d] = useData(R + '/my-day' + (person ? '?person=' + encodeURIComponent(person) : ''), [person])
+  const pq = person ? 'person=' + encodeURIComponent(person) : ''
+  const [d] = useData(R + '/my-day' + (pq ? '?' + pq : ''), [person])
+  const [w] = useData(R + '/work')
+  const [perf] = useData(R + '/performance?range=this_month' + (pq ? '&' + pq : ''), [person])
   const [panel, setPanel] = useState(null)
-  if (!d) return <div className="bk-card"><Skeleton rows={6} /></div>
-  const first = (d.name || '').split(' ')[0]
-  const h = d.hero, k = d.kpis
+  if (!d || !w) return <div className="bk-card"><Skeleton rows={6} /></div>
+  const t = today()
+  const k = d.kpis, m = perf?.metrics || {}
+  const mine = x => !person || x.assigned === person
+  const first = person ? person.split(' ')[0] : (me.me.name || '').split(' ')[0]
+  const appts = w.appointments.filter(a => mine(a) && a.date === t && !String(a.status).startsWith('Cancel'))
+    .sort((x, y) => String(x.time).localeCompare(String(y.time)))
+  const queue = w.follow_ups.filter(f => mine(f) && f.open && (f.due_now || (f.follow_up_on && f.follow_up_on <= t)))
+    .sort((x, y) => String(x.follow_up_on || '0').localeCompare(String(y.follow_up_on || '0')))
+  const due = k.follow_ups_due
   const pick = a => {
     if (a.ref_type === 'appointment') setPanel({ type: 'appt', id: a.ref_id, close: a.kind === 'missing_outcome' })
     else if (a.ref_type === 'follow_up') setPanel({ type: 'fu', id: a.ref_id })
@@ -83,47 +99,63 @@ export function MyDay() {
     else if (a.ref_type === 'service_request') go('service?open=' + a.ref_id)
     else if (a.ref_type === 'sale') go('sales?open=' + a.ref_id)
   }
+  const fuPill = f => {
+    if (f.follow_up_on && f.follow_up_on < t) return <span className="bk-pill warn">Overdue</span>
+    if (f.follow_up_on === t || f.due_now) return <span className="bk-pill">Due today</span>
+    return <span className="bk-pill">Upcoming</span>
+  }
+  const other = d.actions.filter(a => !['appointment', 'follow_up'].includes(a.kind))
   return (
-    <div className="bk-grid">
+    <div>
+      <div className="bk-title"><h1>{greeting()}{first && first !== 'Team' ? ', ' + first : ''}</h1>
+        <p><small>{fmtDate(d.date, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}{me.me.manager && !person ? ' · the whole team' : ''}</small></p></div>
       {me.me.manager && <div className="bk-bar"><span className="faint">Viewing</span>
         <select value={person} onChange={e => setPerson(e.target.value)} aria-label="Whose day">
           <option value="">The whole team</option>{(me.team || []).map(n => <option key={n}>{n}</option>)}</select></div>}
-      <section className="bk-hero">
-        <div className="faint">{fmtDate(d.date, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</div>
-        <h2>Your day{first && first !== 'Team' ? ', ' + first : ''}.</h2>
-        <p>Here's where your attention matters most.</p>
-        <div className="chips">
-          <span className={'bk-chip btn' + (h.priority_cases ? ' err' : '')} onClick={() => go('add-leads')}><b>{h.priority_cases}</b> priority family cases</span>
-          <span className={'bk-chip btn' + (h.overdue_follow_ups ? ' warn' : '')} onClick={() => go('follow-ups')}><b>{h.overdue_follow_ups}</b> overdue follow-ups</span>
-          <span className="bk-chip btn" onClick={() => go('appointments')}><b>{h.upcoming_appointments}</b> upcoming appointments</span>
-          <span className={'bk-chip btn' + (h.missing_outcomes ? ' warn' : '')} onClick={() => go('appointments')}><b>{h.missing_outcomes}</b> outcomes to record</span>
-          <span className="bk-chip btn" onClick={() => go('sales')}><b>{h.pending_sales}</b> pending sales decisions</span>
-          <span className="bk-chip"><b>{h.pta_incomplete}</b> Permission to Access incomplete</span>
-          <span className="bk-chip btn" onClick={() => go('evo6')}><b>{h.evo6_incomplete}</b> Evo 6 Blocks to finish</span>
-        </div>
-      </section>
-      <div className="bk-grid g8">
-        <Kpi l="Appointments today" v={num(k.appointments_today)} icon="calendar" onClick={() => go('appointments')} />
-        <Kpi l="Upcoming appointments" v={num(k.upcoming_appointments)} icon="calendar" onClick={() => go('appointments')} />
-        <Kpi l="Follow-ups due" v={num(k.follow_ups_due)} icon="repeat" onClick={() => go('follow-ups')} />
-        <Kpi l="Overdue follow-ups" v={num(k.follow_ups_overdue)} icon="repeat" tone={k.follow_ups_overdue ? '#B7791F' : null} onClick={() => go('follow-ups')} />
-        <Kpi l="Evo 6 Block contacts" v={num(k.evo6_contacts)} icon="network" onClick={() => go('evo6')} />
-        <Kpi l="ADD Leads needing attention" v={num(k.add_leads_open)} icon="heart" onClick={() => go('add-leads')} />
-        <Kpi l="Pending outcomes" v={num(k.pending_outcomes)} icon="clip" onClick={() => go('appointments')} />
-        <Kpi l="Closed sales this month" v={usd(k.closed_value_cents_this_month)} icon="dollar" onClick={() => go('sales')} />
+      <div className="bk-metrics">
+        <Kpi l="Appointments today" v={num(k.appointments_today)} onClick={() => go('appointments')} />
+        <Kpi l="Upcoming" v={num(k.upcoming_appointments)} onClick={() => go('appointments')} />
+        <Kpi l="Follow-ups due" v={num(due)} onClick={() => go('follow-ups')} />
+        <Kpi l="Completed visits" v={perf ? num(m.attended) : '…'} s="This month" onClick={() => go('performance')} />
+        <Kpi l="Families referred" v={perf ? num(m.contacts_collected) : '…'} s="This month" onClick={() => go('evo6')} />
+        <Kpi l="Sales recorded" v={perf ? num(m.closed_contracts) : '…'} s="This month" onClick={() => go('sales')} />
       </div>
-      <div className="bk-card">
-        <h2><Icon name="spark" width="18" />Action stream<small>{d.actions.length} things, most urgent first</small></h2>
-        {d.actions.length === 0 ? <Empty>You're all caught up.</Empty> : (
-          <div className="bk-list">{d.actions.map((a, i) => (
-            <div key={i} className="bk-row" onClick={() => pick(a)} role="button" tabIndex="0" onKeyDown={e => e.key === 'Enter' && pick(a)}>
-              <div className={'ic' + (['add_lead', 'service'].includes(a.kind) ? ' err' : ['missing_outcome', 'sale_amounts'].includes(a.kind) || a.status === 'Overdue' ? ' warn' : '')}>
-                <Icon name={ACT_ICON[a.kind] || 'spark'} /></div>
-              <div style={{ minWidth: 0 }}><div className="t">{a.name}</div><div className="d">{a.reason} · {a.next}</div></div>
-              <div className="r"><span className={'badge' + (a.status === 'Overdue' ? ' warn' : '')}>{a.status}</span>
-                <span className="faint">{a.due && a.due !== 'now' ? fmtDate(a.due) : a.due === 'now' ? 'Due now' : ''}</span></div>
-            </div>))}</div>)}
+      {due > 0 && <div className="bk-alert" style={{ margin: '15px 0' }}><b>{num(due)}</b> {due === 1 ? 'family requires' : 'families require'} follow-up{k.follow_ups_overdue ? ' (' + num(k.follow_ups_overdue) + ' overdue)' : ''} · Work oldest due first.</div>}
+      <div className="bk-card" style={{ marginTop: due > 0 ? 0 : 15 }}>
+        <h2>Today’s appointments</h2>
+        {appts.length === 0 ? <Empty>No appointments today.</Empty> : appts.map(a => (
+          <div key={a.id} className="bk-line click" onClick={() => setPanel({ type: 'appt', id: a.id })} role="button" tabIndex="0"
+               onKeyDown={e => e.key === 'Enter' && setPanel({ type: 'appt', id: a.id })}>
+            <div><b>{fmtTime(a.time)} · {a.family}</b><br /><small>45 min · {a.how}{me.me.manager && a.assigned ? ' · ' + a.assigned : ''}</small></div>
+            <span className={'bk-pill' + (String(a.outcome || a.status).startsWith('No-Show') ? ' err' : '')}>{a.outcome || a.status}</span>
+          </div>))}
       </div>
+      <div className="bk-card" style={{ marginTop: 15 }}>
+        <h2>{me.me.manager && !person ? 'Follow-up queue' : 'My follow-up queue'}<small><button className="bk-btn ghost" onClick={() => go('follow-ups')}>See all</button></small></h2>
+        {queue.length === 0 ? <Empty>No follow-ups due.</Empty> : queue.slice(0, 12).map(f => (
+          <div key={f.id} className="bk-line click" onClick={() => setPanel({ type: 'fu', id: f.id })} role="button" tabIndex="0"
+               onKeyDown={e => e.key === 'Enter' && setPanel({ type: 'fu', id: f.id })}>
+            <div style={{ minWidth: 0 }}><b>{f.family}</b><br /><small>{(f.why || 'Follow-up').split('\n')[0]}{f.follow_up_on ? ' · ' + fmtDate(f.follow_up_on, { month: 'short', day: 'numeric' }) : ''}{me.me.manager && f.assigned ? ' · ' + f.assigned : ''}</small></div>
+            {fuPill(f)}
+          </div>))}
+        {queue.length > 12 && <p className="faint" style={{ margin: '10px 0 0' }}>{queue.length - 12} more in Follow-Ups.</p>}
+      </div>
+      <div className="bk-card" style={{ marginTop: 15 }}>
+        <h2>{me.me.manager && !person ? 'Team performance' : 'My performance'}</h2>
+        {!perf ? <Skeleton rows={2} /> : m.show_rate === null || m.show_rate === undefined
+          ? <p className="faint">No finished appointments yet this month, so there's no show rate to show.</p>
+          : <><h3 style={{ margin: '0 0 4px' }}>{pct(m.show_rate)} show rate</h3>
+            <small className="faint">This month · {num(m.attended)} showed, {num(m.no_shows)} no-show</small>
+            <div className="bk-meter"><i style={{ width: Math.round((m.show_rate || 0) * 100) + '%' }} /></div></>}
+      </div>
+      {other.length > 0 && <div className="bk-card" style={{ marginTop: 15 }}>
+        <h2>Also needs attention<small>{other.length}</small></h2>
+        {other.slice(0, 20).map((a, i) => (
+          <div key={i} className="bk-line click" onClick={() => pick(a)} role="button" tabIndex="0" onKeyDown={e => e.key === 'Enter' && pick(a)}>
+            <div style={{ minWidth: 0 }}><b>{a.name}</b><br /><small>{a.reason} · {a.next}</small></div>
+            <span className={'bk-pill' + (['add_lead', 'service'].includes(a.kind) ? ' err' : ['missing_outcome', 'sale_amounts'].includes(a.kind) ? ' warn' : '')}>{a.status}</span>
+          </div>))}
+      </div>}
       {panel?.type === 'appt' && <AppointmentPanel id={panel.id} startClose={panel.close} onClose={() => setPanel(null)} />}
       {panel?.type === 'fu' && <FollowUpPanel id={panel.id} onClose={() => setPanel(null)} />}
     </div>
@@ -138,10 +170,10 @@ function statusBadge(s) {
   return <span className={'badge ' + cls}>{v || '—'}</span>
 }
 
-export function Appointments() {
+export function Appointments({ initialView = 'list' }) {
   const { me } = useBk()
   const [w] = useData(R + '/work')
-  const [view, setView] = useState('list')
+  const [view, setView] = useState(initialView)
   const [when, setWhen] = useState('upcoming')
   const [status, setStatus] = useState('')
   const [who, setWho] = useState('')

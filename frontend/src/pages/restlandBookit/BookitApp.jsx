@@ -11,16 +11,36 @@ import * as S from './screens'
 export const Bk = createContext(null)
 export const useBk = () => useContext(Bk)
 
+// Order and names follow the owner's mockup (restland-advisor-portal.html, Nov 25):
+// My Day, Appointments, Follow-Ups, My Families, 6 Block, Calendar, Performance,
+// Notifications, My Profile, Management. The directive's extra screens follow.
 const ADVISOR_NAV = [
-  ['', 'My Day', 'day'], ['appointments', 'Appointments', 'calendar'], ['follow-ups', 'Follow-Ups', 'repeat'],
-  ['evo6', 'Evo 6 Block', 'network'], ['add-leads', 'ADD Leads', 'heart'], ['families', 'My Families', 'family'],
-  ['service', 'Service Requests', 'wrench'], ['sales', 'Sales & Revenue', 'dollar'], ['performance', 'Performance', 'chart'],
-  ['notifications', 'Notifications', 'bell'],
+  ['', 'My Day'], ['appointments', 'Appointments'], ['follow-ups', 'Follow-Ups'], ['families', 'My Families'],
+  ['evo6', 'Evo 6 Block'], ['calendar', 'Calendar'], ['performance', 'Performance'], ['notifications', 'Notifications'],
+  ['profile', 'My Profile'],
 ]
-const MANAGER_NAV = [
-  ['command', 'Command Center', 'shield'], ['team', 'Advisor Management', 'users'], ['audit', 'Activity Audit', 'audit'],
-  ['settings', 'Settings', 'gear'],
-]
+const EXTRA_NAV = [['add-leads', 'ADD Leads'], ['service', 'Service Requests'], ['sales', 'Sales & Revenue']]
+// Management is one menu item; its four screens are tabs inside it.
+const MANAGEMENT = [['command', 'Command Center'], ['team', 'Advisor Management'], ['audit', 'Activity Audit'], ['settings', 'Settings']]
+const MANAGEMENT_KEYS = MANAGEMENT.map(([p]) => p)
+// Page headings: [advisor title, manager title, line under it]
+const HEADINGS = {
+  appointments: ['My Appointments', 'Appointments', 'Assigned records only', 'Every advisor'],
+  'follow-ups': ['My Follow-Ups', 'Follow-Ups', 'Assigned records only', 'Every advisor'],
+  families: ['My Families', 'Families', 'Assigned families only', 'Every advisor'],
+  evo6: ['My Evo 6 Block', 'Evo 6 Block', 'Referral intake', 'Referral intake · every advisor'],
+  calendar: ['My Calendar', 'Calendar', 'Central time', 'Central time · every advisor'],
+  performance: ['My Performance', 'Performance', 'Personal metrics only', 'Team and advisor metrics'],
+  notifications: ['Notifications', 'Notifications', 'Reminders and alerts', 'Reminders and alerts'],
+  profile: ['My Profile', 'My Profile', 'Individual account', 'Individual account'],
+  'add-leads': ['ADD Leads', 'ADD Leads', 'At-death families', 'At-death families · every advisor'],
+  service: ['Service Requests', 'Service Requests', 'Assigned requests only', 'Every advisor'],
+  sales: ['Sales & Revenue', 'Sales & Revenue', 'Your recorded sales', 'Every advisor'],
+  command: ['Restland Command Center', 'Restland Command Center', 'Authorized managers only', 'Authorized managers only'],
+  team: ['Restland Command Center', 'Restland Command Center', 'Authorized managers only', 'Authorized managers only'],
+  audit: ['Restland Command Center', 'Restland Command Center', 'Authorized managers only', 'Authorized managers only'],
+  settings: ['Restland Command Center', 'Restland Command Center', 'Authorized managers only', 'Authorized managers only'],
+}
 const BOTTOM = [['', 'My Day', 'day'], ['appointments', 'Appointments', 'calendar'], ['follow-ups', 'Follow-Ups', 'repeat'],
   ['evo6', 'Evo 6 Block', 'network']]
 const BASE = '/program/restland-bookit'
@@ -31,7 +51,6 @@ export default function BookitApp() {
   const loc = useLocation()
   const [me, setMe] = useState(null)
   const [err, setErr] = useState(null)
-  const [open, setOpen] = useState(() => { try { return localStorage.getItem('bk_rail') !== '0' } catch { return true } })
   const [toast, setToast] = useState(null)
   const [more, setMore] = useState(false)
   const [copilot, setCopilot] = useState(false)
@@ -63,17 +82,17 @@ export default function BookitApp() {
   }, [])
   const refresh = useCallback(() => setTick(x => x + 1), [])
   const go = useCallback((p) => { setMore(false); nav(BASE + (p ? '/' + p : '')) }, [nav])
-  const toggle = () => setOpen(o => { try { localStorage.setItem('bk_rail', o ? '0' : '1') } catch { /* ignore */ } return !o })
 
   const sub = loc.pathname.slice(BASE.length).replace(/^\//, '').split('/')[0]
-  const all = me?.me?.manager ? [...ADVISOR_NAV, ...MANAGER_NAV] : ADVISOR_NAV
-  const title = (all.find(([p]) => p === sub) || ADVISOR_NAV[0])[1]
+  const manager = !!me?.me?.manager
+  const head = HEADINGS[sub]
+  const inManagement = MANAGEMENT_KEYS.includes(sub)
   const ctx = useMemo(() => ({ me, say, refresh, tick, go, base: BASE }), [me, say, refresh, tick, go])
 
   if (err) {
     return (
       <div className="bk" style={{ display: 'block' }}><div className="bk-page" style={{ maxWidth: 560, margin: '10vh auto' }}>
-        <div className="bk-card"><h2><span className="bk-mark">B</span> Restland BookIT</h2>
+        <div className="bk-card"><h2>Restland BookIT</h2>
           <p className="muted">{err}</p><button className="bk-btn" onClick={() => nav('/workspaces')}>Back to Program Access</button>
         </div></div></div>
     )
@@ -81,42 +100,40 @@ export default function BookitApp() {
   return (
     <Bk.Provider value={ctx}>
       <div className="bk">
-        <aside className={'bk-rail' + (open ? ' open' : '')} aria-label="BookIT navigation">
-          <div className="bk-brand">
-            <button className="bk-mark" style={{ border: 0 }} onClick={toggle} aria-label={open ? 'Collapse navigation' : 'Expand navigation'}>B</button>
-            {open && <div className="bk-word"><b>Restland</b> <i>BookIT</i><small>Book It. Close It. Track It.</small></div>}
-          </div>
-          {ADVISOR_NAV.map(([p, l, ic]) => (
-            <button key={p} className={'bk-nav' + (sub === p ? ' on' : '')} data-tip={l} onClick={() => go(p)} aria-current={sub === p ? 'page' : undefined}>
-              <Icon name={ic} />{open && <span>{l}</span>}{open && p === 'notifications' && unread > 0 && <span className="badge err">{unread}</span>}
+        <header className="bk-top">
+          <div className="bk-top-brand"><b>RESTLAND</b><small>FAMILY SERVICE ADVISOR PORTAL</small></div>
+          <S.Search />
+          <span className={'bk-status hide-m' + (fresh.ok ? '' : ' stale')} title="When BookIT last checked for updates">
+            <i />{fresh.ok ? (fresh.at ? 'Updated ' + fresh.at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : 'Loading') : 'Reconnecting…'}
+          </span>
+          <button className="bk-iconbtn" onClick={() => go('notifications')} aria-label="Notifications"><Icon name="bell" />{unread > 0 && <span className="dot" />}</button>
+          <div className="bk-top-who" title={me?.me?.name || ''}>{me?.me?.name || ''}</div>
+        </header>
+        <aside className="bk-rail" aria-label="BookIT navigation">
+          {ADVISOR_NAV.map(([p, l]) => (
+            <button key={p} className={'bk-nav' + (sub === p ? ' on' : '')} onClick={() => go(p)} aria-current={sub === p ? 'page' : undefined}>
+              <span>{l}</span>{p === 'notifications' && unread > 0 && <span className="badge err">{unread}</span>}
             </button>
           ))}
-          {me?.me?.manager && <div className="sep" />}
-          {me?.me?.manager && MANAGER_NAV.map(([p, l, ic]) => (
-            <button key={p} className={'bk-nav' + (sub === p ? ' on' : '')} data-tip={l} onClick={() => go(p)}><Icon name={ic} />{open && <span>{l}</span>}</button>
+          {manager && <button className={'bk-nav' + (inManagement ? ' on' : '')} onClick={() => go('command')} aria-current={inManagement ? 'page' : undefined}><span>Management</span></button>}
+          <div className="sep" />
+          {EXTRA_NAV.map(([p, l]) => (
+            <button key={p} className={'bk-nav' + (sub === p ? ' on' : '')} onClick={() => go(p)} aria-current={sub === p ? 'page' : undefined}><span>{l}</span></button>
           ))}
           <div className="grow" />
-          <button className="bk-nav" data-tip="Program Access" onClick={() => nav('/workspaces')}><Icon name="out" />{open && <span>Program Access</span>}</button>
-          {open && <div className="faint" style={{ padding: '6px 10px' }}>Powered by EvoSys Pro</div>}
+          <button className="bk-nav" onClick={() => nav('/workspaces')}><span>Program Access</span></button>
+          <div className="bk-powered">Restland BookIT · Powered by EvoSys Pro</div>
         </aside>
         <main className="bk-main">
-          <header className="bk-head">
-            <div>
-              <div className="crumb">Restland BookIT</div>
-              <h1>{title}</h1>
-            </div>
-            <S.Search />
-            <span className={'bk-status hide-m' + (fresh.ok ? '' : ' stale')} title="When BookIT last checked for updates">
-              <i />{fresh.ok ? (fresh.at ? 'Updated ' + fresh.at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : 'Loading') : 'Reconnecting…'}
-            </span>
-            <button className="bk-iconbtn" onClick={() => go('notifications')} aria-label="Notifications"><Icon name="bell" />{unread > 0 && <span className="dot" />}</button>
-            <div className="bk-avatar" title={me?.me?.name || ''}>{(me?.me?.name || '?').split(' ').map(x => x[0]).slice(0, 2).join('')}</div>
-          </header>
           <div className="bk-page">
+            {me && head && <div className="bk-title"><h1>{manager ? head[1] : head[0]}</h1><p><small>{manager ? head[3] : head[2]}</small></p></div>}
+            {me && manager && inManagement && <div className="bk-subtabs" role="tablist">{MANAGEMENT.map(([p, l]) =>
+              <button key={p} role="tab" aria-selected={sub === p} className={sub === p ? 'on' : ''} onClick={() => go(p)}>{l}</button>)}</div>}
             {!me ? <div className="bk-card"><div className="bk-skel" /><div className="bk-skel" style={{ width: '70%' }} /></div> : (
               <Routes>
                 <Route index element={<S.MyDay />} />
                 <Route path="appointments" element={<S.Appointments />} />
+                <Route path="calendar" element={<S.Appointments initialView="cal" />} />
                 <Route path="follow-ups" element={<S.FollowUps />} />
                 <Route path="evo6" element={<S.Evo6 kind="evo6" />} />
                 <Route path="add-leads" element={<S.AddLeads />} />
@@ -142,10 +159,10 @@ export default function BookitApp() {
         {more && <>
           <div className="bk-scrim" onClick={() => setMore(false)} />
           <div className="bk-more" role="dialog" aria-label="More">
-            {[['add-leads', 'ADD Leads', 'heart'], ['families', 'My Families', 'family'], ['service', 'Service Requests', 'wrench'],
-              ['sales', 'Sales & Revenue', 'dollar'], ['performance', 'Performance', 'chart'], ['notifications', 'Notifications', 'bell'],
-              ...(me?.me?.manager ? [['command', 'Command Center', 'shield'], ['team', 'Advisor Management', 'users']] : []),
-              ['profile', 'My Profile', 'user']].map(([p, l, ic]) =>
+            {[['families', 'My Families', 'family'], ['calendar', 'Calendar', 'calendar'], ['performance', 'Performance', 'chart'],
+              ['notifications', 'Notifications', 'bell'], ['profile', 'My Profile', 'user'],
+              ...(me?.me?.manager ? [['command', 'Management', 'shield']] : []),
+              ['add-leads', 'ADD Leads', 'heart'], ['service', 'Service Requests', 'wrench'], ['sales', 'Sales & Revenue', 'dollar']].map(([p, l, ic]) =>
               <button key={p} onClick={() => go(p)}><Icon name={ic} />{l}</button>)}
             <button onClick={() => { setMore(false); setCopilot(true) }}><Icon name="spark" />Copilot</button>
             <button onClick={() => nav('/workspaces')}><Icon name="out" />Program Access</button>
