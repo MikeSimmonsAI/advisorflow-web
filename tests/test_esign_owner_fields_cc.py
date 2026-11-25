@@ -34,7 +34,8 @@ def mail(monkeypatch):
 
     def fake(to_email, subject, body_html, attachments=None, org=None, message_type=None, **kw):
         sent.append({"to": to_email, "subject": subject, "html": body_html, "attachments": attachments or [],
-                     "type": message_type})
+                     "type": message_type, "from": getattr(org, "from_email", None),
+                     "from_name": getattr(org, "from_name", None)})
         return {"success": True, "provider_message_id": "m%d" % len(sent), "error": None}
 
     monkeypatch.setattr(email_service, "send_email_via_provider", fake)
@@ -135,3 +136,16 @@ def test_full_flow_fills_blanks_orders_signers_and_copies_cc(client, god, sample
     assert st["status"] == "completed"
     pdf = client.get("/esign/owner/envelopes/%s/signed.pdf" % env.id, headers=god)
     assert pdf.status_code == 200 and pdf.content[:4] == b"%PDF"
+
+
+def test_evosys_org_sends_from_support_address_with_app_links(client, god, sample_org, mail, monkeypatch):
+    # A deployment-wide default sender and raw hosting address must never be used.
+    monkeypatch.setenv("FRONTEND_URL", "https://advisorflow-frontend.onrender.com")
+    monkeypatch.delenv("WHOLESALE_ESIGN_PUBLIC_URL", raising=False)
+    assert not getattr(sample_org, "from_email", None)
+    ok(client.post("/esign/owner/orgs/%s/envelopes" % sample_org.id, headers=god, json=body()))
+    m = mail[0]
+    assert m["from"] == "support@evosyspro.live"
+    assert m["from_name"].endswith("via EvoSys")
+    assert "https://app.evosyspro.live/sign/" in m["html"]
+    assert "onrender.com" not in m["html"]

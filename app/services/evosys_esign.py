@@ -100,6 +100,35 @@ def fill_document(document_html: str, signers: List[EsignSigner]) -> str:
     return _BLANK_RE.sub(sub, document_html or "")
 
 
+EVOSYS_APP_URL = "https://app.evosyspro.live"
+EVOSYS_SENDER = "support@evosyspro.live"
+
+
+class _SendAs:
+    """The organization, but sending from a given address. Every other
+    attribute is the organization's own."""
+
+    def __init__(self, org, from_email: str, from_name: Optional[str]):
+        self._org, self.from_email, self.from_name = org, from_email, from_name
+
+    def __getattr__(self, name):
+        return getattr(self._org, name)
+
+
+def _sender_org(db: Session, org):
+    """An organization with its own From address sends as itself. An EvoSys
+    organization without one (VOLT Marketing, for example) sends from the
+    EvoSys support address, named "<Org> via EvoSys" - never from whatever
+    global default the deployment happens to carry."""
+    if org is None or getattr(org, "from_email", None):
+        return org
+    from app.services.brand_config import _org_platform_slug
+    slug = _org_platform_slug(db, org)
+    if slug in (None, "", "evosyspro"):
+        return _SendAs(org, EVOSYS_SENDER, "%s via EvoSys" % (getattr(org, "name", None) or "EvoSys"))
+    return org
+
+
 def public_base(db=None, org_id: Optional[str] = None) -> str:
     """Where a signer's link points. The sending organization's own brand
     address first (a BookaBoost workspace -> its BookaBoost app, so the signing
@@ -110,8 +139,9 @@ def public_base(db=None, org_id: Optional[str] = None) -> str:
         own = org_app_base_url(db, org_id)
         if own:
             return own
-    return (os.environ.get("WHOLESALE_ESIGN_PUBLIC_URL") or os.environ.get("FRONTEND_URL")
-            or "https://app.evosyspro.live").rstrip("/")
+    # EvoSys organizations (and anything unresolvable) sign on the EvoSys app
+    # address - never the raw hosting address FRONTEND_URL points at.
+    return (os.environ.get("WHOLESALE_ESIGN_PUBLIC_URL") or EVOSYS_APP_URL).rstrip("/")
 
 
 def sign_url(token: str, db=None, org_id: Optional[str] = None) -> str:
@@ -141,7 +171,7 @@ def _send(db: Session, env: EsignEnvelope, to: str, subject: str, html: str, *,
     try:
         r = email_service.send_email_via_provider(
             to_email=to, subject=subject, body_html=html, attachments=attachments,
-            org=_org(db, env.organization_id), message_type="esign_%s" % kind)
+            org=_sender_org(db, _org(db, env.organization_id)), message_type="esign_%s" % kind)
         ok = bool(r and r.get("success"))
         if not ok:
             log.warning("esign email (%s) to %s not accepted: %s", kind, to, (r or {}).get("error"))
