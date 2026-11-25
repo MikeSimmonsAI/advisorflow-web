@@ -104,6 +104,7 @@ export default function SignDocument() {
   const [done, setDone] = useState(null)
   const [declining, setDeclining] = useState(false)
   const [reason, setReason] = useState('')
+  const [vals, setVals] = useState({})
 
   const load = useCallback(async () => {
     try {
@@ -124,7 +125,7 @@ export default function SignDocument() {
   const verify = () => step(async () => { await call(token + '/verify', 'POST', { code }); await load() })
   const signIt = () => step(async () => {
     const r = await call(token + '/sign', 'POST', { consent, typed_name: name,
-      drawn_png: mode === 'draw' ? drawn : null })
+      drawn_png: mode === 'draw' ? drawn : null, fields: vals })
     setDone(r); await load()
   })
   const decline = () => step(async () => { await call(token + '/decline', 'POST', { reason }); await load() })
@@ -142,7 +143,9 @@ export default function SignDocument() {
 
   const verified = d.signer && d.signer.verified
   const canSign = d.can_sign
-  const ready = consent && name.trim().length >= 2 && (mode === 'type' || drawn)
+  const blanks = (d.fields || [])
+  const blanksDone = blanks.every((f) => String(vals[f.key] || '').trim().length >= 2)
+  const ready = consent && name.trim().length >= 2 && (mode === 'type' || drawn) && blanksDone
 
   return (
     <div style={page}><div style={wrap}>
@@ -208,6 +211,18 @@ export default function SignDocument() {
         ) : (
           <div style={box}>
             <b>Step 2 · Sign as {d.signer.role}</b>
+            {blanks.length ? (
+              <div data-esign-blanks style={{ marginTop: 10, padding: 12, background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8 }}>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>Fill in the blank{blanks.length > 1 ? 's' : ''} in the document</div>
+                {blanks.map((f) => (
+                  <label key={f.key} style={{ display: 'block', marginTop: 8, fontSize: 14, color: C.mute }}>{f.label}
+                    <input style={input} value={vals[f.key] || ''} maxLength={200} data-esign-field={f.key}
+                           onChange={(e) => setVals((v) => ({ ...v, [f.key]: e.target.value }))} />
+                  </label>
+                ))}
+                <div style={{ fontSize: 12, color: C.mute, marginTop: 6 }}>What you enter becomes part of the signed document.</div>
+              </div>
+            ) : null}
             <label style={{ display: 'block', marginTop: 10, fontSize: 14, color: C.mute }}>Your full legal name
               <input style={input} value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
             </label>

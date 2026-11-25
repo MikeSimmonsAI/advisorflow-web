@@ -80,7 +80,12 @@ class _Blocks(HTMLParser):
         elif tag == "b" and self.cur is not None:
             self.cur.append("<b>")
         elif tag == "span":
-            blank = self.cur is not None and "blank" in (a.get("class") or "")
+            cls = (a.get("class") or "").split()
+            if self.cur is not None and "filled" in cls:
+                self.spans.append("filled")
+                self.cur.append("<u>")
+                return
+            blank = self.cur is not None and "blank" in cls
             self.spans.append(blank)
             if blank:
                 self.cur.append("<font color='#92400e'>[")
@@ -98,7 +103,10 @@ class _Blocks(HTMLParser):
         elif tag == "b" and self.cur is not None:
             self.cur.append("</b>")
         elif tag == "span":
-            if self.spans and self.spans.pop() and self.cur is not None:
+            kind = self.spans.pop() if self.spans else False
+            if kind == "filled" and self.cur is not None:
+                self.cur.append("</u>")
+            elif kind and self.cur is not None:
                 self.cur.append("]</font>")
 
     def handle_data(self, data):
@@ -136,7 +144,7 @@ def _signature_block(s: Dict[str, Any]):
         "<b>%s</b>: %s" % (_h.escape(s["role"]), _h.escape(s.get("name") or s.get("signature_text") or "")),
         "Signed electronically %s" % _h.escape(fmt_time(s.get("signed_at"))),
         "Email verified (%s) &middot; IP %s" % (_h.escape(_mask(s.get("email") or "")), _h.escape(s.get("sign_ip") or "")),
-    ]
+    ] + ["%s: %s" % (_h.escape(k), _h.escape(v)) for k, v in (s.get("filled_in") or [])]
     t = Table([[_signature_cell(s)], [Paragraph("<br/>".join(lines), ST["small"])]], colWidths=[3.3 * inch])
     t.setStyle(TableStyle([("LINEBELOW", (0, 0), (0, 0), 0.8, colors.HexColor("#555555")),
                            ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),

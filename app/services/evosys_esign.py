@@ -69,6 +69,37 @@ def _sha(s) -> str:
     return hashlib.sha256(s).hexdigest()
 
 
+FIELD_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+FIELD_MAX = 200
+_BLANK_RE = re.compile(r'<span class="blank" data-field="([a-z][a-z0-9_]{0,39})">.*?</span>', re.S)
+
+
+def _fields(s: EsignSigner) -> Dict[str, Any]:
+    try:
+        f = json.loads(s.fields_json or "{}")
+    except ValueError:
+        f = {}
+    return {"requested": list(f.get("requested") or []), "values": dict(f.get("values") or {})}
+
+
+def cc_list(env: EsignEnvelope) -> List[str]:
+    return [e for e in (env.cc_emails or "").split(",") if e]
+
+
+def fill_document(document_html: str, signers: List[EsignSigner]) -> str:
+    """The document as it reads now: each blank a signer has filled shows their
+    text (escaped); unfilled blanks stay blank. The sent document and its
+    SHA-256 never change - this is a view of it plus what signers entered."""
+    values: Dict[str, str] = {}
+    for x in signers:
+        values.update(_fields(x)["values"])
+
+    def sub(m):
+        v = values.get(m.group(1))
+        return ('<span class="filled">%s</span>' % _esc(v)) if v else m.group(0)
+    return _BLANK_RE.sub(sub, document_html or "")
+
+
 def public_base(db=None, org_id: Optional[str] = None) -> str:
     """Where a signer's link points. The sending organization's own brand
     address first (a BookaBoost workspace -> its BookaBoost app, so the signing
@@ -205,33 +236,56 @@ def signers_of(db: Session, env: EsignEnvelope) -> List[EsignSigner]:
 def create_envelope(db: Session, *, org_id: str, title: str, document_html: str,
                     signers: List[Dict[str, Any]], kind: Optional[str] = None, deal_id: Optional[str] = None,
                     document_id: Optional[str] = None, message: Optional[str] = None,
-                    sender=None, expire_days: int = EXPIRE_DAYS) -> Tuple[EsignEnvelope, bool]:
+                    sender=None, expire_days: int = EXPIRE_DAYS, cc: Optional[List[str]] = None,
+                    sender_name: Optional[str] = None) -> Tuple[EsignEnvelope, bool]:
     """Create the envelope and email signer 1. Returns (envelope, first_email_delivered)."""
     clean = []
     for i, p in enumerate(signers or [], start=1):
         email = (p.get("email") or "").strip()
         if not EMAIL_RE.match(email):
             raise EsignError("%s needs a valid email address." % (p.get("role") or "Signer %d" % i), 400)
+        req = []
+        for f in p.get("fields") or []:
+            key, label = (f.get("key") or "").strip(), re.sub(r"\s+", " ", f.get("label") or "").strip()
+            if not FIELD_KEY_RE.match(key) or not (2 <= len(label) <= 120):
+                raise EsignError("Each fill-in blank needs a short key and a label.", 400)
+            if key in {r["key"] for c in clean for r in c.get("_req", [])} | {r["key"] for r in req}:
+                raise EsignError("Fill-in blank '%s' is listed twice." % key, 400)
+            if '<span class="blank" data-field="%s">' % key not in (document_html or ""):
+                raise EsignError("The document has no blank for '%s'." % key, 400)
+            req.append({"key": key, "label": label})
         clean.append({"role": (p.get("role") or "Signer %d" % i)[:60], "name": (p.get("name") or "")[:120],
-                      "email": email.lower()})
+                      "email": email.lower(), "_req": req})
     if not clean:
         raise EsignError("At least one signer is needed.", 400)
+    ccs = []
+    for e in cc or []:
+        e = (e or "").strip().lower()
+        if not EMAIL_RE.match(e) or "," in e:
+            raise EsignError("Copy-to address '%s' isn't a valid email." % e, 400)
+        if e not in ccs:
+            ccs.append(e)
     env = EsignEnvelope(organization_id=org_id, deal_id=deal_id, document_id=document_id, kind=kind,
                         title=title[:250], status="sent", message=(message or "")[:2000] or None,
                         document_html=document_html, document_sha256=_sha(document_html),
                         consent_version=CONSENT_VERSION,
-                        sender_name=getattr(sender, "full_name", None), sender_email=getattr(sender, "email", None),
+                        sender_name=sender_name or getattr(sender, "full_name", None),
+                        sender_email=None if sender_name else getattr(sender, "email", None),
+                        cc_emails=",".join(ccs) or None,
                         created_by_id=getattr(sender, "id", None),
                         expires_at=datetime.utcnow() + timedelta(days=expire_days))
     db.add(env)
     db.flush()
     rows = []
     for i, p in enumerate(clean, start=1):
-        s = EsignSigner(envelope_id=env.id, organization_id=org_id, sign_order=i, status="waiting", **p)
+        req = p.pop("_req")
+        s = EsignSigner(envelope_id=env.id, organization_id=org_id, sign_order=i, status="waiting",
+                        fields_json=json.dumps({"requested": req, "values": {}}) if req else None, **p)
         db.add(s)
         rows.append(s)
     db.flush()
-    _event(db, env, "sent", detail={"signers": [r.email for r in rows], "document_sha256": env.document_sha256})
+    _event(db, env, "sent", detail={"signers": [r.email for r in rows], "document_sha256": env.document_sha256,
+                                    "cc": ccs, "blanks": {r.role: _fields(r)["requested"] for r in rows if r.fields_json}})
     delivered = _email_link(db, env, rows[0])
     return env, delivered
 
@@ -281,7 +335,8 @@ def public_view(db: Session, token: str, *, ip=None, ua=None) -> Dict[str, Any]:
         "signer": {"name": s.name, "role": s.role, "email_masked": name[:2] + "***@" + dom,
                    "status": s.status, "verified": bool(s.verified_at), "signed_at": s.signed_at},
         "parties": [{"role": x.role, "name": x.name, "status": x.status, "you": x.id == s.id} for x in signers],
-        "document_html": env.document_html, "document_sha256": env.document_sha256,
+        "document_html": fill_document(env.document_html, signers), "document_sha256": env.document_sha256,
+        "fields": _fields(s)["requested"],
         "consent_text": CONSENT_TEXT, "consent_version": env.consent_version,
         "can_sign": env.status == "sent" and s.status not in ("signed", "declined"),
         "completed": env.status == "completed", "expires_at": env.expires_at,
@@ -350,7 +405,7 @@ def _png(data_url: Optional[str]) -> Optional[bytes]:
 
 
 def sign(db: Session, token: str, *, consent: bool, typed_name: str, drawn_png: Optional[str] = None,
-         ip=None, ua=None) -> Dict[str, Any]:
+         ip=None, ua=None, fields: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     env, s = resolve(db, token)
     _open_for_signing(env, s)
     if _current(signers_of(db, env)) is not s:
@@ -363,6 +418,15 @@ def sign(db: Session, token: str, *, consent: bool, typed_name: str, drawn_png: 
     if len(typed) < 2 or len(typed) > 120:
         raise EsignError("Type your full name.", 400)
     image = _png(drawn_png)
+    f = _fields(s)
+    values = {}
+    for r in f["requested"]:
+        v = re.sub(r"\s+", " ", str((fields or {}).get(r["key"]) or "")).strip()
+        if len(v) < 2 or len(v) > FIELD_MAX:
+            raise EsignError("Fill in: %s." % r["label"], 400)
+        values[r["key"]] = v
+    if f["requested"]:
+        s.fields_json = json.dumps({"requested": f["requested"], "values": values})
     now = datetime.utcnow()
     s.consent_at = now
     _event(db, env, "consented", signer=s, ip=ip, ua=ua, detail={"consent_version": env.consent_version})
@@ -371,7 +435,8 @@ def sign(db: Session, token: str, *, consent: bool, typed_name: str, drawn_png: 
     s.signed_at, s.status = now, "signed"
     s.sign_ip, s.sign_user_agent = (ip or "")[:64] or None, (ua or "")[:300] or None
     _event(db, env, "signed", signer=s, ip=ip, ua=ua,
-           detail={"kind": s.signature_kind, "document_sha256": env.document_sha256})
+           detail={"kind": s.signature_kind, "document_sha256": env.document_sha256,
+                   **({"filled_in": values} if values else {})})
     db.flush()
     nxt = _current(signers_of(db, env))
     if nxt is not None:
@@ -413,8 +478,12 @@ def snapshot(db: Session, env: EsignEnvelope) -> Tuple[Dict[str, Any], List[Dict
     cols = lambda o, names: {n: getattr(o, n) for n in names}  # noqa: E731
     e = cols(env, ("id", "title", "status", "document_html", "document_sha256", "sender_name", "sender_email",
                    "created_at", "completed_at"))
-    sg = [cols(s, ("id", "role", "name", "email", "signature_kind", "signature_text", "signature_image",
-                   "signed_at", "verified_at", "consent_at", "sign_ip", "sign_user_agent")) for s in signers_of(db, env)]
+    rows = signers_of(db, env)
+    e["document_html"] = fill_document(env.document_html, rows)
+    sg = [dict(cols(s, ("id", "role", "name", "email", "signature_kind", "signature_text", "signature_image",
+                        "signed_at", "verified_at", "consent_at", "sign_ip", "sign_user_agent")),
+               filled_in=[(r["label"], _fields(s)["values"].get(r["key"], "")) for r in _fields(s)["requested"]])
+          for s in rows]
     ev = [cols(x, ("action", "at", "ip", "signer_id")) for x in
           db.query(EsignEvent).filter(EsignEvent.envelope_id == env.id).order_by(EsignEvent.at).all()]
     return e, sg, ev
@@ -435,6 +504,7 @@ def finalize(db: Session, env: EsignEnvelope) -> None:
     recipients = {s["email"] for s in sg}
     if env.sender_email:
         recipients.add(env.sender_email.lower())
+    recipients.update(cc_list(env))
     for to in sorted(recipients):
         _send(db, env, to, "Completed: %s" % env.title, _wrap(
             "<p>Everyone has signed <b>%s</b>. Your signed copy is attached.</p>"
