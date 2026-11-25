@@ -626,7 +626,8 @@ def send_sms(
     # sent to under a made-up facility name - it waits in Location Review.
     # None for every organization without a program.
     from app.services.programs import identity as _program_identity
-    _loc_refusal = _program_identity.send_refusal(db, lead, send_source)
+    _loc_refusal = _program_identity.send_refusal(db, lead, send_source,
+                                                  human_reply=(send_source == "manual"))
     if _loc_refusal:
         raise ValueError(f"Lead {lead.id}: {_loc_refusal}")
 
@@ -816,7 +817,8 @@ def send_mms(
     # sent to under a made-up facility name - it waits in Location Review.
     # None for every organization without a program.
     from app.services.programs import identity as _program_identity
-    _loc_refusal = _program_identity.send_refusal(db, lead, send_source)
+    _loc_refusal = _program_identity.send_refusal(db, lead, send_source,
+                                                  human_reply=(send_source == "manual"))
     if _loc_refusal:
         raise ValueError(f"Lead {lead.id}: {_loc_refusal}")
 

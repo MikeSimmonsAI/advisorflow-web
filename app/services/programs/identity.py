@@ -361,7 +361,14 @@ JOURNEY_NOT_STARTED_REFUSAL = (
 JOURNEY_GATED_SOURCES = (None, "cadence", "campaign", "bulk", "bulk_ai", "auto_send")
 
 
-def send_refusal(db: Session, lead: Lead, send_source: Optional[str] = None) -> Optional[str]:
+def _family_wrote_in(db: Session, lead: Lead) -> bool:
+    """Has this family written to us (a reply on file)?"""
+    from app.models.models import Reply
+    return db.query(Reply.id).filter(Reply.lead_id == lead.id).first() is not None
+
+
+def send_refusal(db: Session, lead: Lead, send_source: Optional[str] = None,
+                 human_reply: bool = False) -> Optional[str]:
     """The reason this lead must not be sent to, or None. Used by every send path.
 
     Automated sends (anything not stamped MANUAL) also require the contact's
@@ -379,7 +386,11 @@ def send_refusal(db: Session, lead: Lead, send_source: Optional[str] = None) -> 
     if any(getattr(r, "on_hold", False) for r in recs):
         return HOLD_REFUSAL
     if any(r.needs_data_review for r in recs):
-        return DATA_REVIEW_REFUSAL
+        # Owner, Nov 25 (James Borens: "Wrong number"): the review stops
+        # automated outreach to a possibly-wrong person - not a person typing
+        # an answer to whoever just wrote to us ("we'll correct our records").
+        if not (human_reply and _family_wrote_in(db, lead)):
+            return DATA_REVIEW_REFUSAL
     if any(r.duplicate_review_reason for r in recs):
         return DUPLICATE_REVIEW_REFUSAL
     if prog.require_location_to_send and location_profile_for_lead(db, lead) is None:
