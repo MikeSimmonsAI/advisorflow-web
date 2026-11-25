@@ -237,7 +237,7 @@ def _plain_why(reason: Optional[str]) -> str:
     return ("Needs a person: " + r) if r else "Needs a person"
 
 
-def _conv_row(db, conv, lead, ev: Optional[Dict[str, Any]] = None) -> List[Any]:
+def _conv_row(db, conv, lead, ev: Optional[Dict[str, Any]] = None, notes=None) -> List[Any]:
     from app.services.volt.sheets_export import central_serial, safe, safe_phone
     state = conv.state or ""
     if state == "waiting_future":
@@ -257,7 +257,46 @@ def _conv_row(db, conv, lead, ev: Optional[Dict[str, Any]] = None) -> List[Any]:
     fu_on = (central_serial(conv.next_followup_at)
              if conv.next_followup_at and state in ("waiting_future", "human") else "")
     return ["FU-" + conv.id, central_serial(conv.created_at), safe(_name(lead)), _phone(lead.phone),
-            safe(lead.email), safe(why[:300]), fu_on, safe(_last_family_words(db, lead.id)), status]
+            safe(lead.email), safe(_with_notes(why, notes)), fu_on, safe(_last_family_words(db, lead.id)), status]
+
+
+# ── notes a person typed on the family in the app (owner, Nov 25) ───────────
+#
+# "if they say book me in about two weeks ... I put notes inside ... the
+# system, but it doesn't update the notes on the spreadsheet ... the person
+# who's working the ticket [needs to understand] that's where it's at."
+# The newest notes a PERSON wrote on the family (not the system's own notes)
+# go under Why on the follow-up row - so they show on the main tab, the
+# person's Follow-Ups tab and the Restland Board - and move Last Update.
+NOTE_DAYS = 45
+NOTES_SHOWN = 2
+
+
+def office_notes(db: Session, lead_ids) -> Dict[str, List[tuple]]:
+    """{lead id: [(created_at, body), ...]} newest first: notes a person wrote
+    in the last NOTE_DAYS days, at most NOTES_SHOWN per family."""
+    from app.models.work_models import LeadNote
+    ids = [i for i in set(lead_ids) if i]
+    out: Dict[str, List[tuple]] = {}
+    cutoff = datetime.utcnow() - timedelta(days=NOTE_DAYS)
+    for i in range(0, len(ids), 500):
+        for lid, at, body in (db.query(LeadNote.lead_id, LeadNote.created_at, LeadNote.body)
+                              .filter(LeadNote.lead_id.in_(ids[i:i + 500]), LeadNote.author_user_id.isnot(None),
+                                      LeadNote.created_at >= cutoff)
+                              .order_by(LeadNote.created_at.desc()).all()):
+            if body and body.strip() and len(out.setdefault(lid, [])) < NOTES_SHOWN:
+                out[lid].append((at, body.strip()))
+    return out
+
+
+def _with_notes(why: str, notes) -> str:
+    if not notes:
+        return why[:300]
+    lines = []
+    for at, body in notes:
+        t = _central(at)
+        lines.append("NOTE %d/%d: %s" % (t.month, t.day, " ".join(body.split())[:300]))
+    return (why[:300] + "\n" + "\n".join(lines))[:900]
 
 
 # ── what happened on a follow-up in the app (owner, Nov 24) ─────────────────
@@ -288,7 +327,7 @@ def followup_events(db: Session, convs) -> Dict[str, Dict[str, Any]]:
     by_lead = {c.lead_id: c for c in convs}
     since = {c.lead_id: (c.created_at or datetime.min) for c in convs}
     out: Dict[str, Dict[str, Any]] = {c.id: {"human_at": None, "human_channel": None, "family_at": None,
-                                              "out_at": None} for c in convs}
+                                              "out_at": None, "note_at": None} for c in convs}
     leads = list(by_lead)
 
     def put(lid, key, at, channel=None):
@@ -325,6 +364,13 @@ def followup_events(db: Session, convs) -> Dict[str, Dict[str, Any]]:
                     .group_by(ProgramConversationTurn.conversation_id).all()):
         if cid in out:
             out[cid]["family_at"] = at
+    try:
+        for lid, items in office_notes(db, leads).items():
+            c = by_lead.get(lid)
+            if c is not None and items:
+                out[c.id]["note_at"] = items[0][0]       # newest note a person wrote
+    except Exception:                                    # noqa: BLE001
+        log.exception("office notes lookup failed")
     return out
 
 
@@ -366,11 +412,16 @@ def follow_up_rows(db: Session, org_id: str, known_ids=()) -> List[List[Any]]:
     except Exception:                                    # noqa: BLE001 - the rows still go in
         log.exception("follow-up events lookup failed")
         events = {}
+    try:
+        notes = office_notes(db, [c.lead_id for c in convs])
+    except Exception:                                    # noqa: BLE001 - the rows still go in
+        log.exception("office notes lookup failed")
+        notes = {}
     for c in convs:
         lead = leads.get(c.lead_id)
         if _skip(lead) or c.is_test:
             continue
-        out.append(_conv_row(db, c, lead, events.get(c.id)))
+        out.append(_conv_row(db, c, lead, events.get(c.id), notes.get(c.lead_id)))
     # Told a time by a person, nothing on the calendar: lock it in.
     told_known = {k[5:] for k in known_ids if str(k).startswith("TOLD-")}
     try:
@@ -1719,7 +1770,8 @@ def _app_followups(db, client, sid: str, fu_staff: Dict[str, Dict[str, Any]], kn
             continue
         snap = json.loads(rec.staff_json or "{}")
         team_at = rec.staff_changed_at
-        last = max([t for t in (team_at, ev["human_at"], ev["family_at"]) if t is not None] or [None])
+        last = max([t for t in (team_at, ev["human_at"], ev["family_at"], ev.get("note_at")) if t is not None]
+                   or [None])
         rec._last_event = last                           # read by the person tabs
         if ev["human_at"] is not None and len(cols) == 2:
             want = {"fu_date": _ct_text(ev["human_at"]), "fu_result": _replied_text(ev)}
