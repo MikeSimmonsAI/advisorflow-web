@@ -100,8 +100,10 @@ def test_a_persons_reply_then_the_familys_reply_show_on_the_board_and_the_case_s
     assert row[COL["System Status"]] == "Open"                           # the family is waiting on us
     # her own Follow-Ups tab shows the same
     mine = sheet[RS.fu_tab_title("Kit")][RS.FT_FIRST - 1]
-    assert mine[0] == "FU-" + conv.id and mine[7] == "11/24/2026 4:26 PM" and mine[8] == "Replied by text (4:26 PM)"
-    assert mine[14] == central_serial(fam_at)
+    C = RS._FU_COL
+    assert mine[0] == "FU-" + conv.id and mine[C["fu_date"]] == "11/24/2026 4:26 PM"
+    assert mine[C["fu_result"]] == "Replied by text (4:26 PM)"
+    assert mine[C["updated"]] == central_serial(fam_at)                 # Last Update, next to the dates
     # a repeat pass: nothing is read back as a team edit, nothing is written again
     notes = db.query(LeadNote).filter_by(lead_id=lead.id).count()
     out, c = _pass(db, prog, sheet, fam_at + timedelta(minutes=4))
@@ -189,3 +191,49 @@ def test_an_email_reply_counts_and_a_queued_one_does_not(setter, sample_advisor)
     db.commit()
     _pass(db, prog, sheet, T0 + timedelta(minutes=8))
     assert _row(sheet, conv)[COL["What Happened"]] == "Replied by email (1:07 PM)"
+
+
+def test_due_now_first_and_dates_up_front(setter, sample_advisor):
+    db, lead, conv = _case(setter, sample_advisor, first="Erica")
+    db2, lead2, conv2 = _case(setter, sample_advisor, first="Fay", state="waiting_future")
+    conv2.next_followup_at = T0 + timedelta(days=20)               # a later date
+    db.commit()
+    prog = _prog(setter)
+    sheet = _sheet()
+    _family(db, conv, "Call me", T0 + timedelta(minutes=1))
+    _family(db, conv2, "After the holidays", T0 + timedelta(minutes=2))
+    _pass(db, prog, sheet, T0 + timedelta(minutes=3))
+    tab = sheet[RS.fu_tab_title("Kit")]
+    rows = [r for r in tab[RS.FT_FIRST - 1:] if r and r[0]]
+    assert [r[0] for r in rows] == ["FU-" + conv.id, "FU-" + conv2.id]      # due now on top
+    head = tab[RS.FT_HEAD - 1]
+    assert head[1:4] == ["Follow Up On", "Last Update", "Family"]
+
+
+def test_date_formats_are_put_back_every_ten_minutes():
+    calls = []
+
+    class C:
+        def spreadsheets(self):
+            return self
+
+        def get(self, spreadsheetId, fields=None):
+            class E:
+                def execute(self_inner):
+                    return {"sheets": [{"properties": {"sheetId": i}} for i in (2, 11, 12)]}
+            return E()
+
+        def batchUpdate(self, spreadsheetId, body):
+            calls.append(body["requests"])
+
+            class E:
+                def execute(self_inner):
+                    return {}
+            return E()
+    RS._last_heal.clear()
+    assert RS.heal_date_formats(C(), "sid", now=T0) is True
+    reqs = calls[0]
+    assert all(set(q["repeatCell"]["fields"].split(",")) == {"userEnteredFormat.numberFormat"} for q in reqs)
+    assert {q["repeatCell"]["range"]["sheetId"] for q in reqs} == {2, 11, 12}        # only tabs that exist
+    assert RS.heal_date_formats(C(), "sid", now=T0 + timedelta(minutes=5)) is False
+    assert RS.heal_date_formats(C(), "sid", now=T0 + timedelta(minutes=11)) is True

@@ -74,9 +74,11 @@ START_TIMES = ("10:00 AM", "11:30 AM", "1:00 PM", "2:30 PM", "4:00 PM")
 # The time picker on the sheet: every half hour from the first to the last
 # start (owner, Nov 23 - any time the family asks for). Any other time can be
 # typed in; the booking checks the calendar either way.
+# Owner, Nov 24: Restland's hours run to 6 PM on weekdays (3 PM weekends -
+# the booking itself checks the day's hours).
 TIME_CHOICES = tuple(
     "%d:%02d %s" % ((h - 1) % 12 + 1, m, "AM" if h < 12 else "PM")
-    for h in range(10, 17) for m in (0, 30) if (h, m) <= (16, 0))
+    for h in range(10, 19) for m in (0, 30) if (h, m) <= (18, 0))
 # Owner, Nov 24: a phone call and a video call are separate choices.
 HOW_CHOICES = {"At Restland": ("office", "visit"), "At Their Home": ("home", "visit"),
                "Phone Call": ("phone", "phone"), "Video Call": ("video", "phone"),
@@ -961,14 +963,17 @@ PT_APPT = (("ref", "Ref"), ("date", "Date"), ("time", "Time"), ("family", "Famil
            ("how", "How"), ("address", "Home Address"), ("status", "Status"),
            ("outcome", "Outcome"), ("sold", "Sold?"), ("sold_what", "What Was Sold"),
            ("link", "Call Link / Details"), ("notes", "My Notes"), ("updated", "Last Update"))
-PT_FU = (("ref", "Ref"), ("due", "Follow Up On"), ("family", "Family"), ("phone", "Phone"), ("why", "Why"),
-         ("said", "What They Said"), ("done", "Done?"), ("fu_date", "Called On"),
-         ("fu_result", "What Happened"), ("appt_date", "Appt Date"), ("appt_time", "Appt Time"),
-         ("appt_how", "How"), ("appt_address", "Home Address"), ("notes", "My Notes"), ("updated", "Last Update"))
+# Owner, Nov 24 9:14 PM ("need dates, last updated, better all around"): the
+# dates come first and stay on screen - Follow Up On, Last Update, Family.
+PT_FU = (("ref", "Ref"), ("due", "Follow Up On"), ("updated", "Last Update"), ("family", "Family"),
+         ("phone", "Phone"), ("why", "Why"), ("said", "What They Said"),
+         ("done", "Done?"), ("fu_date", "Followed Up On"), ("fu_result", "What Happened"),
+         ("appt_date", "Appt Date"), ("appt_time", "Appt Time"), ("appt_how", "How"),
+         ("appt_address", "Home Address"), ("notes", "My Notes"))
 PT_APPT_EDIT = ("link", "outcome", "sold", "sold_what", "notes")
 PT_FU_EDIT = ("done", "fu_date", "fu_result", "appt_date", "appt_time", "appt_how", "appt_address", "notes")
 PT_APPT_INFO = 8                                     # A-H who & when, I-M your update, N last update
-PT_FU_INFO = 6                                       # A-F who & why, G-N your update, O last update
+PT_FU_INFO = 7                                       # A-G when, who & why; H-O your update
 PT_WIDTH = max(len(PT_APPT), len(PT_FU))             # A..O
 # rows (1-based)
 PT_TITLE, PT_HELP = 1, 2
@@ -1124,19 +1129,24 @@ def person_tabs_write(client, sid: str, tabs: List[Dict[str, Any]], rows: Dict[s
             if not mine(FOLLOW_UPS, rid) or str(r[8] or "") != "Open" or (cur.get("done") or "").upper() == "TRUE":
                 continue
             last_ev = getattr(rec, "_last_event", None) if rec is not None else None
-            fus.append([rid, r[6], r[2], r[3], r[5], r[7], False, cur.get("fu_date", ""), cur.get("fu_result", ""),
-                        cur.get("appt_date", ""), cur.get("appt_time", ""), cur.get("appt_how", ""),
-                        cur.get("appt_address", ""), cur.get("notes", ""),
-                        central_serial(last_ev) if last_ev is not None and (
-                            _team_touched(rec, PT_FU_EDIT) or last_ev != rec.staff_changed_at)
-                        else central_serial(rec.staff_changed_at) if _team_touched(rec, PT_FU_EDIT) else ""])
-        fus.sort(key=lambda x: (x[1] if isinstance(x[1], (int, float)) and x[1] else 0, str(x[0])))
+            if last_ev is None and rec is not None:
+                last_ev = rec.staff_changed_at or rec.assigned_at
+            vals = {"ref": rid, "due": r[6], "updated": central_serial(last_ev) if last_ev is not None else "",
+                    "family": r[2], "phone": r[3], "why": r[5], "said": r[7], "done": False}
+            vals.update({k: cur.get(k, "") for k in ("fu_date", "fu_result", "appt_date", "appt_time", "appt_how",
+                                                     "appt_address", "notes")})
+            fus.append([vals.get(k, "") for k, _ in PT_FU])
+        _i_due, _i_upd = _FU_COL["due"], _FU_COL["updated"]
+        # due now (no date, or today/past) first, then later dates; newest update first within each
+        fus.sort(key=lambda x: (
+            (x[_i_due] if isinstance(x[_i_due], (int, float)) and x[_i_due] > today_serial + 1 else 0),
+            -(x[_i_upd] if isinstance(x[_i_upd], (int, float)) else 0), str(x[0])))
         fus = fus[:FT_MAX]
         old = grids.get(t["title"]) or {}
         data = []
         blocks = ((APPOINTMENTS, appts, PT_APPT_FIRST, PT_APPT, _PT_APPT_TEXT, len(PT_APPT) - 1),) \
             if t.get("kind", "appt") == "appt" else \
-            ((FOLLOW_UPS, fus, FT_FIRST, PT_FU, _PT_FU_TEXT, len(PT_FU) - 1),)
+            ((FOLLOW_UPS, fus, FT_FIRST, PT_FU, _PT_FU_TEXT, _FU_COL["updated"]),)
         for tab, new_rows, first, cols, text_cols, stamp_col in blocks:
             was_rows = old.get(tab) or []
             width = len(cols)
@@ -1162,8 +1172,8 @@ def _pt_header_rows(kind: str = "appt") -> Dict[int, List[str]]:
         return (list(vals) + [""] * W)[:W]
     if kind == "fu":
         return {
-            FT_BANNER: row(["MY FOLLOW-UPS   -   call these families, then fill in the gold columns"]),
-            FT_GROUPS: row(["", "WHO TO CALL & WHY"] + [""] * (PT_FU_INFO - 2) + ["YOUR UPDATE  (type here)"]),
+            FT_BANNER: row(["MY FOLLOW-UPS   -   call the ones at the top first, then fill in the gold columns"]),
+            FT_GROUPS: row(["", "WHEN, WHO & WHY"] + [""] * (PT_FU_INFO - 2) + ["YOUR UPDATE  (type here)"]),
             FT_HEAD: row([lbl for _, lbl in PT_FU]),
         }
     return {
@@ -1201,6 +1211,7 @@ def person_tab_headers_heal(client, sid: str, tabs: List[Dict[str, Any]]) -> int
 
 _PT_APPT_TEXT = [i for i, (k, _) in enumerate(PT_APPT) if k not in ("date", "time", "updated")]
 _PT_FU_TEXT = [i for i, (k, _) in enumerate(PT_FU) if k not in ("due", "updated", "done")]
+_FU_COL = {k: i for i, (k, _) in enumerate(PT_FU)}
 
 
 def _same_row(was: List[str], shown: List[str], text_cols: List[int], stamp_col: int) -> bool:
@@ -1209,6 +1220,49 @@ def _same_row(was: List[str], shown: List[str], text_cols: List[int], stamp_col:
     def at(r, i):
         return r[i] if i < len(r) else ""
     return all(at(was, i) == at(shown, i) for i in text_cols) and bool(at(was, stamp_col)) == bool(at(shown, stamp_col))
+
+
+def _fu_number_formats(sid: int) -> List[Dict]:
+    """The date columns of a follow-ups tab, as their own requests."""
+    def nf(col, typ, pattern):
+        return {"repeatCell": {"range": {"sheetId": sid, "startRowIndex": FT_FIRST - 1, "endRowIndex": FT_LAST_ROW,
+                                         "startColumnIndex": col, "endColumnIndex": col + 1},
+                               "cell": {"userEnteredFormat": {"numberFormat": {"type": typ, "pattern": pattern}}},
+                               "fields": "userEnteredFormat.numberFormat"}}
+    return [nf(_FU_COL["due"], "DATE", "ddd, mmm d"), nf(_FU_COL["updated"], "DATE_TIME", "m/d h:mm am/pm")]
+
+
+HEAL_EVERY = timedelta(minutes=10)
+_last_heal: Dict[str, datetime] = {}
+
+
+def heal_date_formats(client, sid: str, now: Optional[datetime] = None) -> bool:
+    """Owner, Nov 24: date cells on the board lost their format (rows deleted,
+    pasted or sorted by hand) and showed 46356.375. Every 10 minutes the date
+    columns get their format back - formats only, never a value."""
+    now = now or datetime.utcnow()
+    if sid in _last_heal and now - _last_heal[sid] < HEAL_EVERY:
+        return False
+    _last_heal[sid] = now
+    reqs: List[Dict] = []
+    for tid in FU_TAB_IDS:
+        reqs += _fu_number_formats(tid)
+
+    def nf(sheet, c0, typ, pattern):
+        return {"repeatCell": {"range": {"sheetId": sheet, "startRowIndex": 1, "endRowIndex": 5000,
+                                         "startColumnIndex": c0, "endColumnIndex": c0 + 1},
+                               "cell": {"userEnteredFormat": {"numberFormat": {"type": typ, "pattern": pattern}}},
+                               "fields": "userEnteredFormat.numberFormat"}}
+    lu = len(FU_COLUMNS) + len(STAFF_COLUMNS[FOLLOW_UPS]) + 1 + len(FU_WORK_COLUMNS)     # T: Last Update (CT)
+    reqs += [nf(TAB_IDS[FOLLOW_UPS], 1, "DATE_TIME", "m/d/yyyy h:mm am/pm"),
+             nf(TAB_IDS[FOLLOW_UPS], 6, "DATE", "ddd, mmm d, yyyy"),
+             nf(TAB_IDS[FOLLOW_UPS], lu, "DATE_TIME", "m/d/yyyy h:mm am/pm")]
+    meta = client.spreadsheets().get(spreadsheetId=sid, fields="sheets.properties.sheetId").execute()
+    have = {s_["properties"]["sheetId"] for s_ in meta.get("sheets") or []}
+    reqs = [q for q in reqs if q["repeatCell"]["range"]["sheetId"] in have]
+    if reqs:
+        client.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": reqs}).execute()
+    return True
 
 
 def person_tab_layout_requests(ids=PERSON_TAB_IDS, kind: str = "appt") -> List[Dict]:
@@ -1273,6 +1327,103 @@ def person_tab_layout_requests(ids=PERSON_TAB_IDS, kind: str = "appt") -> List[D
     widths = [24, 118, 78, 165, 118, 150, 175, 150, 120, 74, 190, 190, 260, 130, 130]
     W = PT_WIDTH
     appt = kind == "appt"
+
+    def fu_look(sid: int, team_row: int) -> List[Dict]:
+        """Owner, Nov 24 9:14 PM: a follow-ups tab that reads at a glance -
+        Follow Up On, Last Update and Family first, the headers frozen, wide
+        name/phone, Why and What They Said wrapped."""
+        W, n, info = len(PT_FU), len(PT_FU), PT_FU_INFO
+        F0, f_end = FT_FIRST, FT_LAST_ROW
+        c = _FU_COL
+        q: List[Dict] = [
+            {"updateSheetProperties": {"properties": {"sheetId": sid, "gridProperties": {
+                "rowCount": 500, "columnCount": 30}}, "fields": "gridProperties.rowCount,gridProperties.columnCount"}},
+            {"unmergeCells": {"range": g(sid, 1, 500, 0, 30)}},
+            {"setDataValidation": {"range": g(sid, 1, 500, 0, 30)}},
+            {"repeatCell": {"range": g(sid, 1, 500, 0, 30), "cell": {},
+                            "fields": "userEnteredValue,userEnteredFormat"}},
+            {"updateSheetProperties": {"properties": {"sheetId": sid, "gridProperties": {
+                "rowCount": f_end + 5, "columnCount": W, "frozenRowCount": FT_HEAD, "frozenColumnCount": 0,
+                "hideGridlines": True}},
+                # no frozen columns: Sheets refuses a merge across a frozen column
+                # (the title and banner rows); the dates are the first columns anyway
+                "fields": "gridProperties.rowCount,gridProperties.columnCount,gridProperties.frozenRowCount,"
+                          "gridProperties.frozenColumnCount,gridProperties.hideGridlines"}},
+            {"updateCells": {"range": g(sid, PT_TITLE, PT_TITLE, 0, 1), "rows": [{"values": [
+                {"userEnteredValue": {"formulaValue": '="MY FOLLOW-UPS  ·  "&UPPER(Team!A%d)' % team_row}}]}],
+                "fields": "userEnteredValue"}},
+            put(sid, PT_HELP, 0, [
+                "Call the families at the top first (due now).  Type only in the GOLD columns - it saves to the "
+                "main tabs and the app by itself within a couple of minutes.  To book, fill in Appt Date + Appt "
+                "Time - the family gets their confirmation.  Replies sent from the app fill in Followed Up On by "
+                "themselves."]),
+            merge(sid, PT_TITLE, PT_TITLE, 0, W), merge(sid, PT_HELP, PT_HELP, 0, W),
+            fmt(sid, PT_TITLE, PT_TITLE, 0, W, bg=INK, fg="#FFFFFF", bold=True, size=16, valign="MIDDLE", pad=10),
+            fmt(sid, PT_HELP, PT_HELP, 0, W, bg=CREAM, fg=INK, size=10, valign="MIDDLE", wrap="WRAP", pad=10),
+            height(sid, PT_TITLE, PT_TITLE, 44), height(sid, PT_HELP, PT_HELP, 40), height(sid, 3, 3, 26),
+            {"updateCells": {"range": g(sid, 3, 3, 1, 2), "rows": [{"values": [{"userEnteredValue": {"formulaValue": (
+                '=IF(COUNTA(D{0}:D{1})=0,"","   "&COUNTA(D{0}:D{1})&" follow-ups      ·      "'
+                '&(COUNTIFS(D{0}:D{1},"<>",B{0}:B{1},"<="&TODAY())+COUNTIFS(D{0}:D{1},"<>",B{0}:B{1},""))'
+                '&" due now      ·      "&COUNTIFS(C{0}:C{1},">="&TODAY())&" updated today")').format(F0, f_end)}}]}],
+                "fields": "userEnteredValue"}},
+            merge(sid, 3, 3, 1, W), fmt(sid, 3, 3, 1, W, fg=INK, bold=True, size=11, valign="MIDDLE"),
+            # banner, groups, headers
+            put(sid, FT_BANNER, 0, ["MY FOLLOW-UPS   -   call the ones at the top first, then fill in the gold columns"]),
+            merge(sid, FT_BANNER, FT_BANNER, 0, W),
+            fmt(sid, FT_BANNER, FT_BANNER, 0, W, bg=GREEN, fg="#FFFFFF", bold=True, size=13, valign="MIDDLE", pad=10),
+            height(sid, FT_BANNER, FT_BANNER, 36),
+            put(sid, FT_GROUPS, 1, ["WHEN, WHO & WHY"]), merge(sid, FT_GROUPS, FT_GROUPS, 1, info),
+            put(sid, FT_GROUPS, info, ["YOUR UPDATE  (type here)"]), merge(sid, FT_GROUPS, FT_GROUPS, info, n),
+            fmt(sid, FT_GROUPS, FT_GROUPS, 0, info, bg=SAGE_D, fg=INK, bold=True, size=9, align="CENTER"),
+            fmt(sid, FT_GROUPS, FT_GROUPS, info, n, bg=BRASS, fg="#FFFFFF", bold=True, size=9, align="CENTER"),
+            put(sid, FT_HEAD, 0, [lbl for _, lbl in PT_FU]),
+            fmt(sid, FT_HEAD, FT_HEAD, 0, info, bg=SAGE, fg=INK, bold=True, size=10, valign="MIDDLE", wrap="WRAP"),
+            fmt(sid, FT_HEAD, FT_HEAD, info, n, bg=GOLD, fg=INK, bold=True, size=10, valign="MIDDLE", wrap="WRAP"),
+            height(sid, FT_HEAD, FT_HEAD, 32),
+            # the rows
+            fmt(sid, F0, f_end, 0, n, fg=TEXT, size=10, valign="MIDDLE", wrap="CLIP"),
+            fmt(sid, F0, f_end, c["why"], c["said"] + 1, wrap="WRAP"),
+            fmt(sid, F0, f_end, c["notes"], c["notes"] + 1, wrap="WRAP"),
+            fmt(sid, F0, f_end, info, n, bg=CREAM),
+            {"addBanding": {"bandedRange": {"range": g(sid, F0, f_end, 0, info), "rowProperties": {
+                "firstBandColorStyle": {"rgbColor": _rgb("#FFFFFF")},
+                "secondBandColorStyle": {"rgbColor": _rgb(STRIPE)}}}}},
+            {"updateBorders": {"range": g(sid, FT_HEAD, f_end, 0, n),
+                               "innerHorizontal": {"style": "SOLID", "colorStyle": {"rgbColor": _rgb(LINE)}},
+                               "bottom": {"style": "SOLID", "colorStyle": {"rgbColor": _rgb(LINE)}}}},
+            {"updateBorders": {"range": g(sid, FT_GROUPS, f_end, info, n),
+                               "left": {"style": "SOLID_MEDIUM", "colorStyle": {"rgbColor": _rgb(BRASS)}},
+                               "right": {"style": "SOLID_MEDIUM", "colorStyle": {"rgbColor": _rgb(BRASS)}}}},
+            fmt(sid, F0, f_end, c["due"], c["due"] + 1, bold=True),
+            fmt(sid, F0, f_end, c["updated"], c["updated"] + 1, fg=GREY, size=9),
+            fmt(sid, F0, f_end, c["family"], c["family"] + 1, bold=True),
+            {"setDataValidation": {"range": g(sid, F0, f_end, c["done"], c["done"] + 1),
+                                   "rule": {"condition": {"type": "BOOLEAN"}}}},
+            fmt(sid, F0, f_end, c["done"], c["done"] + 1, align="CENTER"),
+            {"setDataValidation": {"range": g(sid, F0, f_end, c["fu_date"], c["fu_date"] + 1), "rule": {"condition": {
+                "type": "DATE_IS_VALID"}, "strict": False, "showCustomUi": True}}},
+            lst(sid, F0, f_end, c["fu_result"], list(WHAT_HAPPENED)),
+            {"setDataValidation": {"range": g(sid, F0, f_end, c["appt_date"], c["appt_date"] + 1), "rule": {
+                "condition": {"type": "DATE_IS_VALID"}, "strict": False, "showCustomUi": True}}},
+            lst(sid, F0, f_end, c["appt_time"], list(TIME_CHOICES)),
+            lst(sid, F0, f_end, c["appt_how"], HOW_PICK),
+            _when(sid, "B%d:G%d" % (F0, f_end), '=AND($A%d<>"",OR($B%d="",$B%d<TODAY()+1))' % (F0, F0, F0), "#FCEBD9"),
+        ]
+        q += _fu_number_formats(sid)
+        widths = [24, 105, 115, 175, 120, 260, 300, 60, 135, 175, 105, 90, 110, 180, 230]
+        for i, px in enumerate(widths[:W]):
+            q.append({"updateDimensionProperties": {"range": {"sheetId": sid, "dimension": "COLUMNS",
+                                                              "startIndex": i, "endIndex": i + 1},
+                                                    "properties": {"pixelSize": px}, "fields": "pixelSize"}})
+        q.append({"updateDimensionProperties": {"range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": 0,
+                                                          "endIndex": 1}, "properties": {"hiddenByUser": True},
+                                                "fields": "hiddenByUser"}})
+        return q
+
+    if not appt:
+        for sid in ids:
+            r += fu_look(sid, list(ids).index(sid) + 2)
+        return r
     for sid in ids:
         a_end = PT_APPT_LAST_ROW
         f_end = FT_LAST_ROW
@@ -1463,12 +1614,12 @@ def ensure_fu_tabs(db: Session, prog, client, sid: str, team: List[Dict[str, Any
         client.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": reqs}).execute()
     pol = json.loads(prog.booking_policy_json or "{}")
     cfg = pol.get("handoff_sheet") or {}
-    done = set(cfg.get("fu_tabs_laid_out") or [])
+    done = set(cfg.get("fu_tabs_laid_out_v2") or [])
     todo = [tid for tid in FU_TAB_IDS if tid not in done and (tid in props or tid in made)]
     if todo:
         client.spreadsheets().batchUpdate(spreadsheetId=sid, body={
             "requests": _strip_old_look(client, sid, todo) + person_tab_layout_requests(todo, "fu")}).execute()
-        cfg["fu_tabs_laid_out"] = sorted(done | set(todo))
+        cfg["fu_tabs_laid_out_v2"] = sorted(done | set(todo))
         pol["handoff_sheet"] = cfg
         prog.booking_policy_json = json.dumps(pol)
         db.commit()
@@ -1934,6 +2085,10 @@ def sync(db: Session, prog, client=None) -> Dict[str, Any]:
     except Exception as exc:                             # noqa: BLE001 - the main tabs still sync
         db.rollback()
         log.warning("handoff sheet follow-up tabs not set up: %s (%s)", X.categorize(exc), str(exc)[:300])
+    try:
+        heal_date_formats(client, sid)
+    except Exception as exc:                             # noqa: BLE001 - only the look
+        log.warning("handoff sheet date formats not healed: %s", X.categorize(exc))
     appts = appointment_rows(db, org)
     fus = follow_up_rows(db, org, known_ids(client, sid, FOLLOW_UPS))
     a = upsert(client, sid, APPOINTMENTS, appts)
