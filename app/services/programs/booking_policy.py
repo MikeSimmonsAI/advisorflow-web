@@ -95,10 +95,15 @@ CALLS = (PHONE, VIDEO, REMOTE)
 
 RESTLAND_ORG_ID = "01fed629-9a95-412b-895a-c8b09f37a98c"
 RESTLAND_ADDRESS = "13005 Greenville Ave, Dallas, TX 75243"
+# Owner, Nov 24 6:36 PM: Restland's first and last appointment times.
+# Mon-Fri 10 AM to 6 PM, Sat and Sun 10 AM to 3 PM (the last start time).
+# 15-minute steps, double booking allowed - only the hours are limited.
+RESTLAND_HOURS = {"weekday": ["10:00", "18:00"], "weekend": ["10:00", "15:00"]}
 RESTLAND_POLICY = {
     "version": 1,
     "allow_overlap": True,
     "days": "0123456",
+    "hours": RESTLAND_HOURS,
     "starts": ["10:00", "11:30", "13:00", "14:30", "16:00"],
     "duration": 45,
     "gap_after": 45,
@@ -150,11 +155,26 @@ def _hhmm(s) -> Tuple[int, int]:
 # Programs whose customers' times are always booked, even on top of another
 # appointment (owner, Nov 24). Restland's stored rules may predate the flag.
 OVERLAP_ORGS = {RESTLAND_ORG_ID}
+ORG_HOURS = {RESTLAND_ORG_ID: RESTLAND_HOURS}
+
+
+def hours_on(policy: Optional[Dict], day: date_cls) -> Optional[Tuple[Tuple[int, int], Tuple[int, int]]]:
+    """((h, m) first start, (h, m) last start) for that day, or None."""
+    hrs = (policy or {}).get("hours")
+    if not isinstance(hrs, dict):
+        return None
+    pair = hrs.get("weekend" if day.weekday() >= 5 else "weekday")
+    try:
+        return _hhmm(pair[0]), _hhmm(pair[1])
+    except (TypeError, ValueError, IndexError):
+        return None
 
 
 def _with_org(policy: Optional[Dict], organization_id: Optional[str]) -> Optional[Dict]:
     if policy is not None and organization_id in OVERLAP_ORGS:
         policy = dict(policy, allow_overlap=True)
+    if policy is not None and organization_id in ORG_HOURS and not policy.get("hours"):
+        policy = dict(policy, hours=ORG_HOURS[organization_id])
     if policy is not None:
         opts = list(policy.get("meeting_options") or [])
         keys = {o.get("key") for o in opts}
@@ -320,10 +340,12 @@ def day_slots(db: Session, advisor, target_date: date_cls, policy: Dict, *, toda
     dur, gap = policy["duration"], policy["gap_after"]
     candidates = [datetime(target_date.year, target_date.month, target_date.day, h, m)
                   for h, m in policy["starts"]]
+    hrs = hours_on(policy, target_date)
     if asked:
         day0 = datetime(target_date.year, target_date.month, target_date.day)
-        candidates = sorted(set(candidates) | {day0.replace(hour=ASKED_FIRST[0], minute=ASKED_FIRST[1]),
-                                               day0.replace(hour=ASKED_LAST[0], minute=ASKED_LAST[1])})
+        a0, a1 = hrs if hrs else (ASKED_FIRST, ASKED_LAST)
+        candidates = sorted(set(candidates) | {day0.replace(hour=a0[0], minute=a0[1]),
+                                               day0.replace(hour=a1[0], minute=a1[1])})
     if any_time and candidates:
         first, last = min(candidates), max(candidates)
         t, extra = first, set(candidates)
@@ -331,6 +353,11 @@ def day_slots(db: Session, advisor, target_date: date_cls, policy: Dict, *, toda
             extra.add(t)
             t += timedelta(minutes=int(any_time))
         candidates = sorted(extra)
+    if hrs:
+        # the location's hours bound every time - set starts and asked ones
+        lo_t = datetime(target_date.year, target_date.month, target_date.day, *hrs[0])
+        hi_t = datetime(target_date.year, target_date.month, target_date.day, *hrs[1])
+        candidates = [c for c in candidates if lo_t <= c <= hi_t]
 
     # Every booked/confirmed appointment of this person that could touch the day.
     lo = datetime(target_date.year, target_date.month, target_date.day) - timedelta(days=1)

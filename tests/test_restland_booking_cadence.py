@@ -113,7 +113,8 @@ def test_all_seven_days_exact_five_starts_and_four_pm_ends_at_four_forty_five(rl
     for k in range(7):
         res = _slots(rl, base + timedelta(days=k), now=datetime(2026, 11, 8, 8, 0))
         times = [s[11:16] for s in res["slots"]]
-        assert times == ["10:00", "11:30", "13:00", "14:30", "16:00"], (k, res)
+        # Owner, Nov 24: Sat and Sun end at 3 PM - no 4 PM start on the weekend
+        assert times == (["10:00", "11:30", "13:00", "14:30", "16:00"] if k < 5 else ["10:00", "11:30", "13:00", "14:30"]), (k, res)
     assert res["duration_minutes"] == 45 and res["gap_minutes"] == 45
     # Not 45-minute start intervals, not 30-minute appointments.
     assert "10:45" not in times and "10:30" not in times
@@ -123,7 +124,7 @@ def test_daylight_saving_days_keep_wall_clock_starts(rl):
     configured(rl)
     for d in (date(2027, 3, 14), date(2026, 11, 1)):       # spring forward / fall back Sundays
         res = _slots(rl, d, now=datetime(d.year, d.month, d.day, 0, 0) - timedelta(days=1))
-        assert [s[11:16] for s in res["slots"]] == ["10:00", "11:30", "13:00", "14:30", "16:00"]
+        assert [s[11:16] for s in res["slots"]] == ["10:00", "11:30", "13:00", "14:30"]                  # Sundays end at 3 PM
 
 
 def test_existing_booking_and_gap_block_overlapping_starts(rl):
@@ -137,7 +138,7 @@ def test_existing_booking_and_gap_block_overlapping_starts(rl):
     db.commit()
     # Restland books on top of other appointments (owner, Nov 24): nothing is taken away.
     times = [s[11:16] for s in _slots(rl, day, now=datetime(2026, 11, 13, 8))["slots"]]
-    assert times == ["10:00", "11:30", "13:00", "14:30", "16:00"]
+    assert times == ["10:00", "11:30", "13:00", "14:30"]                                   # a Saturday ends at 3 PM
     # A program WITHOUT that rule: 11:30 taken; 10:00 holds 10:00-11:30 and still fits;
     # the 15:00 legacy visit (60 + 45 gap) blocks 14:30 and 16:00.
     pol = dict(BP.for_program(prog_of(rl)), allow_overlap=False)
@@ -151,21 +152,21 @@ def test_calendar_conflict_and_unreadable_calendar(rl):
     day = date(2026, 11, 15)
     busy = lambda db, a, d: ([(datetime(2026, 11, 15, 12, 0), datetime(2026, 11, 15, 12, 30))], None)   # noqa
     res = BP.day_slots(rl["db"], rl["mike"], day, pol, now_local=datetime(2026, 11, 14, 8), busy_reader=busy)
-    assert [s[11:16] for s in res["slots"]] == ["10:00", "13:00", "14:30", "16:00"]       # 11:30 + gap hits 12:00
+    assert [s[11:16] for s in res["slots"]] == ["10:00", "13:00", "14:30"]       # 11:30 + gap hits 12:00; Sunday ends 3 PM
     down = lambda db, a, d: ([], "unreadable")                                           # noqa
     res = BP.day_slots(rl["db"], rl["mike"], day, pol, now_local=datetime(2026, 11, 14, 8), busy_reader=down)
     assert res["slots"] == [] and res["calendar_error"] == "unreadable"
     # Restland: the calendar never takes a time away, and isn't needed to offer one.
     rpol = BP.for_program(prog_of(rl))
     res = BP.day_slots(rl["db"], rl["mike"], day, rpol, now_local=datetime(2026, 11, 14, 8), busy_reader=down)
-    assert [s[11:16] for s in res["slots"]] == ["10:00", "11:30", "13:00", "14:30", "16:00"]
+    assert [s[11:16] for s in res["slots"]] == ["10:00", "11:30", "13:00", "14:30"]
 
 
 def test_same_day_notice_and_horizon(rl):
     configured(rl)
     day = date(2026, 11, 14)
     times = [s[11:16] for s in _slots(rl, day, now=datetime(2026, 11, 14, 11, 0))["slots"]]
-    assert times == ["13:00", "14:30", "16:00"]                       # 2-hour notice
+    assert times == ["13:00", "14:30"]                                # 2-hour notice; Saturday ends 3 PM
     assert _slots(rl, date(2026, 12, 30), now=datetime(2026, 11, 14, 8))["slots"] == []
 
 
@@ -534,19 +535,41 @@ def test_customer_time_is_always_bookable_even_triple_booked(rl):
                                         BookingLink.status == "booked").count() == 3
 
 
-def test_manual_time_any_minute_seven_to_eight_and_far_out(rl):
+def test_manual_time_any_minute_inside_restlands_hours_and_far_out(rl):
+    """Owner, Nov 24 6:36 PM: Mon-Fri 10 AM to 6 PM, Sat-Sun 10 AM to 3 PM
+    (first and last start). Any minute in between, double booking allowed."""
     configured(rl)
     pol = BP.for_program(prog_of(rl))
-    d = _next(2)
+    today = date.today()
+    from app.services import no_contact_days as _ncd
+    days = [today + timedelta(days=i) for i in range(7, 21) if not _ncd.quiet_on(today + timedelta(days=i))]
+    wk = next(d for d in days if d.weekday() < 5)
+    we = next(d for d in days if d.weekday() >= 5)
     down = lambda db, a, day: ([], "unreadable")                  # noqa: E731 - calendar not needed
-    for hh, mm in ((7, 0), (9, 10), (17, 35), (20, 0)):
-        assert BP.is_open(rl["db"], rl["mike"], datetime(d.year, d.month, d.day, hh, mm), pol, busy_reader=down)
-    assert not BP.is_open(rl["db"], rl["mike"], datetime(d.year, d.month, d.day, 21, 0), pol, busy_reader=down)
-    far = date.today() + timedelta(days=40)                    # well past the two-week page window
-    assert BP.is_open(rl["db"], rl["mike"], datetime(far.year, far.month, far.day, 14, 0), pol, busy_reader=down)
-    # Offers (the booking page, the AI) keep the five set starts.
-    res = BP.day_slots(rl["db"], rl["mike"], d, pol, busy_reader=down)
+    at = lambda d, h, m: datetime(d.year, d.month, d.day, h, m)   # noqa: E731
+    ok = lambda d, h, m: BP.is_open(rl["db"], rl["mike"], at(d, h, m), pol, busy_reader=down)  # noqa: E731
+    for hh, mm in ((10, 0), (13, 10), (17, 35), (18, 0)):
+        assert ok(wk, hh, mm), (hh, mm)
+    for hh, mm in ((7, 0), (9, 45), (18, 15), (19, 30)):
+        assert not ok(wk, hh, mm), (hh, mm)
+    for hh, mm in ((10, 0), (14, 45), (15, 0)):
+        assert ok(we, hh, mm), (hh, mm)
+    for hh, mm in ((9, 30), (15, 15), (16, 0), (18, 0)):
+        assert not ok(we, hh, mm), (hh, mm)
+    # the "custom time" list for a day runs first to last, every 15 minutes
+    day = BP.day_slots(rl["db"], rl["mike"], wk, pol, busy_reader=down, any_time=15)
+    assert day["slots"][0][11:16] == "10:00" and day["slots"][-1][11:16] == "18:00"
+    day = BP.day_slots(rl["db"], rl["mike"], we, pol, busy_reader=down, any_time=15)
+    assert day["slots"][0][11:16] == "10:00" and day["slots"][-1][11:16] == "15:00"
+    far = today + timedelta(days=40)                           # well past the two-week page window
+    while far.weekday() >= 5:
+        far += timedelta(days=1)
+    assert ok(far, 14, 0)
+    # Offers (the booking page, the AI) keep the set starts inside the hours.
+    res = BP.day_slots(rl["db"], rl["mike"], wk, pol, busy_reader=down)
     assert [s[11:16] for s in res["slots"]] == ["10:00", "11:30", "13:00", "14:30", "16:00"]
+    res = BP.day_slots(rl["db"], rl["mike"], we, pol, busy_reader=down)
+    assert [s[11:16] for s in res["slots"]] == ["10:00", "11:30", "13:00", "14:30"]
 
 
 # ── Owner, Nov 24: phone call vs video call vs office vs home ───────────────

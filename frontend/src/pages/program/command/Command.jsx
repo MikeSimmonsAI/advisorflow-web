@@ -788,6 +788,10 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
   // hand - not only the suggested times. The server re-checks it on booking.
   const useManualTime = () => {
     if (!customDay || !/^\d{2}:\d{2}$/.test(manualTime)) return
+    const open = daySlots?.slots || []
+    if (open.length && (manualTime < open[0].value.slice(11, 16) || manualTime > open[open.length - 1].value.slice(11, 16))) {
+      toast?.(`That's outside the hours for that day (${open[0].time} to ${open[open.length - 1].time}).`); return
+    }
     const [h, m] = manualTime.split(':').map(Number)
     const time = `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`
     setPick({ value: `${customDay}T${manualTime}:00`, time, label: `${dayLabel(`${customDay}T${manualTime}:00`)} at ${time}` })
@@ -1019,7 +1023,9 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
               : <p className="cmd-muted">{daySlots.reason || 'No open times that day.'} Try another day.</p>)}
           {customDay && <div className="cmd-manual-time" style={{ marginTop: 10 }}>
             <label className="cmd-custom-day">Or type the time they asked for
-              <input type="time" step="300" min="07:00" max="20:00" value={manualTime}
+              <input type="time" step="300" value={manualTime}
+                     min={daySlots?.slots?.[0]?.value?.slice(11, 16) || '10:00'}
+                     max={daySlots?.slots?.length ? daySlots.slots[daySlots.slots.length - 1].value.slice(11, 16) : '18:00'}
                      onChange={e => setManualTime(e.target.value)} aria-label="Manual appointment time" /></label>
             <button disabled={busy || !manualTime} onClick={useManualTime} style={{ marginLeft: 8 }}>Use this time</button>
           </div>}
