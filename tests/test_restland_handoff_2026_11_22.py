@@ -887,3 +887,12 @@ def test_each_person_gets_their_own_follow_ups_tab(setter):
     props[12] = {"sheetId": 12, "title": RS.fu_tab_title("Person 2"), "index": 7, "hidden": True}
     out = RS.ensure_fu_tabs(db, prog, C(), "sid", team)
     assert calls == [] and out["laid_out"] == []                     # nothing to do the second time
+
+
+
+def test_a_blanked_id_header_is_put_back_and_the_sync_goes_on():
+    """Owner, Nov 24 6:15 PM: 'Follow-Up ID' was blanked and every sync stopped."""
+    sheet = _sheet()
+    sheet[RS.FOLLOW_UPS][0][0] = " "
+    out = RS.upsert(_Client(sheet), "sid", RS.FOLLOW_UPS, [["FU-1"] + ["x"] * 8])
+    assert sheet[RS.FOLLOW_UPS][0][0] == "Follow-Up ID" and out["inserted"] == 1

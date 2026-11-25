@@ -566,8 +566,17 @@ def upsert(client, sid: str, tab: str, rows: List[List[Any]]) -> Dict[str, int]:
     width = len(cols)
     values = client.spreadsheets().values()
     head = values.get(spreadsheetId=sid, range=_rng(tab, "A1:%s1" % column(width))).execute()
-    if [str(c).strip() for c in (head.get("values") or [[]])[0]] != list(cols):
-        raise SheetsError("sheet_layout")
+    have = [str(c).strip() for c in (head.get("values") or [[]])[0]]
+    if have != list(cols):
+        # Owner, Nov 24: someone blanked the first header ("Follow-Up ID") and
+        # the whole sync stopped. Only the id header blank, the rest right:
+        # put it back and carry on. Anything else still stops the sync.
+        if have and not have[0] and have[1:] == list(cols)[1:]:
+            values.update(spreadsheetId=sid, range=_rng(tab, "A1"), valueInputOption="RAW",
+                          body={"values": [[cols[0]]]}).execute()
+            log.warning("handoff sheet: put back the blank %r header on %s", cols[0], tab)
+        else:
+            raise SheetsError("sheet_layout")
     got = values.get(spreadsheetId=sid, range=_rng(tab, "A2:A%d" % (MAX_ROWS + 1))).execute()
     where: Dict[str, int] = {}
     filled = 1
@@ -1322,6 +1331,7 @@ def ensure_fu_tabs(db: Session, prog, client, sid: str, team: List[Dict[str, Any
     props = {s_["properties"]["sheetId"]: s_["properties"] for s_ in meta.get("sheets") or []}
     by_row = {p["row"]: p for p in team}
     reqs, made, laid = [], [], []
+    adds = []
     for i, tid in enumerate(FU_TAB_IDS):
         p = by_row.get(i + 2)
         real = p is not None and not p.get("placeholder")
@@ -1334,13 +1344,16 @@ def ensure_fu_tabs(db: Session, prog, client, sid: str, team: List[Dict[str, Any
             pr: Dict[str, Any] = {"sheetId": tid, "title": title, "hidden": False}
             if idx is not None:
                 pr["index"] = idx + 1
-            reqs.append({"addSheet": {"properties": pr}})
+            adds.append({"addSheet": {"properties": pr}})
             made.append(tid)
             continue
         cur = props[tid]
         if cur.get("title") != title or bool(cur.get("hidden")) != hidden:
             reqs.append({"updateSheetProperties": {"properties": {"sheetId": tid, "title": title, "hidden": hidden},
                                                    "fields": "title,hidden"}})
+    # added highest position first, so an earlier insert never shifts a later one
+    adds.sort(key=lambda a: -(a["addSheet"]["properties"].get("index") or 0))
+    reqs = adds + reqs
     if reqs:
         client.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": reqs}).execute()
     pol = json.loads(prog.booking_policy_json or "{}")
