@@ -127,3 +127,37 @@ def signed_pdf(envelope_id: str, db: Session = Depends(get_db), _god: User = Dep
     return Response(content=env.final_pdf, media_type="application/pdf",
                     headers={"Content-Disposition": 'attachment; filename="%s"' % ev._filename(env.title),
                              "Cache-Control": "private, no-store"})
+
+
+class SignerEmailIn(BaseModel):
+    role: str = Field(..., max_length=60)
+    email: str = Field(..., max_length=254)
+
+
+@router.put("/envelopes/{envelope_id}/signer-email")
+def change_signer_email(envelope_id: str, body: SignerEmailIn, db: Session = Depends(get_db),
+                        god: User = Depends(require_god)):
+    env = _env(db, envelope_id)
+    try:
+        r = ev.change_signer_email(db, env, body.role, body.email, user=god)
+    except ev.EsignError as e:
+        raise HTTPException(e.status, e.message)
+    _audit(db, god, "esign_signer_email_changed", env, {"role": body.role, "email": body.email})
+    db.commit()
+    return r
+
+
+class CcIn(BaseModel):
+    cc: List[str] = Field(default_factory=list, max_length=10)
+
+
+@router.put("/envelopes/{envelope_id}/cc")
+def change_cc(envelope_id: str, body: CcIn, db: Session = Depends(get_db), god: User = Depends(require_god)):
+    env = _env(db, envelope_id)
+    try:
+        r = ev.set_cc(db, env, body.cc, user=god)
+    except ev.EsignError as e:
+        raise HTTPException(e.status, e.message)
+    _audit(db, god, "esign_cc_changed", env, {"cc": r["cc"]})
+    db.commit()
+    return r

@@ -159,6 +159,7 @@ ACTION_LABEL = {
     "voided": "Voided by sender", "completed": "All parties signed; document sealed",
     "reminder": "Reminder sent", "code_failed": "Wrong verification code entered",
     "signer_email_changed": "Signer's email changed by sender",
+    "cc_changed": "Copy recipients changed by sender",
 }
 
 
