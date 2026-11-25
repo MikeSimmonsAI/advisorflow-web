@@ -837,7 +837,8 @@ def read_team(client, sid: str) -> List[Dict[str, Any]]:
         if not name:
             continue
         team.append({"name": name, "row": i + 2, "active": str(cells[4]).strip().upper() != "FALSE",
-                     "placeholder": bool(PLACEHOLDER.match(name))})
+                     "placeholder": bool(PLACEHOLDER.match(name)),
+                     "phone": str(cells[1]).strip(), "email": str(cells[2]).strip()})
     return team
 
 
@@ -1142,6 +1143,40 @@ def person_tabs_read(client, sid: str, tabs: List[Dict[str, Any]], staff: Dict[s
                         copy.append((tab, rid, k, mine))
                         edits += 1
     return {"grids": grids, "edits": edits, "copy": copy}
+
+
+BOARD_KEYS = {APPOINTMENTS: APPT_KEYS, FOLLOW_UPS: FU_KEYS}
+BOARD_GIVE_UP = timedelta(days=2)
+
+
+def board_edits_in(db, org: str, staff, now: datetime) -> List[tuple]:
+    """Changes made on the team board -> merged into `staff` as if typed on the
+    main tab; returns [(tab, row id, key, value)] for the sheet. Oldest first,
+    so the newest change to a field wins. A row no longer on the sheet keeps
+    its change for BOARD_GIVE_UP, then it is dropped (recorded, not lost)."""
+    from app.models.program_models import HandoffPendingEdit as E
+    todo = (db.query(E).filter(E.organization_id == org, E.applied_at.is_(None))
+            .order_by(E.created_at).all())
+    copy: List[tuple] = []
+    for e in todo:
+        if e.key not in BOARD_KEYS.get(e.tab, ()):
+            e.applied_at, e.result = now, "unknown_field"
+            continue
+        cur = staff.get(e.tab, {}).get(e.row_id)
+        if cur is None:
+            if e.created_at and now - e.created_at > BOARD_GIVE_UP:
+                e.applied_at, e.result = now, "row_gone"
+            continue
+        val = e.value or ""
+        if e.key == "done":
+            val = "TRUE" if str(val).upper() == "TRUE" else ""
+        if (cur.get(e.key) or "") != val:
+            cur[e.key] = val
+            copy = [c for c in copy if not (c[0] == e.tab and c[1] == e.row_id and c[2] == e.key)]
+            copy.append((e.tab, e.row_id, e.key, val))
+        e.applied_at, e.result = now, "applied"
+    db.flush()
+    return copy
 
 
 def copy_to_main(client, sid: str, staff, copy) -> int:
@@ -1835,6 +1870,12 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
     today_serial = int(central_serial(now))
     out: Dict[str, Any] = {"changes": 0, "assigned": 0, "paused": []}
     team = read_team(client, sid)
+    try:                                                 # the team board's people follow the Team tab
+        from app.services.programs import team_board as TB
+        TB.sync_members(db, org, team, now)
+    except Exception as exc:                             # noqa: BLE001
+        db.rollback()
+        log.warning("team board members not synced: %s", str(exc)[:300])
     known = {r.row_id: r for r in db.query(R).filter(R.organization_id == org).all()}
     staff = {tab: read_staff(client, sid, tab) for tab in (APPOINTMENTS, FOLLOW_UPS)}
     # 0. what people typed on their own tabs -> as if typed on the main tabs
@@ -1842,6 +1883,14 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
     pt = person_tabs_read(client, sid, ptabs, staff, known) if ptabs else {"grids": {}, "edits": 0, "copy": []}
     if pt["copy"]:
         out["person_tab_edits"] = copy_to_main(client, sid, staff, pt["copy"])
+    # 0b. changes made on the team board (owner, Nov 25) - the same road
+    try:
+        board = board_edits_in(db, org, staff, now)
+        if board:
+            out["board_edits"] = copy_to_main(client, sid, staff, board)
+    except Exception as exc:                             # noqa: BLE001 - the sheet's own edits still go in
+        db.rollback()
+        log.warning("team board edits not applied: %s", str(exc)[:300])
     booking_results: Dict[str, str] = {}
     stamped: List[tuple] = []                            # (tab, sheet row) the team changed this pass
     # 1. what the team typed -> the app

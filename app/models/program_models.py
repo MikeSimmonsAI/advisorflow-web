@@ -715,3 +715,46 @@ class HandoffSheetRow(Base):
     staff_changed_at = Column(DateTime, nullable=True)         # the team last changed this row
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ProgramTeamMember(Base):
+    """A person who works a program's appointments and follow-ups (Restland,
+    owner Nov 25: "everyone has their own login ... and only can see their
+    data"). `name` is the name the work is assigned to - the same name as on
+    the handoff sheet's Team tab - so the sheet and the team board agree on
+    whose work a row is. A login (user_id) is linked only when the owner
+    creates one."""
+    __tablename__ = "program_team_members"
+    __table_args__ = (UniqueConstraint("organization_id", "name", name="uq_program_team_member_name"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    organization_id = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    email = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    user_id = Column(String, nullable=True, index=True)        # their own login, once made
+    role = Column(String, nullable=False, default="member")    # member | lead
+    active = Column(Boolean, nullable=False, default=True)     # in the rotation
+    source = Column(String, nullable=False, default="sheet")   # sheet (Team tab) | board
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class HandoffPendingEdit(Base):
+    """A change made on the team board, waiting for the next pass to put it
+    through the same road a sheet edit takes (sheet cell + the app), so the
+    sheet and the board never disagree while both are in use."""
+    __tablename__ = "handoff_pending_edits"
+    __table_args__ = (Index("ix_handoff_pending_open", "organization_id", "applied_at"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    organization_id = Column(String, nullable=False)
+    row_id = Column(String, nullable=False)
+    tab = Column(String, nullable=False)                       # Appointments | Follow-Ups
+    key = Column(String, nullable=False)                       # assigned, outcome, notes, ...
+    value = Column(Text, nullable=True)
+    by_user_id = Column(String, nullable=True)
+    by_name = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    applied_at = Column(DateTime, nullable=True)
+    result = Column(String, nullable=True)                     # applied | row_gone | superseded
