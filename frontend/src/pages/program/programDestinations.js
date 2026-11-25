@@ -13,7 +13,7 @@
  * Moved verbatim from ProgramAccessPortal.jsx and App.jsx (WorkspaceSelector);
  * behaviour is unchanged.
  */
-import { clearWorkspaceContext, setBrandContext, setWorkspaceContext } from '../../api/client'
+import { clearWorkspaceContext, setBrandContext, setOrgContext, setWorkspaceContext } from '../../api/client'
 import { setLauncherOrigin } from './launcherOrigin.js'
 
 // salesToolCards lives in programAccessModel.js (pure, node-testable) and is
@@ -50,7 +50,9 @@ export function openProgramItem(item, navigate, opts = {}) {
   }
   if (item.type === 'restland_bookit') {
     // The Restland workspace is the one BookIT reads; the server re-checks it.
+    // God Mode enters a customer by selecting it (it holds no membership).
     setWorkspaceContext(item.organization_id)
+    if (item.organization_name) setOrgContext(item.organization_id, item.organization_name)
     navigate(item.path || '/program/restland-bookit'); return
   }
   if (item.type === 'client_growth') {
