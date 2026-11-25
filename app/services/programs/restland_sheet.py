@@ -958,7 +958,10 @@ def _pause_alert(db, prog, name: str, since: datetime, now: datetime) -> None:
 # group. What they type is copied to the main tab and into the app on the next
 # pass; if the same field changed on both, their own tab wins.
 
-PERSON_TAB_IDS = (3, 4, 7, 8, 9)                     # Team rows 2-6, in order
+# Owner, Nov 25: everyone added on the Team tab gets BOTH tabs (appointments
+# and follow-ups). The first five use the tabs the board was built with; more
+# people get new tabs (Team rows 7-16).
+PERSON_TAB_IDS = (3, 4, 7, 8, 9) + tuple(range(101, 111))   # Team rows 2-16, in order
 PT_APPT = (("ref", "Ref"), ("date", "Date"), ("time", "Time"), ("family", "Family"), ("phone", "Phone"),
            ("how", "How"), ("address", "Home Address"), ("status", "Status"),
            ("outcome", "Outcome"), ("sold", "Sold?"), ("sold_what", "What Was Sold"),
@@ -983,13 +986,21 @@ PT_FU_GROUPS, PT_FU_HEAD, PT_FU_FIRST, PT_FU_MAX = PT_FU_BANNER + 1, PT_FU_BANNE
 PT_LAST_ROW = PT_FU_FIRST + PT_FU_MAX - 1
 # Owner, Nov 24: follow-ups get a tab of their own per person ("Kitty Arnold -
 # Follow-Ups"); the person tab keeps only their appointments.
-FU_TAB_IDS = (11, 12, 13, 14, 15)                    # Team rows 2-6, in order
+FU_TAB_IDS = (11, 12, 13, 14, 15) + tuple(range(201, 211))  # Team rows 2-16, in order
 FT_BANNER, FT_GROUPS, FT_HEAD, FT_FIRST, FT_MAX = 4, 5, 6, 7, 200
 FT_LAST_ROW = FT_FIRST + FT_MAX - 1
 PT_APPT_LAST_ROW = PT_APPT_FIRST + PT_APPT_MAX - 1
 # where each kind of tab keeps its one block: (main tab, first data row, max rows, columns)
 KIND_BLOCK = {"appt": (APPOINTMENTS, PT_APPT_FIRST, PT_APPT_MAX, PT_APPT),
               "fu": (FOLLOW_UPS, FT_FIRST, FT_MAX, PT_FU)}
+
+
+def team_row_of(tab_id: int) -> int:
+    """The Team tab row a person tab belongs to (2 = the first person)."""
+    for ids in (PERSON_TAB_IDS, FU_TAB_IDS):
+        if tab_id in ids:
+            return ids.index(tab_id) + 2
+    return 2
 
 
 def fu_tab_title(name: str) -> str:
@@ -1247,6 +1258,17 @@ def heal_date_formats(client, sid: str, now: Optional[datetime] = None) -> bool:
     reqs: List[Dict] = []
     for tid in FU_TAB_IDS:
         reqs += _fu_number_formats(tid)
+    # Owner, Nov 25: a tab added later got the first person's name in its
+    # title ("MY FOLLOW-UPS · NEOSO WALKER" on Johnny's tab) - the title
+    # always points at the tab's own Team row.
+    for ids, label in ((PERSON_TAB_IDS, "MY APPOINTMENTS"), (FU_TAB_IDS, "MY FOLLOW-UPS")):
+        for tid in ids:
+            reqs.append({"updateCells": {
+                "range": {"sheetId": tid, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0,
+                          "endColumnIndex": 1},
+                "rows": [{"values": [{"userEnteredValue": {"formulaValue": '="%s  \u00b7  "&UPPER(Team!A%d)'
+                                                           % (label, team_row_of(tid))}}]}],
+                "fields": "userEnteredValue"}})
 
     def nf(sheet, c0, typ, pattern):
         return {"repeatCell": {"range": {"sheetId": sheet, "startRowIndex": 1, "endRowIndex": 5000,
@@ -1259,7 +1281,7 @@ def heal_date_formats(client, sid: str, now: Optional[datetime] = None) -> bool:
              nf(TAB_IDS[FOLLOW_UPS], lu, "DATE_TIME", "m/d/yyyy h:mm am/pm")]
     meta = client.spreadsheets().get(spreadsheetId=sid, fields="sheets.properties.sheetId").execute()
     have = {s_["properties"]["sheetId"] for s_ in meta.get("sheets") or []}
-    reqs = [q for q in reqs if q["repeatCell"]["range"]["sheetId"] in have]
+    reqs = [q for q in reqs if next(iter(q.values()))["range"]["sheetId"] in have]
     if reqs:
         client.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": reqs}).execute()
     return True
@@ -1422,7 +1444,7 @@ def person_tab_layout_requests(ids=PERSON_TAB_IDS, kind: str = "appt") -> List[D
 
     if not appt:
         for sid in ids:
-            r += fu_look(sid, list(ids).index(sid) + 2)
+            r += fu_look(sid, team_row_of(sid))
         return r
     for sid in ids:
         a_end = PT_APPT_LAST_ROW
@@ -1441,7 +1463,7 @@ def person_tab_layout_requests(ids=PERSON_TAB_IDS, kind: str = "appt") -> List[D
             "fields": "gridProperties.rowCount,gridProperties.columnCount,gridProperties.frozenRowCount,"
                       "gridProperties.hideGridlines"}})
         # title + how to use
-        team_row = list(ids).index(sid) + 2
+        team_row = team_row_of(sid)
         r.append({"updateCells": {"range": g(sid, PT_TITLE, PT_TITLE, 0, 1), "rows": [{"values": [
             {"userEnteredValue": {"formulaValue": '="%s  ·  "&UPPER(Team!A%d)'
                                   % ("MY APPOINTMENTS" if appt else "MY FOLLOW-UPS", team_row)}}]}],
@@ -1563,20 +1585,56 @@ def _strip_old_look(client, sid: str, ids) -> List[Dict]:
     return first
 
 
-def ensure_person_tabs(db: Session, prog, client, sid: str) -> bool:
-    """Give the person tabs their current look, once per version. v6 (owner,
-    Nov 24): appointments only - follow-ups moved to each person's own tab."""
+def ensure_person_tabs(db: Session, prog, client, sid: str, team: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """Each person's appointments tab, named after them. Owner, Nov 25: a
+    person added on the Team tab got a Follow-Ups tab but their appointments
+    tab stayed hidden as "Person 4" - now the tab is created (if needed),
+    renamed and shown when the name is typed, and hidden again as "Person N"
+    when the row is cleared. A tab gets its look once."""
+    meta = client.spreadsheets().get(spreadsheetId=sid, fields="sheets.properties").execute()
+    props = {s_["properties"]["sheetId"]: s_["properties"] for s_ in meta.get("sheets") or []}
+    team = read_team(client, sid) if team is None else team
+    by_row = {p["row"]: p for p in team}
+    reqs, adds, made = [], [], []
+    for i, tid in enumerate(PERSON_TAB_IDS):
+        p = by_row.get(i + 2)
+        real = p is not None and not p.get("placeholder")
+        title = p["name"] if real else "Person %d" % (i + 1)
+        if tid not in props:
+            if not real:
+                continue                                 # made when that person is added
+            pr: Dict[str, Any] = {"sheetId": tid, "title": title, "hidden": False,
+                                  "tabColorStyle": {"rgbColor": _rgb(GOLD)}}
+            if i:                                        # right after the person before them
+                prev = props.get(FU_TAB_IDS[i - 1]) or props.get(PERSON_TAB_IDS[i - 1]) or {}
+                if prev.get("index") is not None:
+                    pr["index"] = prev["index"] + 1
+            adds.append({"addSheet": {"properties": pr}})
+            made.append(tid)
+            continue
+        cur = props[tid]
+        if cur.get("title") != title or bool(cur.get("hidden")) != (not real):
+            reqs.append({"updateSheetProperties": {"properties": {"sheetId": tid, "title": title,
+                                                                  "hidden": not real},
+                                                   "fields": "title,hidden"}})
+    adds.sort(key=lambda a: -(a["addSheet"]["properties"].get("index") or 0))
+    reqs = adds + reqs
+    if reqs:
+        client.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": reqs}).execute()
     pol = json.loads(prog.booking_policy_json or "{}")
     cfg = pol.get("handoff_sheet") or {}
-    if cfg.get("person_tabs_v6"):
-        return False                                     # this layout is on the tabs (headers self-heal below)
-    client.spreadsheets().batchUpdate(spreadsheetId=sid, body={
-        "requests": _strip_old_look(client, sid, PERSON_TAB_IDS) + person_tab_layout_requests()}).execute()
-    cfg["person_tabs_v6"] = True
-    pol["handoff_sheet"] = cfg
-    prog.booking_policy_json = json.dumps(pol)
-    db.commit()
-    return True
+    done = set(cfg.get("person_tabs_v6_ids") or ([3, 4, 7, 8, 9] if cfg.get("person_tabs_v6") else []))
+    todo = [tid for tid in PERSON_TAB_IDS if tid not in done and (tid in props or tid in made)]
+    if todo:
+        client.spreadsheets().batchUpdate(spreadsheetId=sid, body={
+            "requests": _strip_old_look(client, sid, todo) + person_tab_layout_requests(todo)}).execute()
+    if todo or cfg.get("person_tabs_v6_ids") is None:
+        cfg["person_tabs_v6"] = True
+        cfg["person_tabs_v6_ids"] = sorted(done | set(todo))
+        pol["handoff_sheet"] = cfg
+        prog.booking_policy_json = json.dumps(pol)
+        db.commit()
+    return {"created": made, "laid_out": todo, "changed": len(reqs)}
 
 
 def ensure_fu_tabs(db: Session, prog, client, sid: str, team: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -1770,15 +1828,27 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
     # are balanced SEPARATELY - a new appointment goes to whoever has the
     # fewest upcoming appointments, a new follow-up to whoever has the fewest
     # open follow-ups (ties: in turn). A newcomer catches up first.
+    # Owner, Nov 25 ("everybody's getting an even amount of appointments
+    # starting now"): the count starts over whenever the people in the
+    # rotation change (someone added, removed or paused), and from then on
+    # each new one goes to whoever has received the fewest since - a newcomer
+    # gets their even share, not everything until they catch up.
+    since_raw = cfg.get("rr_since")
+    if sorted(cfg.get("rr_members") or []) != sorted(rotation) or not since_raw:
+        cfg["rr_since"], cfg["rr_members"] = now.isoformat(), list(rotation)
+        since = now
+    else:
+        since = datetime.fromisoformat(since_raw)
     load = {t: {n: 0 for n in rotation} for t in (APPOINTMENTS, FOLLOW_UPS)}
+    for r in known.values():
+        if r.tab in load and (r.assigned_to or "") in load[r.tab] and r.assigned_at and r.assigned_at >= since:
+            load[r.tab][r.assigned_to] += 1
     appt_owner_by_lead: Dict[str, str] = {}
     for t in (APPOINTMENTS, FOLLOW_UPS):
         for row in rows[t]:
             rid0 = str(row[0])
             a = (staff[t].get(rid0) or {}).get("assigned") or ""
             if a and _eligible(t, row, today_serial):
-                if a in load[t]:
-                    load[t][a] += 1
                 if t == APPOINTMENTS and known.get(rid0) is not None and known[rid0].lead_id:
                     appt_owner_by_lead[known[rid0].lead_id] = a
     turn_key = {APPOINTMENTS: "rr_last_appt", FOLLOW_UPS: "rr_last_fu"}
@@ -2075,13 +2145,14 @@ def sync(db: Session, prog, client=None) -> Dict[str, Any]:
     except Exception as exc:                             # noqa: BLE001 - the data still goes in
         db.rollback()
         log.warning("handoff sheet layout not applied: %s", X.categorize(exc))
+    team_now = read_team(client, sid)
     try:
-        ensure_person_tabs(db, prog, client, sid)
+        ensure_person_tabs(db, prog, client, sid, team_now)
     except Exception as exc:                             # noqa: BLE001 - the main tabs still sync
         db.rollback()
         log.warning("handoff sheet person tabs layout not applied: %s (%s)", X.categorize(exc), str(exc)[:300])
     try:
-        ensure_fu_tabs(db, prog, client, sid, read_team(client, sid))
+        ensure_fu_tabs(db, prog, client, sid, team_now)
     except Exception as exc:                             # noqa: BLE001 - the main tabs still sync
         db.rollback()
         log.warning("handoff sheet follow-up tabs not set up: %s (%s)", X.categorize(exc), str(exc)[:300])
