@@ -41,12 +41,12 @@ def _real(db, lead):
 def test_a_held_reply_sent_later_marks_the_family_answered(client, auto, sample_advisor, monkeypatch):
     db, org, admin, prog = auto["db"], auto["org"], auto["admin"], auto["prog"]
     lead = _real(db, _lead_for(db, org, sample_advisor, "L001"))
-    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": False})
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None, **_k: {"permitted": False})
     _run(db, lead, "Yes I'd like to come in to talk about a plan", _Fake([_d("offer_times", "Would {TIMES} work?")]))
     resp = db.query(ProgramResponse).filter_by(lead_id=lead.id).one()
     assert resp.handling_status == "new"                             # held overnight: not answered yet
     assert _home(client, db, admin)["counts"]["needs_attention"] == 1
-    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": True})
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None, **_k: {"permitted": True})
     S.sweep(db)
     db.refresh(resp)
     assert len(auto["sent"]) == 1 and resp.handling_status == "responded"
@@ -60,7 +60,7 @@ def test_replies_answered_before_the_fix_are_recognised(client, auto, sample_adv
     """Existing production rows: the AI's held reply went out but the message stayed 'new'."""
     db, org, admin, prog = auto["db"], auto["org"], auto["admin"], auto["prog"]
     lead = _real(db, _lead_for(db, org, sample_advisor, "L001"))
-    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": False})
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None, **_k: {"permitted": False})
     _run(db, lead, "Yes I'd like to come in to talk about a plan", _Fake([_d("offer_times", "Would {TIMES} work?")]))
     t = db.query(ProgramConversationTurn).filter_by(lead_id=lead.id, role="ai").one()
     t.delivery = "sent"                                              # sent by the old sweep, message left 'new'
@@ -133,6 +133,6 @@ def test_a_held_follow_up_marks_nothing_answered(auto, sample_advisor, monkeypat
     db.add(ProgramConversationTurn(conversation_id=conv.id, organization_id=org.id, lead_id=lead.id, role="ai",
                                    text="Just checking in.", action="follow_up", delivery="held"))
     db.commit()
-    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": True})
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None, **_k: {"permitted": True})
     S.sweep(db)
     assert db.query(ProgramResponse).filter_by(lead_id=lead.id).one().handling_status == "new"

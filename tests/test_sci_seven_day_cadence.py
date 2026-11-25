@@ -124,7 +124,7 @@ def test_choosing_every_day_late_in_the_day_raises_no_missed_batch_alarm(client,
 def sci_text(program, sample_advisor, monkeypatch):
     db, org = program["db"], program["org"]
     _sending_on(monkeypatch)
-    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": True, "reason": ""})
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None, **_k: {"permitted": True, "reason": ""})
     lead = _lead_for(db, org, sample_advisor, "L001", phone="2055550111")
     lead.is_test = False
     st = db.query(CadenceState).filter_by(lead_id=lead.id).one()
@@ -201,7 +201,7 @@ def test_other_workspaces_keep_their_own_hours(db_session, sample_org, sample_ad
     """No program in this workspace: the SCI window does not apply."""
     from tests.test_cadence_engine import _due, _lead
     _sending_on(monkeypatch)
-    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": True, "reason": ""})
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None, **_k: {"permitted": True, "reason": ""})
     lead = _lead(db_session, sample_org, sample_advisor, phone="12145552777")
     _due(db_session, lead)
     early = datetime.utcnow().replace(hour=13, minute=30, second=0, microsecond=0) + timedelta(days=1)  # ~7:30 CT

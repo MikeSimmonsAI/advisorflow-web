@@ -104,7 +104,7 @@ def test_held_sweep_never_sends_twice(wired, sample_advisor, monkeypatch):
         db_.commit()                                             # send_sms commits its Message row
         return SimpleNamespace(id="M%d" % len(texts))
     monkeypatch.setattr("app.services.sms_service.send_sms", fake_send)
-    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now: {"permitted": True})
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now, **_k: {"permitted": True})
     monkeypatch.setattr("app.services.programs.appointments.program_advisor", lambda db_, p: sample_advisor)
     ai_setter.sweep(db)
     ai_setter.sweep(db)
@@ -128,7 +128,7 @@ def test_held_reply_refused_at_sweep_alerts_staff(wired, sample_advisor, monkeyp
     def refuse(*a_, **k):
         raise ValueError("carrier refused")
     monkeypatch.setattr("app.services.sms_service.send_sms", refuse)
-    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now: {"permitted": True})
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now, **_k: {"permitted": True})
     monkeypatch.setattr("app.services.programs.appointments.program_advisor", lambda db_, p: sample_advisor)
     ai_setter.sweep(db)
     t = db.query(ProgramConversationTurn).filter_by(lead_id=a.id).one()
@@ -246,7 +246,7 @@ def test_a_deliberately_blocked_held_reply_pages_nobody(wired, sample_advisor, m
     def refuse(*a_, **k):
         raise ValueError("Lead x: CAMPAIGN OFF: this contact's campaign is not switched on")
     monkeypatch.setattr("app.services.sms_service.send_sms", refuse)
-    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now: {"permitted": True})
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now, **_k: {"permitted": True})
     monkeypatch.setattr("app.services.programs.appointments.program_advisor", lambda db_, p: sample_advisor)
     before = len(_owner_texts(sent))
     ai_setter.sweep(db)
