@@ -630,6 +630,24 @@ def void(db: Session, env: EsignEnvelope, reason: Optional[str], user=None) -> D
     return {"voided": True}
 
 
+def set_cc(db: Session, env: EsignEnvelope, cc: List[str], user=None) -> Dict[str, Any]:
+    """Replace who gets a copy of the sealed document (only while it is out
+    for signature). CC addresses never sign and get nothing until it is sealed."""
+    if env.status != "sent":
+        raise EsignError("Only a document still out for signature can be changed.", 409)
+    clean: List[str] = []
+    for e in cc or []:
+        e = (e or "").strip().lower()
+        if not EMAIL_RE.match(e) or "," in e:
+            raise EsignError("Copy-to address '%s' isn't a valid email." % e, 400)
+        if e not in clean:
+            clean.append(e)
+    old = cc_list(env)
+    env.cc_emails = ",".join(clean) or None
+    _event(db, env, "cc_changed", detail={"from": old, "to": clean, "by": getattr(user, "email", None)})
+    return {"cc": clean}
+
+
 def change_signer_email(db: Session, env: EsignEnvelope, role: str, email: str, user=None) -> Dict[str, Any]:
     """Point a signer who has not signed yet at a different email address.
 

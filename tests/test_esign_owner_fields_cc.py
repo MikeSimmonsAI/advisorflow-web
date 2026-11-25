@@ -149,3 +149,31 @@ def test_evosys_org_sends_from_support_address_with_app_links(client, god, sampl
     assert m["from_name"].endswith("via EvoSys")
     assert "https://app.evosyspro.live/sign/" in m["html"]
     assert "onrender.com" not in m["html"]
+
+
+def test_owner_swaps_a_waiting_signer_and_the_cc_without_emailing_the_first_signer(client, god, sample_org, mail, db_session):
+    out = ok(client.post("/esign/owner/orgs/%s/envelopes" % sample_org.id, headers=god, json=body()))
+    eid = out["envelope_id"]
+    before = len(mail)
+    r = ok(client.put("/esign/owner/envelopes/%s/signer-email" % eid, headers=god,
+                      json={"role": "Owner", "email": "owner.new@example.test"}))
+    assert r["email"] == "owner.new@example.test" if "email" in r else True
+    assert ok(client.put("/esign/owner/envelopes/%s/cc" % eid, headers=god,
+                         json={"cc": ["office@example.test"]}))["cc"] == ["office@example.test"]
+    assert len(mail) == before  # the waiting owner isn't emailed yet; the agency gets nothing new
+    st = ok(client.get("/esign/owner/envelopes/%s" % eid, headers=god))
+    assert [s["email"] for s in st["signers"]] == ["alex@example.test", "owner.new@example.test"]
+    assert st["cc"] == ["office@example.test"]
+    # Non-owners can't change anything.
+    assert client.put("/esign/owner/envelopes/%s/cc" % eid, json={"cc": []}).status_code in (401, 403)
+    # Finish: the new owner address signs, the new CC gets the sealed copy, the old ones get nothing.
+    a = token_for(mail, "alex@example.test")
+    verify(client, mail, a, "alex@example.test")
+    ok(client.post("/esign/sign/%s/sign" % a, json={"consent": True, "typed_name": "Alex Agency",
+       "fields": {"agency_legal_name": "Example Media LLC", "agency_title": "Director"}}))
+    o = token_for(mail, "owner.new@example.test")
+    verify(client, mail, o, "owner.new@example.test")
+    ok(client.post("/esign/sign/%s/sign" % o, json={"consent": True, "typed_name": "Olivia Owner"}))
+    done = {m["to"] for m in mail if m["type"] == "esign_completed"}
+    assert done == {"alex@example.test", "owner.new@example.test", "office@example.test"}
+    assert not any(m["to"] in ("owner@example.test", "copy@example.test") for m in mail)
