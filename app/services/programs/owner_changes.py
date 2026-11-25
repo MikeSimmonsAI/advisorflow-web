@@ -233,6 +233,16 @@ NSMG3 = [
 FWD_KEY = "restland-forwarded-anne-2026-11-24"
 FWD_UNTIL = datetime(2026, 11, 27, 6, 0)
 FWD = [("dbcf4b2f-45d9-40a8-8501-eecd8d28ef33", "Hi, I'm here for your call.", datetime(2026, 11, 24, 16, 4))]
+# Owner, Nov 24 6:50 PM: Gun Maran's first text went to (817) 360-6862; that
+# number replied with his contact info ("+1 (214) 392-5105 / Gun Mai Maran",
+# "This is his contact info"). The record becomes Gun Mai Maran at the new
+# number, history kept, and he re-enters the Family File Review at Day 1 -
+# only if the new number passes the usual checks (on no other contact, not
+# opted out or suppressed, outreach-eligible, a cell phone).
+GUN_KEY = "restland-gun-maran-new-number-2026-11-24"
+GUN_UNTIL = datetime(2026, 11, 27, 6, 0)
+GUN = "068130dd-ce6d-494b-9fca-75d1375d2f09"
+GUN_OLD, GUN_NEW = "8173606862", "2143925105"
 # Owner, Nov 24 11:51 AM: David Ahmad asked for a call ("you can call me at
 # 817.723.4630") - his Sat Nov 28 10 AM appointment is a PHONE CALL, on the
 # app, the sheet and the calendar. Nothing is sent to him by this change.
@@ -987,6 +997,117 @@ def restland_forwarded_anne(db: Session, prog, now: datetime) -> Dict:
     return out
 
 
+def _d10(v) -> str:
+    d = re.sub(r"\D", "", str(v or ""))
+    return d[1:] if len(d) == 11 and d.startswith("1") else d
+
+
+def restland_gun_new_number(db: Session, prog, now: datetime, line_adapter=None) -> Dict:
+    from app.models.models import CadenceState, Lead, SuppressionEntry
+    from app.models.program_models import ProgramResponse, ProgramSourceRecord
+    from app.models.work_models import LeadNote
+    from app.services import cadence_service as CS
+    from app.services import test_records
+    from app.services.programs import ai_setter, line_check
+    org_id = prog.organization_id
+    run, item = _open_run(db, org_id, GUN_KEY)
+    out: Dict = {"changed": False, "enrolled": False}
+
+    def done(**k):
+        out.update(k)
+        run.status, run.finished_at, run.summary_json = "applied", datetime.utcnow(), json.dumps(out, default=str)
+        db.commit()
+        return out
+    lead = db.query(Lead).filter(Lead.id == GUN, Lead.organization_id == org_id).first()
+    if lead is None:
+        return done(blocker="contact not found")
+    # the new number on any other contact of this workspace?
+    others = [l.id for l in db.query(Lead).filter(Lead.organization_id == org_id, Lead.id != lead.id).all()
+              if GUN_NEW in (_d10(l.phone), _d10(getattr(l, "callback_phone", None)))]
+    from app.models.reset_models import CampaignCycleMember as _CCM
+    others += [m.lead_id for m in db.query(_CCM).filter(_CCM.organization_id == org_id,
+                                                        _CCM.phone_e164 == "+1" + GUN_NEW,
+                                                        _CCM.lead_id != lead.id).all()]
+    if others:
+        return done(blocker="(214) 392-5105 is already on another contact: %s" % ", ".join(sorted(set(others))))
+    before = {"first": lead.first_name, "last": lead.last_name, "phone": lead.phone, "status": lead.status}
+    if _d10(lead.phone) == GUN_OLD:
+        lead.first_name, lead.last_name = "Gun Mai", "Maran"
+        lead.phone = "1" + GUN_NEW
+        if hasattr(lead, "phone_raw"):
+            lead.phone_raw = "(214) 392-5105"
+        for rec in db.query(ProgramSourceRecord).filter(ProgramSourceRecord.lead_id == lead.id).all():
+            rec.phone = GUN_NEW
+        # his open Family File Review round tracks the number it texts
+        from app.models.reset_models import CampaignCycleMember
+        for m in db.query(CampaignCycleMember).filter(CampaignCycleMember.lead_id == lead.id,
+                                                      CampaignCycleMember.phone_e164 == "+1" + GUN_OLD).all():
+            m.phone_e164 = "+1" + GUN_NEW
+        db.add(LeadNote(organization_id=org_id, lead_id=lead.id, kind="internal", body=(
+            "Owner, Nov 24: phone changed from (817) 360-6862 to (214) 392-5105 and name to Gun Mai Maran, "
+            "based on the reply from (817) 360-6862 at 6:43 PM (\"+1 (214) 392-5105 / Gun Mai Maran\" - "
+            "\"This is his contact info\"). The old number belongs to someone else; nothing more goes to it. "
+            "Conversation history kept.")))
+        item("lead", lead.id, "new_number", before, {"first": "Gun Mai", "last": "Maran", "phone": lead.phone},
+             "owner Nov 24: number replaced from the inbound reply")
+        out["changed"] = True
+    elif _d10(lead.phone) != GUN_NEW:
+        return done(blocker="his number is neither the old nor the new one (%s) - left alone" % lead.phone)
+    # nothing more goes out on the old run
+    st = db.query(CadenceState).filter(CadenceState.lead_id == lead.id).first()
+    if st is not None and st.status == "active":
+        CS.stop_cadence_for_lead(db, lead.id, "stopped_number_changed")
+    db.commit()
+    # the usual checks, on the new number
+    e164 = "+1" + GUN_NEW
+    supp = {(_d10(e.phone)) for e in db.query(SuppressionEntry).filter(SuppressionEntry.organization_id == org_id).all()}
+    try:
+        from app.services import sms_programs
+        opted = {_d10(x) for x in sms_programs.opted_out_numbers(db, org_id)}
+    except Exception:                                    # noqa: BLE001
+        opted = set()
+    if GUN_NEW in supp or GUN_NEW in opted:
+        return done(blocker="(214) 392-5105 is opted out or suppressed")
+    if (lead.status or "") == "dnc" or getattr(lead, "allow_sms", None) is False:
+        return done(blocker="the contact is do-not-contact")
+    if lead.is_duplicate or not test_records.is_outreach_eligible(lead):
+        return done(blocker="the contact is not eligible for outreach (duplicate, test or suppressed)")
+    line = line_check.check_lead(db, lead, line_adapter)
+    db.commit()
+    out["line_type"] = line
+    if line != "mobile":
+        return done(blocker="(214) 392-5105 checked as %s, not a cell phone - texts can't go to it"
+                    % (line or "unknown (lookup failed)"))
+    # Day 1 of the Family File Review, the way a restart from text 1 works:
+    # one text schedule, a new start, text 1 next (sent in Restland's slots).
+    if st is None:
+        lead.status = "new"
+        db.commit()
+        st = CS.start_cadence(db, lead)
+    else:
+        st.status, st.completed_at, st.current_touch_number = "active", None, 0
+        st.cadence_started_at = now
+        st.next_touch_due_at = now
+    lead.status = "new"
+    conv = ai_setter.conversation_for(db, lead)
+    conv.offered_at = None
+    try:
+        ai_setter.set_owner(db, lead, ai_setter.AI_OWNER, actor=None,
+                            note="New number (214) 392-5105 - started over at Day 1", at=now)
+    except ValueError as exc:
+        return done(blocker=str(exc))
+    for r in db.query(ProgramResponse).filter(ProgramResponse.lead_id == lead.id,
+                                              ProgramResponse.handling_status.in_(("new", "opened"))).all():
+        r.handling_status = "closed"                     # the relative's replies: answered by this change
+    for r in db.query(ProgramResponse).filter(ProgramResponse.lead_id == lead.id).all():
+        r.response_class = "number_changed"              # not him answering: his new texts are not stopped
+    item("cadence_state", st.id if st is not None else None, "day1", {}, {"next_touch": 1},
+         "owner Nov 24: re-entered at Day 1 on the new number")
+    db.commit()
+    return done(enrolled=True, next_touch_due_at=st.next_touch_due_at if st is not None else None,
+                cadence_state=st.id if st is not None else None)
+
+
 def restland_david_phone(db: Session, prog, now: datetime) -> Dict:
     from app.models.models import BookingLink, Lead
     from app.services.programs import booking_policy as BP
@@ -1035,7 +1156,7 @@ def apply_pending(db: Session, now: Optional[datetime] = None) -> Dict:
     from app.services.programs import outreach_slots as OS
     now = now or datetime.utcnow()
     out: Dict = {}
-    if now >= max(APPLY_UNTIL, SUNDAYS_APPLY_UNTIL, MORNING_UNTIL, DAVID_UNTIL, NSMG3_UNTIL, FWD_UNTIL):
+    if now >= max(APPLY_UNTIL, SUNDAYS_APPLY_UNTIL, MORNING_UNTIL, DAVID_UNTIL, NSMG3_UNTIL, FWD_UNTIL, GUN_UNTIL):
         return out
     for prog in db.query(OutreachProgram).all():
         try:
@@ -1071,6 +1192,8 @@ def apply_pending(db: Session, now: Optional[datetime] = None) -> Dict:
                                                                      CARMELITA_330_SLOT)
                 if now < NSMG3_UNTIL and _ledger(db, prog.organization_id, NSMG3_KEY) is None:
                     res["nsmg_replies"] = restland_nsmg_replies(db, prog, now)
+                if now < GUN_UNTIL and _ledger(db, prog.organization_id, GUN_KEY) is None:
+                    res["gun_new_number"] = restland_gun_new_number(db, prog, now)
                 if now < FWD_UNTIL and _ledger(db, prog.organization_id, FWD_KEY) is None:
                     res["forwarded_anne"] = restland_forwarded_anne(db, prog, now)
                 if now < DAVID_UNTIL and _ledger(db, prog.organization_id, DAVID_KEY) is None:

@@ -81,3 +81,81 @@ def test_nov24_forwarded_reply_is_recorded_without_touching_the_booking(rl, monk
                                             ProgramResponse.channel == "email").count() == 1
     assert ai_setter.conversation_for(db, a).state == before
     assert OC._ledger(db, org, OC.FWD_KEY) is not None
+
+
+class _Line:
+    def __init__(self, kind):
+        self.kind = kind
+
+    def validate_phone(self, d):
+        return {"line_type": self.kind}
+
+
+def _gun(rl, monkeypatch, phone="18173606862"):
+    from app.models.models import CadenceState
+    _launch(rl)
+    db, org = rl["db"], rl["org"].id
+    prog = db.query(OutreachProgram).filter(OutreachProgram.organization_id == org).first()
+    lead = db.query(Lead).filter(Lead.organization_id == org).first()
+    lead.phone, lead.status, lead.phone_line_type, lead.phone_line_number = phone, "replied", "mobile", "8173606862"
+    from unittest.mock import patch
+    from app.models.models import Reply
+    from app.services.programs import responses as R
+    rep = Reply(lead_id=lead.id, body="+1 (214) 392-5105 Gun Mai Maran", source="sms", received_at=datetime.utcnow())
+    db.add(rep)
+    db.commit()
+    with patch("app.services.programs.responses._deliver_staff_alert", return_value=(True, None)):
+        R.on_inbound(db, lead, rep.body, "sms", reply_id=rep.id, run_setter=False)
+    st = db.query(CadenceState).filter(CadenceState.lead_id == lead.id).first()
+    if st is None:
+        st = CadenceState(lead_id=lead.id)
+        db.add(st)
+    st.status, st.current_touch_number = "stopped_replied", 1
+    st.cadence_started_at, st.completed_at = datetime(2026, 11, 24, 23, 0), datetime(2026, 11, 24, 23, 5)
+    db.commit()
+    monkeypatch.setattr(OC, "GUN", lead.id)
+    return db, org, prog, lead
+
+
+def test_gun_new_number_replaces_the_old_one_and_starts_day_1(rl, monkeypatch):
+    from app.models.models import CadenceState
+    from app.models.work_models import LeadNote
+    from app.services.programs import ai_setter
+    db, org, prog, lead = _gun(rl, monkeypatch)
+    now = datetime(2026, 11, 25, 1, 0)
+    out = OC.restland_gun_new_number(db, prog, now, line_adapter=_Line("mobile"))
+    assert out["changed"] and out["enrolled"], out
+    db.refresh(lead)
+    assert (lead.first_name, lead.last_name, lead.phone) == ("Gun Mai", "Maran", "12143925105")
+    assert lead.phone_line_number == "2143925105" and lead.phone_line_type == "mobile"
+    sts = db.query(CadenceState).filter(CadenceState.lead_id == lead.id).all()
+    assert len(sts) == 1 and sts[0].status == "active" and sts[0].current_touch_number == 0
+    assert sts[0].cadence_started_at == now                               # Day 1, a new run
+    assert ai_setter.conversation_for(db, lead).state != "human"
+    assert any("(817) 360-6862" in n.body and "(214) 392-5105" in n.body
+               for n in db.query(LeadNote).filter_by(lead_id=lead.id))
+    assert OC._ledger(db, org, OC.GUN_KEY) is not None
+    # the relative's reply from the old number does not stop the new texts
+    from app.services.programs import rotation
+    assert rotation.reply_counts_for_cadence(db, lead) is False
+
+
+def test_gun_stops_when_the_new_number_is_someone_else_or_not_a_cell(rl, monkeypatch):
+    from app.models.models import CadenceState
+    db, org, prog, lead = _gun(rl, monkeypatch)
+    other = db.query(Lead).filter(Lead.organization_id == org, Lead.id != lead.id).first()
+    other.phone = "12143925105"
+    db.commit()
+    out = OC.restland_gun_new_number(db, prog, datetime(2026, 11, 25, 1, 0), line_adapter=_Line("mobile"))
+    assert "another contact" in out["blocker"] and not out["changed"]
+    db.refresh(lead)
+    assert lead.phone == "18173606862"                                    # nothing touched
+
+
+def test_gun_landline_is_updated_but_not_texted(rl, monkeypatch):
+    from app.models.models import CadenceState
+    db, org, prog, lead = _gun(rl, monkeypatch)
+    out = OC.restland_gun_new_number(db, prog, datetime(2026, 11, 25, 1, 0), line_adapter=_Line("landline"))
+    assert out["changed"] and not out["enrolled"] and "landline" in out["blocker"]
+    st = db.query(CadenceState).filter(CadenceState.lead_id == lead.id).one()
+    assert st.status != "active"
