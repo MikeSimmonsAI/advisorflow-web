@@ -2060,7 +2060,8 @@ def _own_copy_preview(db: Session, prog, f: CampaignFamily, prof: LocationProfil
     # The real offers the family would get right now (calendar read, failing
     # closed) - the preview shows exactly what goes out (owner, Nov 17).
     from types import SimpleNamespace as _NS
-    _who = _NS(id=None, organization_id=prog.organization_id)
+    # The family's own offer (offers rotate family to family, Nov 25).
+    _who = _NS(id=(rec.lead_id if rec else None), organization_id=prog.organization_id)
     offers = {"time_offer": identity.time_offer_for(db, _who, "sms"),
               "tomorrow_offer": identity.tomorrow_offer_for(db, _who, "sms")}
     r = _et.render_touch(db, prog, f, prof, who, "first",
