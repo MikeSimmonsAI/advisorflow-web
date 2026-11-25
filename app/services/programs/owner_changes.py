@@ -239,7 +239,7 @@ FWD = [("dbcf4b2f-45d9-40a8-8501-eecd8d28ef33", "Hi, I'm here for your call.", d
 # number, history kept, and he re-enters the Family File Review at Day 1 -
 # only if the new number passes the usual checks (on no other contact, not
 # opted out or suppressed, outreach-eligible, a cell phone).
-GUN_KEY = "restland-gun-maran-new-number-2026-11-24"
+GUN_KEY = "restland-gun-maran-new-number-2026-11-24-b"   # -a stopped on a startup import error
 GUN_UNTIL = datetime(2026, 11, 27, 6, 0)
 GUN = "068130dd-ce6d-494b-9fca-75d1375d2f09"
 GUN_OLD, GUN_NEW = "8173606862", "2143925105"

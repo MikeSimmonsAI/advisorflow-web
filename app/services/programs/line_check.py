@@ -30,6 +30,9 @@ def check_lead(db: Session, lead, adapter=None) -> Optional[str]:
     """Look the number up (once) and store mobile / landline / voip / unknown / invalid."""
     if not needs_check(lead):
         return getattr(lead, "phone_line_type", None)
+    # providers first: vendors <-> providers import each other, and importing
+    # vendors cold fails (owner change at startup, Nov 24).
+    import app.services.evosense.providers  # noqa: F401
     from app.services.evosense.vendors import TwilioLookupLineType
     adapter = adapter or TwilioLookupLineType()
     d = _digits10(lead.phone)

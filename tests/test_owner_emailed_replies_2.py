@@ -159,3 +159,14 @@ def test_gun_landline_is_updated_but_not_texted(rl, monkeypatch):
     assert out["changed"] and not out["enrolled"] and "landline" in out["blocker"]
     st = db.query(CadenceState).filter(CadenceState.lead_id == lead.id).one()
     assert st.status != "active"
+
+
+def test_line_check_imports_cold():
+    """The line check's lookup must import in a fresh process (it failed at startup)."""
+    import subprocess
+    import sys
+    code = ("import app.services.programs.line_check as L, inspect, re;"
+            "src = inspect.getsource(L.check_lead);"
+            "exec(compile('import app.services.evosense.providers\\nfrom app.services.evosense.vendors import TwilioLookupLineType', 'x', 'exec'))")
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[-500:]
