@@ -634,3 +634,5 @@ import app.models.evosys_sales_models  # noqa: F401,E402  (imported for side eff
 import app.models.client_growth_models  # noqa: F401,E402  (imported for side effects)
 # Free commercial-cleaning walkthrough requests from the public page (LinkedIn offer).
 import app.models.walkthrough_request_models  # noqa: F401,E402  (imported for side effects)
+# Restland BookIT (owner directive v2.0, Nov 25): sales, Evo 6 Block, ADD Leads, paperwork, audit.
+import app.models.bookit_models  # noqa: F401  (imported for side effects)

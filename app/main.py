@@ -153,6 +153,7 @@ from app.routers.deal_builder_router import router as deal_builder_router
 from app.routers.sales_team_router import router as sales_team_router
 from app.routers.team_app_router import router as team_app_router
 from app.routers.team_board_router import router as team_board_router
+from app.routers.restland_bookit_router import router as restland_bookit_router
 from app.routers.launcher_router import router as launcher_router
 from app.routers.sales_demo_requests_router import router as sales_demo_requests_router
 from app.routers.launch_router import god_router as launch_god_router
@@ -1101,6 +1102,7 @@ app.include_router(launcher_router)           # /launcher — Program Access pin
 app.include_router(sales_team_router)         # /sales-team — My Team + sales onboarding (server-gated)
 app.include_router(team_app_router)           # /team-app — mobile Team Chat + Timekeeping (server-gated)
 app.include_router(team_board_router)         # /program/team-board — the handoff sheet inside EvoSys (owner-only until opened)
+app.include_router(restland_bookit_router)    # /restland-bookit — Restland BookIT (owner-only until opened to the team)
 app.include_router(launch_god_router)         # /god/launch — staff, god_admin only
 app.include_router(launch_template_router)    # /god/launch-templates/{brand}
 app.include_router(email_tracking_router)
