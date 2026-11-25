@@ -261,3 +261,22 @@ def test_emailed_replies_are_entered_and_outreach_stops(setter, sample_advisor, 
     from app.models.models import Organization
     assert db.get(Organization, org.id).reply_to_email == OC.REPLY_TO_SYSTEM
     assert out["reply_to"]["after"] == "support@evosyspro.live"
+
+
+def test_sunday_answers_a_family_who_writes_in_but_reaches_out_to_nobody(rl):
+    """Owner, Nov 25: 'We're not reaching out on Sunday ... but if they reply
+    to us, the system's going to kick back and answer. If they want to book an
+    appointment, they can.' Thanksgiving (a no-contact day) still holds all."""
+    _launch(rl)
+    OS.clear_cache()
+    db, org = rl["db"], rl["org"].id
+    lead = _dallas(rl)
+    assert not CH.is_permitted(lead, SUN_NOON)                        # outreach: still off on Sunday
+    assert CH.check(lead, SUN_NOON, program_days=False)["permitted"]  # an answer: goes
+    assert not OS.closed_for_replies(SUN_NOON)
+    assert OS.closed_for_replies(utc(2026, 11, 26, 12, 0))            # Thanksgiving: nothing at all
+    import inspect
+    from app.services.programs import ai_setter as AS
+    src = inspect.getsource(AS)
+    assert "contact_hours.check(lead, now, program_days=False)" in src  # replies skip the closed day
+    assert "closed_for_replies(now)" in src

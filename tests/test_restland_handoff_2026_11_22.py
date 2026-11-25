@@ -906,3 +906,45 @@ def test_a_blanked_id_header_is_put_back_and_the_sync_goes_on():
     sheet[RS.FOLLOW_UPS][0][0] = " "
     out = RS.upsert(_Client(sheet), "sid", RS.FOLLOW_UPS, [["FU-1"] + ["x"] * 8])
     assert sheet[RS.FOLLOW_UPS][0][0] == "Follow-Up ID" and out["inserted"] == 1
+
+
+def test_appointments_from_the_even_date_are_dealt_out_evenly_then_stay_even(setter):
+    """Owner, Nov 25 4:44 PM: 'Reassign everything from Saturday on ... I want
+    it even from Saturday.' Then strict turns, fewest first."""
+    from app.services.programs import restland_sheet as RS2
+    db = setter["db"]
+    prog = _prog(setter)
+    now = datetime(2026, 11, 25, 23, 0)
+    today = int(__import__("app.services.volt.sheets_export", fromlist=["x"]).central_serial(now))
+    sat = today + 3                                                  # Sat Nov 28
+    sheet = _board([("Neoso", "TRUE"), ("Kitty", "TRUE"), ("Laura", "TRUE"), ("Johnny", "TRUE")])
+    appts = [_appt("thu", today + 1), _appt("fri", today + 2)] + [_appt("s%d" % i, sat + i // 3) for i in range(9)]
+    _run_team(db, prog, sheet, appts, [], now)                       # whatever the old rules did
+    # Lopsided by hand: Laura was given six of the Saturday-on ones.
+    for r in sheet[RS.APPOINTMENTS][1:]:
+        if r[0] in ("s0", "s1", "s2", "s3", "s4", "s5"):
+            _pad(r)[12] = "Laura"
+    before = {r[0]: _c(r, 12) for r in sheet[RS.APPOINTMENTS][1:]}
+    cfg = json.loads(prog.booking_policy_json)
+    cfg["handoff_sheet"]["appt_even_from"] = "2026-11-28"
+    prog.booking_policy_json = json.dumps(cfg)
+    db.commit()
+    out = _run_team(db, prog, sheet, appts, [], now + timedelta(minutes=2))
+    got = {r[0]: _c(r, 12) for r in sheet[RS.APPOINTMENTS][1:]}
+    assert [got["s%d" % i] for i in range(9)] == ["Neoso", "Kitty", "Laura", "Johnny"] * 2 + ["Neoso"]
+    assert got["thu"] == before["thu"] and got["fri"] == before["fri"]   # before Saturday: untouched
+    assert out["appointments_evened"]["appointments"] == 9
+    # once only: the next pass does not deal them out again
+    _pad(sheet[RS.APPOINTMENTS][-1])[12] = "Johnny"                  # someone moved one by hand
+    out = _run_team(db, prog, sheet, appts, [], now + timedelta(minutes=4))
+    assert "appointments_evened" not in out
+    # new ones keep it even, fewest first, ties in the fixed order
+    appts += [_appt("n%d" % i, sat + 5) for i in range(3)]
+    _run_team(db, prog, sheet, appts, [], now + timedelta(minutes=6))
+    got = {r[0]: _c(r, 12) for r in sheet[RS.APPOINTMENTS][1:]}
+    counts = {}
+    for i in list(range(9)) + ["n0", "n1", "n2"]:
+        k = got["s%d" % i] if isinstance(i, int) else got[i]
+        counts[k] = counts.get(k, 0) + 1
+    assert sorted(counts.values()) == [3, 3, 3, 3]
+    assert RS2.APPOINTMENTS == RS.APPOINTMENTS

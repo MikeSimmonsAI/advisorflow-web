@@ -356,7 +356,7 @@ def test_a_skipped_blank_text_is_recorded_not_sent(program, sample_advisor, monk
     from app.services import entitlements
     monkeypatch.setattr(entitlements, "org_has_feature", lambda org, f: True)
     from app.services import contact_hours
-    monkeypatch.setattr(contact_hours, "check", lambda lead, now=None: {"permitted": True})
+    monkeypatch.setattr(contact_hours, "check", lambda lead, now=None, **_k: {"permitted": True})
     from app.services.programs import send_window
     monkeypatch.setattr(send_window, "permits", lambda now=None, days=None: True)   # not a test of the clock
     try:

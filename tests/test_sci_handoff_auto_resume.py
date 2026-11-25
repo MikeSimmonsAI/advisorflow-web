@@ -36,7 +36,7 @@ def world(setter, sample_advisor, monkeypatch):
     db, prog = setter["db"], setter["prog"]
     prog.ai_setter_mode = "auto"
     db.commit()
-    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": True})
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None, **_k: {"permitted": True})
     sent, hooks = [], {"fail": None, "during": None}
 
     def fake_send(db_, adv, lead_, text, *a, **k):
