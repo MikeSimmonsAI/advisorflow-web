@@ -756,7 +756,7 @@ def test_a_person_tab_lists_their_work_and_their_edits_reach_the_main_tab_and_th
     assert sheet[fut][f0][0] == "FU-x1"                              # MY FOLLOW-UPS on her own Follow-Ups tab
     # Owner, Nov 24: what she types on her Follow-Ups tab reaches the main tab
     fu_row = _pad(sheet[fut][f0], 15)
-    fu_row[13] = "Left her a voicemail"
+    fu_row[RS._FU_COL["notes"]] = "Left her a voicemail"
     out = _run_team(db, prog, sheet, appts, fus, now + timedelta(minutes=1))
     assert out["person_tab_edits"] == 1
     main_fu = sheet[RS.FOLLOW_UPS][1]
@@ -849,9 +849,11 @@ def test_person_tab_header_rows_heal_themselves(setter):
     _run_team(db, prog, sheet, [], [], now)
     ann, afu = sheet["Ann"], sheet[fut]
     assert ann[RS.PT_APPT_HEAD - 1][3] == "Family" and afu[RS.FT_BANNER - 1][0].startswith("MY FOLLOW-UPS")
-    afu[RS.FT_HEAD - 1][2] = "junk"                                  # something overwrote a header
+    fam = RS._FU_COL["family"]
+    assert afu[RS.FT_HEAD - 1][fam] == "Family" and afu[RS.FT_HEAD - 1][RS._FU_COL["updated"]] == "Last Update"
+    afu[RS.FT_HEAD - 1][fam] = "junk"                                # something overwrote a header
     out = _run_team(db, prog, sheet, [], [], now + timedelta(minutes=2))
-    assert out["person_tab_headers_fixed"] == 1 and sheet[fut][RS.FT_HEAD - 1][2] == "Family"
+    assert out["person_tab_headers_fixed"] == 1 and sheet[fut][RS.FT_HEAD - 1][fam] == "Family"
 
 
 def test_each_person_gets_their_own_follow_ups_tab(setter):
