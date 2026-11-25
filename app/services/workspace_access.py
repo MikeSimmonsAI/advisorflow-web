@@ -488,9 +488,20 @@ def _bookit_contexts(db: Session, user: User, workspaces: List[Dict[str, Any]]) 
     Its own list (not a product context) so the Restland workspace card stays."""
     out: List[Dict[str, Any]] = []
     try:
-        from app.models.program_models import ProgramTeamMember as _TM
+        from app.models.program_models import OutreachProgram as _OP, ProgramTeamMember as _TM
         from app.services.bookit import core as _bk
         from app.services.programs import identity as _ident
+        if is_god(user):
+            # The owner's God Mode login holds no workspace membership; it
+            # enters a customer by selecting it. One card per handoff-sheet program.
+            for prog in db.query(_OP).all():
+                if (json.loads(prog.booking_policy_json or "{}").get("handoff_sheet") or {}).get("id"):
+                    org = db.query(Organization).filter(Organization.id == prog.organization_id).first()
+                    out.append({"type": "restland_bookit", "label": "Restland BookIT",
+                                "organization_id": prog.organization_id,
+                                "organization_name": org.name if org else "Restland",
+                                "path": "/program/restland-bookit"})
+            return out
         for w in workspaces:
             if not w.get("is_program"):
                 continue
