@@ -791,13 +791,14 @@ def test_person_tab_layout_is_valid_and_applied_once(setter):
             return _Exec({})
 
         def get(self, spreadsheetId, fields=None):
-            return _Exec({"sheets": [{"properties": {"sheetId": 3}, "bandedRanges": [{"bandedRangeId": 77}],
+            return _Exec({"sheets": [{"properties": {"sheetId": 3, "title": "Person 1", "hidden": True},
+                                      "bandedRanges": [{"bandedRangeId": 77}],
                                       "conditionalFormats": [{}, {}]},
                                      {"properties": {"sheetId": 1}, "bandedRanges": [{"bandedRangeId": 5}]}]})
-    assert RS.ensure_person_tabs(db, prog, C(), "sid") is True
+    assert RS.ensure_person_tabs(db, prog, C(), "sid", [])["laid_out"] == [3]
     assert calls[0][0] == {"deleteBanding": {"bandedRangeId": 77}}               # only the person tab's
     assert calls[0][1] == calls[0][2] == {"deleteConditionalFormatRule": {"sheetId": 3, "index": 0}}
-    assert RS.ensure_person_tabs(db, prog, C(), "sid") is False and len(calls) == 1
+    assert RS.ensure_person_tabs(db, prog, C(), "sid", [])["laid_out"] == [] and len(calls) == 1
 
 
 
@@ -817,7 +818,7 @@ def test_new_families_tab_is_found_by_id_after_a_rename(setter, sample_advisor):
 
 # ── Owner, Nov 23 5:53 PM: "Kitty Arnold is sitting appointmentless" ───────
 
-def test_a_newcomer_gets_new_appointments_until_caught_up_and_follow_ups_balance_separately(setter):
+def test_a_newcomer_gets_an_even_share_from_the_moment_they_join(setter):
     db = setter["db"]
     prog = _prog(setter)
     now = datetime(2026, 11, 23, 23, 0)
@@ -831,11 +832,17 @@ def test_a_newcomer_gets_new_appointments_until_caught_up_and_follow_ups_balance
     appts += [_appt("n%d" % i, today + 2) for i in range(3)]
     fus += [_fu("FU-n%d" % i) for i in range(2)]
     _run_team(db, prog, sheet, appts, fus, now + timedelta(minutes=2))
+    # Owner, Nov 25: "everybody's getting an even amount ... starting now" -
+    # the count starts over when Kit joins, so the three go one each.
     got = {r[0]: _c(r, 12) for r in sheet[RS.APPOINTMENTS][1:]}
-    assert [got["n0"], got["n1"]] == ["Kit", "Kit"]                  # catches up first
-    assert got["n2"] in ("Ann", "Bob", "Kit")
+    assert sorted([got["n0"], got["n1"], got["n2"]]) == ["Ann", "Bob", "Kit"]
     fu = {r[0]: _c(r, 9) for r in sheet[RS.FOLLOW_UPS][1:]}
-    assert [fu["FU-n0"], fu["FU-n1"]] == ["Kit", "Kit"]
+    assert fu["FU-n0"] != fu["FU-n1"]
+    # and it stays even: three more go one each again
+    appts += [_appt("m%d" % i, today + 3) for i in range(3)]
+    _run_team(db, prog, sheet, appts, fus, now + timedelta(minutes=4))
+    got = {r[0]: _c(r, 12) for r in sheet[RS.APPOINTMENTS][1:]}
+    assert sorted([got["m0"], got["m1"], got["m2"]]) == ["Ann", "Bob", "Kit"]
 
 
 

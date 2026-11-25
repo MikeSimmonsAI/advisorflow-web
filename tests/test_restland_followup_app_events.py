@@ -232,8 +232,64 @@ def test_date_formats_are_put_back_every_ten_minutes():
             return E()
     RS._last_heal.clear()
     assert RS.heal_date_formats(C(), "sid", now=T0) is True
-    reqs = calls[0]
+    reqs = [q for q in calls[0] if "repeatCell" in q]
+    titles = [q["updateCells"] for q in calls[0] if "updateCells" in q]
     assert all(set(q["repeatCell"]["fields"].split(",")) == {"userEnteredFormat.numberFormat"} for q in reqs)
     assert {q["repeatCell"]["range"]["sheetId"] for q in reqs} == {2, 11, 12}        # only tabs that exist
+    # each tab's title points at its own Team row (Nov 25: Johnny's tab said Neoso)
+    assert {t["range"]["sheetId"] for t in titles} == {11, 12}
+    assert all(t["fields"] == "userEnteredValue" for t in titles)
+    assert "Team!A3" in [t for t in titles if t["range"]["sheetId"] == 12][0]["rows"][0]["values"][0][
+        "userEnteredValue"]["formulaValue"]
     assert RS.heal_date_formats(C(), "sid", now=T0 + timedelta(minutes=5)) is False
     assert RS.heal_date_formats(C(), "sid", now=T0 + timedelta(minutes=11)) is True
+
+
+def test_new_person_gets_an_appointments_tab_and_fresh_tabs_title_their_own_row():
+    """Owner, Nov 25: Johnny (Team row 5) got his Follow-Ups tab, but his
+    appointments tab stayed hidden as "Person 4"."""
+    import json as _json
+    calls = []
+    props = [{"sheetId": 3, "title": "Neoso Walker", "index": 4}, {"sheetId": 11, "title": "Neoso Walker \u2013 Follow-Ups", "index": 5},
+             {"sheetId": 8, "title": "Person 4", "hidden": True, "index": 10},
+             {"sheetId": 9, "title": "Person 5", "hidden": True, "index": 11},
+             {"sheetId": 14, "title": "Johnny Weon \u2013 Follow-Ups", "index": 12}]
+
+    class C:
+        def spreadsheets(self):
+            return self
+
+        def get(self, spreadsheetId, fields=None, ranges=None):
+            class E:
+                def execute(self_inner):
+                    return {"sheets": [{"properties": p} for p in props]}
+            return E()
+
+        def batchUpdate(self, spreadsheetId, body):
+            calls.append(body["requests"])
+
+            class E:
+                def execute(self_inner):
+                    return {}
+            return E()
+
+    class P:
+        booking_policy_json = _json.dumps({"handoff_sheet": {"person_tabs_v6": True}})
+
+    class D:
+        def commit(self):
+            pass
+    team = [{"name": "Neoso Walker", "row": 2, "active": True, "placeholder": False},
+            {"name": "Johnny Weon", "row": 5, "active": True, "placeholder": False},
+            {"name": "Someone New", "row": 7, "active": True, "placeholder": False}]
+    prog = P()
+    out = RS.ensure_person_tabs(D(), prog, C(), "sid", team)
+    first = calls[0]
+    ren = [q["updateSheetProperties"]["properties"] for q in first if "updateSheetProperties" in q]
+    assert {"sheetId": 8, "title": "Johnny Weon", "hidden": False} in ren
+    assert {"sheetId": 9, "title": "Person 5", "hidden": True} not in ren          # already right
+    added = [q["addSheet"]["properties"] for q in first if "addSheet" in q]
+    assert [a["sheetId"] for a in added] == [RS.PERSON_TAB_IDS[5]] and added[0]["title"] == "Someone New"
+    assert out["created"] == [RS.PERSON_TAB_IDS[5]] and out["laid_out"] == [RS.PERSON_TAB_IDS[5]]
+    assert "person_tabs_v6_ids" in _json.loads(prog.booking_policy_json)["handoff_sheet"]
+    assert RS.team_row_of(RS.PERSON_TAB_IDS[5]) == 7 and RS.team_row_of(14) == 5
