@@ -1803,13 +1803,13 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             slots, why = A.slots_on_day(db, prog, preferred_day, kind=conv.appointment_kind or A.VISIT)
         if not slots and _want and len(_want) < 7:
             slots, why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT, part=day_part(body),
-                                           weekdays=_want, days=28)
+                                           weekdays=_want, days=28, seed=lead.id)
             if slots:
                 merge_memory(conv, {"best_times": ", ".join(_DAYS[i].title() + "s" for i in sorted(_want))})
         if not slots and day_part(body):
-            slots, why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT, part=day_part(body))
+            slots, why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT, part=day_part(body), seed=lead.id)
         if not slots:
-            slots, why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT)
+            slots, why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT, seed=lead.id)
         if not slots:
             # No calendar slots is an operational block, not a reason to replace
             # the family's contextual reply with a canned appointment sentence.
@@ -1859,7 +1859,7 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             # printed copy by mail; their address makes it a mail task.
             # Get the guide to them by mail (a person sends it) and invite them in
             # to go over it - the visit is the goal. Real times only.
-            slots, _why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT)
+            slots, _why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT, seed=lead.id)
             if slots:
                 text = ("I'd be glad to get the planning guide to you, and I'd be happy to go over it with you "
                         "in person and answer any questions. Would {TIMES} work for a short visit? If you'd rather "
@@ -1921,7 +1921,7 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
     if "{TIMES}" in text and action != "offer_times":
         # Times written into another kind of reply (e.g. guide + a visit
         # offer): fill them from the calendar too, or drop the offer.
-        slots, _why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT)
+        slots, _why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT, seed=lead.id)
         if slots:
             text = _fill_times(text, slots)
             conv.offered_slots = json.dumps([s.isoformat() for s in slots])
@@ -2147,7 +2147,7 @@ def followup_sweep(db: Session, now: Optional[datetime] = None, limit: int = 20)
             continue
         allowed: List[str] = []
         if "{TIMES}" in text or action == "offer_times":
-            slots, _why = A.available_slots(db, prog)
+            slots, _why = A.available_slots(db, prog, seed=lead.id)
             if not slots:
                 _due_person(db, prog, lead, conv, reason)
                 db.commit()
