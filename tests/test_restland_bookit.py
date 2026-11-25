@@ -18,9 +18,10 @@ from tests.test_sci_appointment_setter import setter  # noqa: F401
 
 
 class _U:
-    def __init__(self, uid, name=None):
+    def __init__(self, uid, name=None, email=None):
         self.id = uid
         self.full_name = name or uid
+        self.email = email or ("platform@evosyspro.live" if uid == "owner" else uid + "@example.com")
 
 
 def _live(db, prog):
@@ -96,6 +97,15 @@ def test_a_each_advisor_sees_only_their_own(setter, sample_advisor):
     boss = core.who(db, prog, _U("owner"), manager=True)
     assert insights.my_day(db, prog, boss)["kpis"]["upcoming_appointments"] == 2
     assert insights.my_day(db, prog, ann, person="Bob")["kpis"]["upcoming_appointments"] == 1   # still her own
+    # before BookIT is opened, another org admin isn't let in - only the owner's logins
+    pol = json.loads(prog.booking_policy_json)
+    pol["bookit"]["live"] = False
+    prog.booking_policy_json = json.dumps(pol)
+    db.commit()
+    with pytest.raises(core.BookitError):
+        core.who(db, prog, _U("u-admin", email="someone@example.com"), manager=True)
+    assert core.who(db, prog, _U("owner"), manager=True).manager
+    _live(db, prog)
     # suspending her access closes BookIT for her
     pol = json.loads(prog.booking_policy_json)
     pol["bookit"]["suspended"] = {ann.member_id: True}

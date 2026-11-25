@@ -78,6 +78,10 @@ const PROGRAMS = {
   client_growth: { rank: 2, variant: 'office', symbol: '↗', kind: 'EVOSYS PRO PLATFORM',
                    summary: 'Discovery • Questionnaires • Proposals',
                    facts: ['Discovery', 'Questionnaires', 'Proposals'] },
+  // RESTLAND BOOKIT (Nov 25): each advisor's own workspace + the owner's Command Center.
+  restland_bookit: { rank: 1, variant: 'office', symbol: 'B', kind: 'RESTLAND · POWERED BY EVOSYS PRO',
+                     summary: 'Book It. Close It. Track It.',
+                     facts: ['My Day', 'Evo 6 Block', 'Sales'] },
   back_office: { rank: 8, variant: 'office', symbol: '▤', kind: 'BACK OFFICE',
                  summary: 'Sales pipeline, customers and brand operations',
                  facts: ['Pipeline', 'Customers', 'Brand ops'] },
@@ -221,6 +225,13 @@ export function programCards(ctx) {
     cards.push({ ...g, type: 'client_growth', organization_id: 'client-growth', program: 'client_growth',
                  variant: p.variant, symbol: p.symbol, rank: p.rank, kind: p.kind, facts: p.facts,
                  display: 'Client Growth', summary: p.summary, orgLabel: null, actionLabel: 'Open workspace' })
+  }
+  // RESTLAND BOOKIT: only where the server confirmed BookIT would let this login in.
+  for (const b of ctx?.bookit_contexts || []) {
+    const p = PROGRAMS.restland_bookit
+    cards.push({ ...b, type: 'restland_bookit', program: 'restland_bookit', variant: p.variant, symbol: p.symbol,
+                 rank: p.rank, kind: p.kind, facts: p.facts, display: 'Restland BookIT', summary: p.summary,
+                 orgLabel: null, actionLabel: 'Open BookIT' })
   }
   // BACK OFFICE AND EXECUTIVE SUITE are separate destinations on the same
   // launcher - only when the server says this person has them, never the

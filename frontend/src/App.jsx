@@ -179,6 +179,8 @@ const InsReports = insPage('ReportsPage')
 const InsAutomation = insPage('AutomationPage')
 const InsImport = insPage('ImportPage')
 const InsSettings = insPage('SettingsPage')
+// Restland BookIT (/program/restland-bookit/*): each advisor's own workspace + the owner's Command Center.
+const RestlandBookit = lazyPage(() => import('./pages/restlandBookit/BookitApp'))
 // EvoSys BookIt program (/program/evosys-sales/*): EvoSys's own sales team.
 const EvsShell = lazyPage(() => import('./pages/evosysSales/EvoSysSales'))
 const evsPage = name => lazyPage(() => import('./pages/evosysSales/EvoSysSales').then(m => ({ default: m[name] })))
@@ -1277,6 +1279,7 @@ function WorkspaceSelector() {
   const otherDestinations = products.length + previews.length + (ctx.acquisition_ops || []).length
     + (ctx.consumer_leads_contexts || []).length
     + (ctx.client_growth_contexts || []).length
+    + (ctx.bookit_contexts || []).length
     + (ctx.has_back_office ? 1 : 0) + (ctx.executive_contexts || []).length + dealBuilders + ownerTools
   if (volts.length === 1 && nonVolt.length === 0 && otherDestinations === 0) {
     clearWorkspaceContext()
@@ -1748,6 +1751,8 @@ export default function App() {
           <Route path="import" element={<InsImport />} />
           <Route path="settings" element={<InsSettings />} />
         </Route>
+        {/* Restland BookIT: the server decides who may open it on every call. */}
+        <Route path="/program/restland-bookit/*" element={<ProtectedRoute bare><RestlandBookit /></ProtectedRoute>} />
         {/* EvoSys BookIt program: /sales/evosys/* admits only the EvoSys Pro sales team. */}
         <Route path="/program/evosys-sales" element={<ProtectedRoute bare><EvsShell /></ProtectedRoute>}>
           <Route index element={<EvsInbox />} />

@@ -56,6 +56,7 @@ Game; both are true, neither implies the other.
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -480,6 +481,33 @@ def program_brand(db: Session, user: User, host_slug: Optional[str] = None) -> O
         return None
 
 
+def _bookit_contexts(db: Session, user: User, workspaces: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """RESTLAND BOOKIT (owner directive v2.0, Nov 25): a card only for someone
+    BookIT itself would let in - the owner's logins until it's opened to the
+    team, then each linked advisor. /restland-bookit re-checks every call.
+    Its own list (not a product context) so the Restland workspace card stays."""
+    out: List[Dict[str, Any]] = []
+    try:
+        from app.models.program_models import ProgramTeamMember as _TM
+        from app.services.bookit import core as _bk
+        from app.services.programs import identity as _ident
+        for w in workspaces:
+            if not w.get("is_program"):
+                continue
+            prog = _ident.program_for_org(db, w["organization_id"])
+            if prog is None or not (json.loads(prog.booking_policy_json or "{}").get("handoff_sheet") or {}).get("id"):
+                continue                                 # BookIT is the handoff-sheet program's (Restland)
+            member = db.query(_TM.id).filter(_TM.organization_id == w["organization_id"],
+                                             _TM.user_id == user.id).first()
+            manager = w.get("role") in ("org_admin", "super_admin", "manager")
+            if (manager and (_bk.is_live(prog) or _bk.previewer(prog, user))) or (member and _bk.is_live(prog)):
+                out.append({"type": "restland_bookit", "label": "Restland BookIT",
+                            "organization_id": w["organization_id"], "path": "/program/restland-bookit"})
+    except Exception:
+        _log.warning("could not resolve Restland BookIT card for %s", user.id, exc_info=True)
+    return out
+
+
 def authorized_contexts(db: Session, user: User, host_slug: Optional[str] = None) -> Dict[str, Any]:
     """Every context this caller may enter, and where they should land.
 
@@ -822,6 +850,7 @@ def authorized_contexts(db: Session, user: User, host_slug: Optional[str] = None
         # CLIENT GROWTH: discovery questionnaires and proposals - God Mode, the
         # sales program owners and the client_growth grant. Never prospects.
         "client_growth_contexts": _client_growth_contexts(db, user),
+        "bookit_contexts": _bookit_contexts(db, user, workspaces),
         "workspace_count": len(workspaces),
         "default_context": default,
         # WHICH BRAND'S LOOK the launcher wears (e.g. BookaBoost), decided

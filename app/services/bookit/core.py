@@ -64,10 +64,25 @@ class Who:
         return {"name": self.name or self.user_name, "manager": self.manager}
 
 
+# Standing order (Nov 21): a new feature is visible only to the owner's own
+# logins until he approves it. Until BookIT is opened (`live`), a program
+# manager gets in only with one of these logins (or `preview_emails` in the
+# BookIT settings) - another org admin of the workspace does not.
+OWNER_LOGINS = ("platform@evosyspro.live", "simmonsmj242@gmail.com", "michael.simmons@nsmg.com")
+
+
+def previewer(prog, user) -> bool:
+    emails = [e.lower() for e in (cfg(prog).get("preview_emails") or OWNER_LOGINS)]
+    return (getattr(user, "role", None) == "god_admin"
+            or (getattr(user, "email", "") or "").lower() in emails)
+
+
 def who(db: Session, prog, user, manager: bool) -> Who:
     from app.models.program_models import ProgramTeamMember as M
     m = (db.query(M).filter(M.organization_id == prog.organization_id, M.user_id == user.id).first())
     if manager:
+        if not is_live(prog) and not previewer(prog, user):
+            raise BookitError("Restland BookIT isn't open for this login yet.", 403)
         return Who(user, True, m.name if m else None, m.id if m else None)
     if m is None or not is_live(prog):
         raise BookitError("Restland BookIT isn't open for this login yet.", 403)
