@@ -274,7 +274,7 @@ def test_new_person_gets_an_appointments_tab_and_fresh_tabs_title_their_own_row(
             return E()
 
     class P:
-        booking_policy_json = _json.dumps({"handoff_sheet": {"person_tabs_v6": True}})
+        booking_policy_json = _json.dumps({"handoff_sheet": {"person_tabs_v7_ids": [3, 4, 7, 8, 9]}})
 
     class D:
         def commit(self):
@@ -291,7 +291,7 @@ def test_new_person_gets_an_appointments_tab_and_fresh_tabs_title_their_own_row(
     added = [q["addSheet"]["properties"] for q in first if "addSheet" in q]
     assert [a["sheetId"] for a in added] == [RS.PERSON_TAB_IDS[5]] and added[0]["title"] == "Someone New"
     assert out["created"] == [RS.PERSON_TAB_IDS[5]] and out["laid_out"] == [RS.PERSON_TAB_IDS[5]]
-    assert "person_tabs_v6_ids" in _json.loads(prog.booking_policy_json)["handoff_sheet"]
+    assert "person_tabs_v7_ids" in _json.loads(prog.booking_policy_json)["handoff_sheet"]
     assert RS.team_row_of(RS.PERSON_TAB_IDS[5]) == 7 and RS.team_row_of(14) == 5
 
 
@@ -309,3 +309,12 @@ def test_a_note_a_person_writes_on_the_family_shows_on_the_follow_up(setter, sam
     assert "NOTE " in why and "call first part of December" in why and "assigned to Kit" not in why
     ev = RS.followup_events(db, [conv])[conv.id]
     assert ev["note_at"] is not None
+
+
+def test_office_notes_go_above_what_the_family_said_on_an_appointment():
+    at = datetime(2026, 11, 25, 2, 57)                   # 8:57 PM Central on 11/24
+    got = RS._said_with_notes("Can Monday work?", [(at, "PHONE APPOINTMENT - call her at the booked time")])
+    assert got.startswith("NOTE 11/24: PHONE APPOINTMENT") and got.endswith("Said: Can Monday work?")
+    assert RS._said_with_notes("Ok", None) == "Ok"
+    assert [k for k, _ in RS.PT_APPT].index("said") == 7 and RS.PT_APPT_INFO == 9
+    assert len(RS.PT_APPT) <= RS.PT_WIDTH == 15
