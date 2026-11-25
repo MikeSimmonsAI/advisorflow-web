@@ -870,10 +870,24 @@ PT_APPT_BANNER, PT_APPT_GROUPS, PT_APPT_HEAD, PT_APPT_FIRST, PT_APPT_MAX = 4, 5,
 PT_FU_BANNER = PT_APPT_FIRST + PT_APPT_MAX + 1       # 48
 PT_FU_GROUPS, PT_FU_HEAD, PT_FU_FIRST, PT_FU_MAX = PT_FU_BANNER + 1, PT_FU_BANNER + 2, PT_FU_BANNER + 3, 200
 PT_LAST_ROW = PT_FU_FIRST + PT_FU_MAX - 1
+# Owner, Nov 24: follow-ups get a tab of their own per person ("Kitty Arnold -
+# Follow-Ups"); the person tab keeps only their appointments.
+FU_TAB_IDS = (11, 12, 13, 14, 15)                    # Team rows 2-6, in order
+FT_BANNER, FT_GROUPS, FT_HEAD, FT_FIRST, FT_MAX = 4, 5, 6, 7, 200
+FT_LAST_ROW = FT_FIRST + FT_MAX - 1
+PT_APPT_LAST_ROW = PT_APPT_FIRST + PT_APPT_MAX - 1
+# where each kind of tab keeps its one block: (main tab, first data row, max rows, columns)
+KIND_BLOCK = {"appt": (APPOINTMENTS, PT_APPT_FIRST, PT_APPT_MAX, PT_APPT),
+              "fu": (FOLLOW_UPS, FT_FIRST, FT_MAX, PT_FU)}
+
+
+def fu_tab_title(name: str) -> str:
+    return "%s \u2013 Follow-Ups" % name
 
 
 def _person_tabs(client, sid: str, team: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """[{"name", "title", "sheet_id"}] for the person tabs whose Team row has a real name."""
+    """[{"name", "title", "sheet_id", "kind"}] for each real person: their
+    appointments tab ("appt") and their follow-ups tab ("fu")."""
     try:
         meta = client.spreadsheets().get(spreadsheetId=sid, fields="sheets.properties").execute()
     except Exception:                                    # noqa: BLE001
@@ -881,11 +895,12 @@ def _person_tabs(client, sid: str, team: List[Dict[str, Any]]) -> List[Dict[str,
     titles = {s_["properties"]["sheetId"]: s_["properties"]["title"] for s_ in meta.get("sheets") or []}
     by_row = {p["row"]: p for p in team}
     out = []
-    for i, tid in enumerate(PERSON_TAB_IDS):
-        p = by_row.get(i + 2)
-        if p is None or p.get("placeholder") or tid not in titles:
-            continue
-        out.append({"name": p["name"], "title": titles[tid], "sheet_id": tid})
+    for ids, kind in ((PERSON_TAB_IDS, "appt"), (FU_TAB_IDS, "fu")):
+        for i, tid in enumerate(ids):
+            p = by_row.get(i + 2)
+            if p is None or p.get("placeholder") or tid not in titles:
+                continue
+            out.append({"name": p["name"], "title": titles[tid], "sheet_id": tid, "kind": kind})
     return out
 
 
@@ -893,15 +908,13 @@ def _cell(v) -> str:
     return str(v).strip() if v is not None else ""
 
 
-def _pt_blocks(client, sid: str, title: str) -> Dict[str, List[List[Any]]]:
+def _pt_blocks(client, sid: str, t: Dict[str, Any]) -> Dict[str, List[List[Any]]]:
     from app.services.volt.sheets_export import column
-    out = {}
-    for key, first, n, width in ((APPOINTMENTS, PT_APPT_FIRST, PT_APPT_MAX, len(PT_APPT)),
-                                 (FOLLOW_UPS, PT_FU_FIRST, PT_FU_MAX, len(PT_FU))):
-        got = client.spreadsheets().values().get(
-            spreadsheetId=sid, range=_rng(title, "A%d:%s%d" % (first, column(width), first + n - 1))).execute()
-        out[key] = [list(r) + [""] * (width - len(r)) for r in (got.get("values") or [])]
-    return out
+    tab, first, n, cols = KIND_BLOCK[t.get("kind", "appt")]
+    width = len(cols)
+    got = client.spreadsheets().values().get(
+        spreadsheetId=sid, range=_rng(t["title"], "A%d:%s%d" % (first, column(width), first + n - 1))).execute()
+    return {tab: [list(r) + [""] * (width - len(r)) for r in (got.get("values") or [])]}
 
 
 def person_tabs_read(client, sid: str, tabs: List[Dict[str, Any]], staff: Dict[str, Dict[str, Dict[str, Any]]],
@@ -911,7 +924,7 @@ def person_tabs_read(client, sid: str, tabs: List[Dict[str, Any]], staff: Dict[s
     grids, copy, edits = {}, [], 0
     for t in tabs:
         try:
-            blocks = _pt_blocks(client, sid, t["title"])
+            blocks = _pt_blocks(client, sid, t)
         except Exception:                                # noqa: BLE001 - a person tab that can't be read changes nothing
             continue
         grids[t["title"]] = blocks
@@ -1009,12 +1022,13 @@ def person_tabs_write(client, sid: str, tabs: List[Dict[str, Any]], rows: Dict[s
                         cur.get("appt_address", ""), cur.get("notes", ""),
                         central_serial(rec.staff_changed_at) if _team_touched(rec, PT_FU_EDIT) else ""])
         fus.sort(key=lambda x: (x[1] if isinstance(x[1], (int, float)) and x[1] else 0, str(x[0])))
-        fus = fus[:PT_FU_MAX]
+        fus = fus[:FT_MAX]
         old = grids.get(t["title"]) or {}
         data = []
-        for tab, new_rows, first, cols, text_cols, stamp_col in (
-                (APPOINTMENTS, appts, PT_APPT_FIRST, PT_APPT, _PT_APPT_TEXT, len(PT_APPT) - 1),
-                (FOLLOW_UPS, fus, PT_FU_FIRST, PT_FU, _PT_FU_TEXT, len(PT_FU) - 1)):
+        blocks = ((APPOINTMENTS, appts, PT_APPT_FIRST, PT_APPT, _PT_APPT_TEXT, len(PT_APPT) - 1),) \
+            if t.get("kind", "appt") == "appt" else \
+            ((FOLLOW_UPS, fus, FT_FIRST, PT_FU, _PT_FU_TEXT, len(PT_FU) - 1),)
+        for tab, new_rows, first, cols, text_cols, stamp_col in blocks:
             was_rows = old.get(tab) or []
             width = len(cols)
             for i in range(max(len(new_rows), len(was_rows))):
@@ -1031,19 +1045,22 @@ def person_tabs_write(client, sid: str, tabs: List[Dict[str, Any]], rows: Dict[s
     return writes
 
 
-def _pt_header_rows() -> Dict[int, List[str]]:
+def _pt_header_rows(kind: str = "appt") -> Dict[int, List[str]]:
     """The banner / group / column-name rows of a person tab, by sheet row."""
     W = PT_WIDTH
 
     def row(vals):
         return (list(vals) + [""] * W)[:W]
+    if kind == "fu":
+        return {
+            FT_BANNER: row(["MY FOLLOW-UPS   -   call these families, then fill in the gold columns"]),
+            FT_GROUPS: row(["", "WHO TO CALL & WHY"] + [""] * (PT_FU_INFO - 2) + ["YOUR UPDATE  (type here)"]),
+            FT_HEAD: row([lbl for _, lbl in PT_FU]),
+        }
     return {
         PT_APPT_BANNER: row(["MY APPOINTMENTS   -   after each visit, fill in the gold columns"]),
         PT_APPT_GROUPS: row(["", "THE APPOINTMENT"] + [""] * (PT_APPT_INFO - 2) + ["YOUR UPDATE  (type here)"]),
         PT_APPT_HEAD: row([lbl for _, lbl in PT_APPT]),
-        PT_FU_BANNER: row(["MY FOLLOW-UPS   -   call these families, then fill in the gold columns"]),
-        PT_FU_GROUPS: row(["", "WHO TO CALL & WHY"] + [""] * (PT_FU_INFO - 2) + ["YOUR UPDATE  (type here)"]),
-        PT_FU_HEAD: row([lbl for _, lbl in PT_FU]),
     }
 
 
@@ -1051,9 +1068,9 @@ def person_tab_headers_heal(client, sid: str, tabs: List[Dict[str, Any]]) -> int
     """Put the header rows back if anything (a deploy switch-over, a person)
     changed them. One read per tab; writes only when they differ."""
     from app.services.volt.sheets_export import column
-    want = _pt_header_rows()
     fixed = 0
     for t in tabs:
+        want = _pt_header_rows(t.get("kind", "appt"))
         try:
             got = client.spreadsheets().values().batchGet(
                 spreadsheetId=sid, ranges=[_rng(t["title"], "A%d:%s%d" % (r, column(PT_WIDTH), r)) for r in want]
@@ -1085,10 +1102,11 @@ def _same_row(was: List[str], shown: List[str], text_cols: List[int], stamp_col:
     return all(at(was, i) == at(shown, i) for i in text_cols) and bool(at(was, stamp_col)) == bool(at(shown, stamp_col))
 
 
-def person_tab_layout_requests() -> List[Dict]:
-    """The person tabs' look (applied once by sync): a title, one line on how to
-    use the tab, then MY APPOINTMENTS and MY FOLLOW-UPS stacked, each with a
-    banner, a 'who & when' group and a gold 'your update' group."""
+def person_tab_layout_requests(ids=PERSON_TAB_IDS, kind: str = "appt") -> List[Dict]:
+    """A person's tab look (applied once by sync): a title, one line on how to
+    use the tab, then one block - MY APPOINTMENTS on the person tab, MY
+    FOLLOW-UPS on their follow-ups tab - with a banner, a 'who & when' group
+    and a gold 'your update' group."""
     INK, SAGE, SAGE_D, CREAM, STRIPE = "#17352C", "#E3ECE7", "#C9D9D0", "#FBF7EE", "#F3F6F4"
     r: List[Dict] = []
 
@@ -1145,9 +1163,11 @@ def person_tab_layout_requests() -> List[Dict]:
 
     widths = [24, 118, 78, 165, 118, 150, 175, 150, 120, 74, 190, 190, 260, 130, 130]
     W = PT_WIDTH
-    for sid in PERSON_TAB_IDS:
-        a_end = PT_APPT_FIRST + PT_APPT_MAX - 1
-        f_end = PT_LAST_ROW
+    appt = kind == "appt"
+    for sid in ids:
+        a_end = PT_APPT_LAST_ROW
+        f_end = FT_LAST_ROW
+        last_row = PT_APPT_LAST_ROW if appt else FT_LAST_ROW
         # clear the old layout first (it may be wider and taller - or smaller than
         # the range cleared, so make room first), then size the tab
         r.append({"updateSheetProperties": {"properties": {"sheetId": sid, "gridProperties": {
@@ -1157,29 +1177,44 @@ def person_tab_layout_requests() -> List[Dict]:
         r.append({"repeatCell": {"range": g(sid, 1, 500, 0, 30), "cell": {},
                                  "fields": "userEnteredValue,userEnteredFormat"}})
         r.append({"updateSheetProperties": {"properties": {"sheetId": sid, "gridProperties": {
-            "rowCount": PT_LAST_ROW + 5, "columnCount": W, "frozenRowCount": 2, "hideGridlines": True}},
+            "rowCount": last_row + 5, "columnCount": W, "frozenRowCount": 2, "hideGridlines": True}},
             "fields": "gridProperties.rowCount,gridProperties.columnCount,gridProperties.frozenRowCount,"
                       "gridProperties.hideGridlines"}})
         # title + how to use
-        team_row = PERSON_TAB_IDS.index(sid) + 2
+        team_row = list(ids).index(sid) + 2
         r.append({"updateCells": {"range": g(sid, PT_TITLE, PT_TITLE, 0, 1), "rows": [{"values": [
-            {"userEnteredValue": {"formulaValue": '="MY WORK  ·  "&UPPER(Team!A%d)' % team_row}}]}],
+            {"userEnteredValue": {"formulaValue": '="%s  ·  "&UPPER(Team!A%d)'
+                                  % ("MY APPOINTMENTS" if appt else "MY FOLLOW-UPS", team_row)}}]}],
             "fields": "userEnteredValue"}})
         r.append(put(sid, PT_HELP, 0, [
             "How this tab works:  1) Work the families below.  2) Type only in the GOLD columns.  "
             "3) It saves to the main tabs and to the app by itself within a couple of minutes.  "
-            "To book a follow-up, fill in Appt Date + Appt Time - the family gets their confirmation."]))
+            + ("Your follow-ups are on your own Follow-Ups tab." if appt else
+               "To book a follow-up, fill in Appt Date + Appt Time - the family gets their confirmation.")]))
         r += [merge(sid, PT_TITLE, PT_TITLE, 0, W), merge(sid, PT_HELP, PT_HELP, 0, W),
               fmt(sid, PT_TITLE, PT_TITLE, 0, W, bg=INK, fg="#FFFFFF", bold=True, size=16, valign="MIDDLE", pad=10),
               fmt(sid, PT_HELP, PT_HELP, 0, W, bg=CREAM, fg=INK, size=10, valign="MIDDLE", wrap="WRAP", pad=10),
-              height(sid, PT_TITLE, PT_TITLE, 44), height(sid, PT_HELP, PT_HELP, 40), height(sid, 3, 3, 10)]
-        for (banner, groups, head, first, last, cols, info, title, info_lbl, upd_lbl) in (
-                (PT_APPT_BANNER, PT_APPT_GROUPS, PT_APPT_HEAD, PT_APPT_FIRST, a_end, PT_APPT, PT_APPT_INFO,
-                 "MY APPOINTMENTS   -   after each visit, fill in the gold columns",
-                 "THE APPOINTMENT", "YOUR UPDATE  (type here)"),
-                (PT_FU_BANNER, PT_FU_GROUPS, PT_FU_HEAD, PT_FU_FIRST, f_end, PT_FU, PT_FU_INFO,
-                 "MY FOLLOW-UPS   -   call these families, then fill in the gold columns",
-                 "WHO TO CALL & WHY", "YOUR UPDATE  (type here)")):
+              height(sid, PT_TITLE, PT_TITLE, 44), height(sid, PT_HELP, PT_HELP, 40), height(sid, 3, 3, 26)]
+        # the counts line under the title
+        if appt:
+            a0, a1 = PT_APPT_FIRST, PT_APPT_LAST_ROW
+            summary = ('=IF(COUNTA(D{0}:D{1})=0,"","   "&COUNTA(D{0}:D{1})&" appointments      ·      "'
+                       '&COUNTIFS(B{0}:B{1},TODAY())&" today")').format(a0, a1)
+        else:
+            f0, f1 = FT_FIRST, FT_LAST_ROW
+            summary = ('=IF(COUNTA(C{0}:C{1})=0,"","   "&COUNTA(C{0}:C{1})&" follow-ups to call      ·      "'
+                       '&(COUNTIFS(C{0}:C{1},"<>",B{0}:B{1},"<="&TODAY())+COUNTIFS(C{0}:C{1},"<>",B{0}:B{1},""))'
+                       '&" due now")').format(f0, f1)
+        r.append({"updateCells": {"range": g(sid, 3, 3, 1, 2), "rows": [{"values": [
+            {"userEnteredValue": {"formulaValue": summary}}]}], "fields": "userEnteredValue"}})
+        r += [merge(sid, 3, 3, 1, W), fmt(sid, 3, 3, 1, W, fg=INK, bold=True, size=11, valign="MIDDLE")]
+        blocks = (((PT_APPT_BANNER, PT_APPT_GROUPS, PT_APPT_HEAD, PT_APPT_FIRST, a_end, PT_APPT, PT_APPT_INFO,
+                    "MY APPOINTMENTS   -   after each visit, fill in the gold columns",
+                    "THE APPOINTMENT", "YOUR UPDATE  (type here)"),) if appt else
+                  ((FT_BANNER, FT_GROUPS, FT_HEAD, FT_FIRST, f_end, PT_FU, PT_FU_INFO,
+                    "MY FOLLOW-UPS   -   call these families, then fill in the gold columns",
+                    "WHO TO CALL & WHY", "YOUR UPDATE  (type here)"),))
+        for (banner, groups, head, first, last, cols, info, title, info_lbl, upd_lbl) in blocks:
             n = len(cols)
             r += [put(sid, banner, 0, [title]), merge(sid, banner, banner, 0, W),
                   fmt(sid, banner, banner, 0, W, bg=GREEN, fg="#FFFFFF", bold=True, size=13, valign="MIDDLE", pad=10),
@@ -1209,28 +1244,30 @@ def person_tab_layout_requests() -> List[Dict]:
                                      "right": {"style": "SOLID_MEDIUM", "colorStyle": {"rgbColor": _rgb(BRASS)}}}},
                   fmt(sid, first, last, n - 1, n, fg=GREY, size=9, num=("DATE_TIME", "m/d h:mm am/pm"))]
         # number formats and pickers
-        r += [fmt(sid, PT_APPT_FIRST, a_end, 1, 2, num=("DATE", "ddd, mmm d"), bold=True),
-              fmt(sid, PT_APPT_FIRST, a_end, 2, 3, num=("TIME", "h:mm am/pm"), bold=True),
-              fmt(sid, PT_APPT_FIRST, a_end, 3, 4, bold=True),
-              fmt(sid, PT_FU_FIRST, f_end, 1, 2, num=("DATE", "ddd, mmm d")),
-              fmt(sid, PT_FU_FIRST, f_end, 2, 3, bold=True),
-              lst(sid, PT_APPT_FIRST, a_end, 8, ["Showed", "No-Show", "Rescheduled", "Cancelled"]),
-              lst(sid, PT_APPT_FIRST, a_end, 9, list(SOLD_CHOICES)),
-              {"setDataValidation": {"range": g(sid, PT_FU_FIRST, f_end, 6, 7), "rule": {"condition": {"type": "BOOLEAN"}}}},
-              fmt(sid, PT_FU_FIRST, f_end, 6, 7, align="CENTER"),
-              {"setDataValidation": {"range": g(sid, PT_FU_FIRST, f_end, 7, 8), "rule": {"condition": {
-                  "type": "DATE_IS_VALID"}, "strict": False, "showCustomUi": True}}},
-              lst(sid, PT_FU_FIRST, f_end, 8, list(WHAT_HAPPENED)),
-              {"setDataValidation": {"range": g(sid, PT_FU_FIRST, f_end, 9, 10), "rule": {"condition": {
-                  "type": "DATE_IS_VALID"}, "strict": False, "showCustomUi": True}}},
-              lst(sid, PT_FU_FIRST, f_end, 10, list(TIME_CHOICES)),
-              lst(sid, PT_FU_FIRST, f_end, 11, HOW_PICK),
-              _when(sid, "J%d:J%d" % (PT_APPT_FIRST, a_end), '=$J%d="Yes"' % PT_APPT_FIRST, "#DCEFE3"),
-              _when(sid, "I%d:I%d" % (PT_APPT_FIRST, a_end), '=$I%d="Showed"' % PT_APPT_FIRST, "#DCEFE3"),
-              _when(sid, "I%d:I%d" % (PT_APPT_FIRST, a_end), '=$I%d="No-Show"' % PT_APPT_FIRST, "#FBE3DF"),
-              _when(sid, "B%d:F%d" % (PT_FU_FIRST, f_end),
-                    '=AND($A%d<>"",OR($B%d="",$B%d<TODAY()+1))' % (PT_FU_FIRST, PT_FU_FIRST, PT_FU_FIRST),
-                    "#FCEBD9")]
+        if appt:
+            r += [fmt(sid, PT_APPT_FIRST, a_end, 1, 2, num=("DATE", "ddd, mmm d"), bold=True),
+                  fmt(sid, PT_APPT_FIRST, a_end, 2, 3, num=("TIME", "h:mm am/pm"), bold=True),
+                  fmt(sid, PT_APPT_FIRST, a_end, 3, 4, bold=True),
+                  lst(sid, PT_APPT_FIRST, a_end, 8, ["Showed", "No-Show", "Rescheduled", "Cancelled"]),
+                  lst(sid, PT_APPT_FIRST, a_end, 9, list(SOLD_CHOICES)),
+                  _when(sid, "J%d:J%d" % (PT_APPT_FIRST, a_end), '=$J%d="Yes"' % PT_APPT_FIRST, "#DCEFE3"),
+                  _when(sid, "I%d:I%d" % (PT_APPT_FIRST, a_end), '=$I%d="Showed"' % PT_APPT_FIRST, "#DCEFE3"),
+                  _when(sid, "I%d:I%d" % (PT_APPT_FIRST, a_end), '=$I%d="No-Show"' % PT_APPT_FIRST, "#FBE3DF")]
+        else:
+            F0 = FT_FIRST
+            r += [fmt(sid, F0, f_end, 1, 2, num=("DATE", "ddd, mmm d")),
+                  fmt(sid, F0, f_end, 2, 3, bold=True),
+                  {"setDataValidation": {"range": g(sid, F0, f_end, 6, 7), "rule": {"condition": {"type": "BOOLEAN"}}}},
+                  fmt(sid, F0, f_end, 6, 7, align="CENTER"),
+                  {"setDataValidation": {"range": g(sid, F0, f_end, 7, 8), "rule": {"condition": {
+                      "type": "DATE_IS_VALID"}, "strict": False, "showCustomUi": True}}},
+                  lst(sid, F0, f_end, 8, list(WHAT_HAPPENED)),
+                  {"setDataValidation": {"range": g(sid, F0, f_end, 9, 10), "rule": {"condition": {
+                      "type": "DATE_IS_VALID"}, "strict": False, "showCustomUi": True}}},
+                  lst(sid, F0, f_end, 10, list(TIME_CHOICES)),
+                  lst(sid, F0, f_end, 11, HOW_PICK),
+                  _when(sid, "B%d:F%d" % (F0, f_end), '=AND($A%d<>"",OR($B%d="",$B%d<TODAY()+1))' % (F0, F0, F0),
+                        "#FCEBD9")]
         for c, px in enumerate(widths[:W]):
             r.append({"updateDimensionProperties": {"range": {"sheetId": sid, "dimension": "COLUMNS",
                                                               "startIndex": c, "endIndex": c + 1},
@@ -1241,14 +1278,9 @@ def person_tab_layout_requests() -> List[Dict]:
     return r
 
 
-def ensure_person_tabs(db: Session, prog, client, sid: str) -> bool:
-    """Give the person tabs their current look, once per version."""
-    pol = json.loads(prog.booking_policy_json or "{}")
-    cfg = pol.get("handoff_sheet") or {}
-    if cfg.get("person_tabs_v5") or cfg.get("person_tabs_v3"):
-        return False                                     # this layout is on the tabs (headers self-heal below)
-    # A layout applied before leaves its row striping and color rules behind:
-    # Google refuses to stripe a range twice, so take the old ones off first.
+def _strip_old_look(client, sid: str, ids) -> List[Dict]:
+    """Requests removing row striping and color rules left on these tabs by an
+    earlier layout (Google refuses to stripe a range twice)."""
     first: List[Dict] = []
     try:
         meta = client.spreadsheets().get(
@@ -1256,20 +1288,74 @@ def ensure_person_tabs(db: Session, prog, client, sid: str) -> bool:
         ).execute()
         for sh in meta.get("sheets") or []:
             sheet_id = (sh.get("properties") or {}).get("sheetId")
-            if sheet_id not in PERSON_TAB_IDS:
+            if sheet_id not in ids:
                 continue
             first += [{"deleteBanding": {"bandedRangeId": b["bandedRangeId"]}} for b in sh.get("bandedRanges") or []]
             first += [{"deleteConditionalFormatRule": {"sheetId": sheet_id, "index": 0}}
                       for _ in sh.get("conditionalFormats") or []]
     except Exception:                                    # noqa: BLE001 - a fresh sheet has nothing to remove
         first = []
-    client.spreadsheets().batchUpdate(spreadsheetId=sid,
-                                      body={"requests": first + person_tab_layout_requests()}).execute()
-    cfg["person_tabs_v5"] = True
+    return first
+
+
+def ensure_person_tabs(db: Session, prog, client, sid: str) -> bool:
+    """Give the person tabs their current look, once per version. v6 (owner,
+    Nov 24): appointments only - follow-ups moved to each person's own tab."""
+    pol = json.loads(prog.booking_policy_json or "{}")
+    cfg = pol.get("handoff_sheet") or {}
+    if cfg.get("person_tabs_v6"):
+        return False                                     # this layout is on the tabs (headers self-heal below)
+    client.spreadsheets().batchUpdate(spreadsheetId=sid, body={
+        "requests": _strip_old_look(client, sid, PERSON_TAB_IDS) + person_tab_layout_requests()}).execute()
+    cfg["person_tabs_v6"] = True
     pol["handoff_sheet"] = cfg
     prog.booking_policy_json = json.dumps(pol)
     db.commit()
     return True
+
+
+def ensure_fu_tabs(db: Session, prog, client, sid: str, team: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Each person's own Follow-Ups tab ("Kitty Arnold - Follow-Ups"), right
+    after their appointments tab: created once, renamed when the Team name
+    changes, hidden while the Team row is a placeholder."""
+    meta = client.spreadsheets().get(spreadsheetId=sid, fields="sheets.properties").execute()
+    props = {s_["properties"]["sheetId"]: s_["properties"] for s_ in meta.get("sheets") or []}
+    by_row = {p["row"]: p for p in team}
+    reqs, made, laid = [], [], []
+    for i, tid in enumerate(FU_TAB_IDS):
+        p = by_row.get(i + 2)
+        real = p is not None and not p.get("placeholder")
+        title = fu_tab_title(p["name"] if real else "Person %d" % (i + 1))
+        hidden = not real
+        if tid not in props:
+            if not real:
+                continue                                 # made when that person is added
+            idx = (props.get(PERSON_TAB_IDS[i]) or {}).get("index")
+            pr: Dict[str, Any] = {"sheetId": tid, "title": title, "hidden": False}
+            if idx is not None:
+                pr["index"] = idx + 1
+            reqs.append({"addSheet": {"properties": pr}})
+            made.append(tid)
+            continue
+        cur = props[tid]
+        if cur.get("title") != title or bool(cur.get("hidden")) != hidden:
+            reqs.append({"updateSheetProperties": {"properties": {"sheetId": tid, "title": title, "hidden": hidden},
+                                                   "fields": "title,hidden"}})
+    if reqs:
+        client.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": reqs}).execute()
+    pol = json.loads(prog.booking_policy_json or "{}")
+    cfg = pol.get("handoff_sheet") or {}
+    done = set(cfg.get("fu_tabs_laid_out") or [])
+    todo = [tid for tid in FU_TAB_IDS if tid not in done and (tid in props or tid in made)]
+    if todo:
+        client.spreadsheets().batchUpdate(spreadsheetId=sid, body={
+            "requests": _strip_old_look(client, sid, todo) + person_tab_layout_requests(todo, "fu")}).execute()
+        cfg["fu_tabs_laid_out"] = sorted(done | set(todo))
+        pol["handoff_sheet"] = cfg
+        prog.booking_policy_json = json.dumps(pol)
+        db.commit()
+        laid = todo
+    return {"created": made, "laid_out": laid, "changed": len(reqs)}
 
 
 def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any]]],
@@ -1656,6 +1742,11 @@ def sync(db: Session, prog, client=None) -> Dict[str, Any]:
     except Exception as exc:                             # noqa: BLE001 - the main tabs still sync
         db.rollback()
         log.warning("handoff sheet person tabs layout not applied: %s (%s)", X.categorize(exc), str(exc)[:300])
+    try:
+        ensure_fu_tabs(db, prog, client, sid, read_team(client, sid))
+    except Exception as exc:                             # noqa: BLE001 - the main tabs still sync
+        db.rollback()
+        log.warning("handoff sheet follow-up tabs not set up: %s (%s)", X.categorize(exc), str(exc)[:300])
     appts = appointment_rows(db, org)
     fus = follow_up_rows(db, org, known_ids(client, sid, FOLLOW_UPS))
     a = upsert(client, sid, APPOINTMENTS, appts)
