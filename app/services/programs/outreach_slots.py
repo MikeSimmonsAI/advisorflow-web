@@ -102,6 +102,16 @@ def closed_now(now_utc: Optional[datetime], cfg: Optional[Dict]) -> bool:
     return closed_on(_local(now_utc or datetime.utcnow()).date(), cfg)
 
 
+def closed_for_replies(now_utc: Optional[datetime] = None) -> bool:
+    """May the system ANSWER a family who wrote in today? Owner, Nov 25:
+    "we're not reaching out on Sunday ... but if they reply to us, the system's
+    going to kick back and answer. If they want to book an appointment, they
+    can." A program's closed day (Sunday) stops outreach only; answers to
+    replies go out. A no-contact day (Thanksgiving) still stops everything."""
+    from app.services import no_contact_days as NCD
+    return NCD.quiet_now(now_utc)
+
+
 def closed_for_org(db: Optional[Session], org_id: Optional[str], now_utc: Optional[datetime] = None) -> bool:
     """True when this workspace's program is closed today. False on any error
     or for a workspace without a text schedule (SCI and the rest)."""

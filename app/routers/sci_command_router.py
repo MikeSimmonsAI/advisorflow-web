@@ -2277,6 +2277,46 @@ def restart_unanswered(body: RestartIn, db: Session = Depends(get_db), user: Use
     return out
 
 
+class EvenAppointmentsIn(BaseModel):
+    from_date: str                     # "2026-11-28" (Central)
+
+
+@router.post("/even-appointments")
+def even_appointments(body: EvenAppointmentsIn, db: Session = Depends(get_db),
+                      user: User = Depends(require_tenant_user)):
+    """Owner, Nov 25: 'Reassign everything from Saturday on ... I want it
+    even from Saturday.' Managers only. Sets the handoff board's even date;
+    the board's next pass (within about two minutes) deals every booked
+    appointment on or after it out evenly, once, then keeps it even. Sends
+    nothing to families."""
+    import json as _json
+    from datetime import date as _date
+    from app.services.programs import restland_sheet as RS
+    prog = _program(db, user)
+    _require_manager(db, user)
+    try:
+        d = _date.fromisoformat(body.from_date.strip())
+    except ValueError:
+        raise HTTPException(status_code=422, detail="from_date is a date like 2026-11-28.")
+    if not RS.sheet_id(prog):
+        raise HTTPException(status_code=404, detail="This program has no handoff board.")
+    pol = _json.loads(prog.booking_policy_json or "{}")
+    cfg = dict(pol.get("handoff_sheet") or {})
+    before = cfg.get("appt_even_from")
+    cfg["appt_even_from"] = d.isoformat()
+    if before != d.isoformat():
+        cfg.pop("appt_rebalanced_from", None)
+    pol["handoff_sheet"] = cfg
+    prog.booking_policy_json = _json.dumps(pol)
+    from app.routers.audit_log_router import log_action
+    log_action(db, prog.organization_id, user.id, action="program.even_appointments",
+               target_type="outreach_program", target_id=prog.id, before={"appt_even_from": before},
+               after={"appt_even_from": d.isoformat()}, commit=False)
+    db.commit()
+    return {"ok": True, "appt_even_from": d.isoformat(),
+            "note": "The board deals out the appointments on its next pass (within about two minutes)."}
+
+
 class StageReturnIn(BaseModel):
     lead_ids: list
 

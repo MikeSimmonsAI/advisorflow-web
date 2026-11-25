@@ -129,7 +129,7 @@ def sender(monkeypatch):
     monkeypatch.setattr(_sms, "send_sms", fake)
     monkeypatch.setattr(cadence_service, "org_sending_enabled", lambda db, oid: True)
     monkeypatch.setattr(entitlements, "org_has_feature", lambda org, f: True)
-    monkeypatch.setattr(contact_hours, "check", lambda lead, now=None: {"permitted": True})
+    monkeypatch.setattr(contact_hours, "check", lambda lead, now=None, **_k: {"permitted": True})
     import app.services.programs.identity as I
     monkeypatch.setattr(I, "time_offer_for", lambda db, lead, channel="sms": "What day this week works?")
     OS.clear_cache()

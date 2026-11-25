@@ -1977,6 +1977,75 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
                     appt_owner_by_lead[known[rid0].lead_id] = a
     turn_key = {APPOINTMENTS: "rr_last_appt", FOLLOW_UPS: "rr_last_fu"}
 
+    # 2b. EVEN APPOINTMENTS (owner, Nov 25 4:44 PM - "reassign everything from
+    # Saturday on ... I want it even from Saturday"). appt_even_from (a Central
+    # date) starts an even count: once, every booked appointment on or after
+    # it is dealt out in date order in the rotation's fixed order (Neoso,
+    # Kitty, Laura, Johnny, repeat); from then on each new one goes to whoever
+    # has the fewest appointments on or after that date - ties in the fixed
+    # order after the last automatic pick. Pausing or adding someone no longer
+    # starts the appointment count over.
+    even_from = cfg.get("appt_even_from")
+    even_serial = None
+    if even_from:
+        try:
+            from datetime import date as _date
+            even_serial = (_date.fromisoformat(even_from) - _date(1899, 12, 30)).days
+        except ValueError:
+            even_from = None
+
+    def _when(row) -> tuple:
+        t = row[3]
+        if isinstance(t, (int, float)):
+            mins = round(float(t) % 1 * 1440)
+        else:
+            try:
+                mins = (lambda d: d.hour * 60 + d.minute)(datetime.strptime(str(t).strip(), "%I:%M %p"))
+            except ValueError:
+                mins = 0
+        return (row[2], mins, str(row[0]))
+
+    def _in_window(row) -> bool:
+        return (even_serial is not None and _eligible(APPOINTMENTS, row, today_serial)
+                and isinstance(row[2], (int, float)) and row[2] >= even_serial)
+
+    def _set(tab: str, rid: str, name: str, why: str) -> None:
+        cur = staff[tab][rid]
+        writes.append({"range": _rng(tab, "%s%d" % (column(len(COLUMNS[tab]) + 1), cur["row"])),
+                       "values": [[name]]})
+        cur["assigned"] = name
+        rec = known[rid]
+        vals = json.loads(rec.staff_json or "{}")
+        vals["assigned"] = name
+        rec.staff_json, rec.assigned_to, rec.auto_assigned, rec.assigned_at = json.dumps(vals), name, True, now
+        _note(db, org, rec.lead_id, "Restland sheet: assigned to %s (%s)" % (name, why))
+
+    writes = []
+    if even_from and rotation and cfg.get("appt_rebalanced_from") != even_from:
+        dealt = sorted((r for r in rows[APPOINTMENTS] if _in_window(r) and str(r[0]) in staff[APPOINTMENTS]
+                        and str(r[0]) in known), key=_when)
+        moved = 0
+        for i, row in enumerate(dealt):
+            rid, name = str(row[0]), rotation[i % len(rotation)]
+            if (staff[APPOINTMENTS][rid].get("assigned") or "") != name:
+                _set(APPOINTMENTS, rid, name, "appointments evened out from %s" % even_from)
+                moved += 1
+            if known[rid].lead_id:
+                appt_owner_by_lead[known[rid].lead_id] = name
+        if dealt:
+            cfg[turn_key[APPOINTMENTS]] = rotation[(len(dealt) - 1) % len(rotation)]
+        cfg["appt_rebalanced_from"] = even_from
+        out["appointments_evened"] = {"from": even_from, "appointments": len(dealt), "moved": moved,
+                                      "each": {n: sum(1 for i in range(len(dealt)) if rotation[i % len(rotation)] == n)
+                                               for n in rotation}}
+    if even_from:
+        # the appointment count: everything on or after the even date, as it stands
+        load[APPOINTMENTS] = {n: 0 for n in rotation}
+        for row in rows[APPOINTMENTS]:
+            a0 = (staff[APPOINTMENTS].get(str(row[0])) or {}).get("assigned") or ""
+            if _in_window(row) and a0 in load[APPOINTMENTS]:
+                load[APPOINTMENTS][a0] += 1
+
     def _pick(t: str) -> Optional[str]:
         if not rotation:
             return None
@@ -1984,7 +2053,6 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
         start = (rotation.index(last) + 1) if last in rotation else 0
         order = rotation[start:] + rotation[:start]
         return min(order, key=lambda n: load[t][n])
-    writes = []
     for tab in (APPOINTMENTS, FOLLOW_UPS):
         first_staff = len(COLUMNS[tab]) + 1
         for row in rows[tab]:
@@ -2024,7 +2092,7 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
                   % (name, "same person as the family's other work" if owner else "automatic, fewest open"))
             if not owner:
                 cfg[turn_key[tab]] = name
-            if name in load[tab]:
+            if name in load[tab] and (tab != APPOINTMENTS or not even_from or _in_window(row)):
                 load[tab][name] += 1
             if tab == APPOINTMENTS and rec.lead_id:
                 appt_owner_by_lead[rec.lead_id] = name

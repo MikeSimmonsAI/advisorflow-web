@@ -226,7 +226,7 @@ def test_auto_mode_sends_from_the_program_line_with_its_own_source(setter, sampl
     prog.ai_setter_mode = "auto"
     db.commit()
     lead = _lead_for(db, org, sample_advisor, "L001")
-    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": True})
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None, **_k: {"permitted": True})
     sent = []
 
     def fake_send(db_, adv, lead_, text, **kw):
@@ -248,7 +248,7 @@ def test_auto_mode_outside_hours_holds_then_sweep_sends(setter, sample_advisor, 
     db.commit()
     lead = _lead_for(db, org, sample_advisor, "L001")
     allowed = {"v": False}
-    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": allowed["v"]})
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None, **_k: {"permitted": allowed["v"]})
     monkeypatch.setattr("app.services.contact_hours.next_permitted_utc", lambda lead, now=None: datetime.utcnow())
     _, conv = _run(db, lead, "What does the guide include?",
                    _Fake([_d("offer_times", "Happy to explain in person. Would {TIMES} work?")]))

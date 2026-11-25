@@ -1361,12 +1361,13 @@ def _deliver(db, prog, lead, conv, resp, text, action, mode, *, now) -> ProgramC
         return _turn(db, conv, "ai", text, action=action, delivery="draft",
                      response_id=resp.id if resp else None, reason="draft mode - a person sends it")
     if is_email:
-        # Closed day (Restland, Nov 22: nothing on Sundays): the answer is
-        # held and sweep() sends it in its thread once the day is open.
+        # A no-contact day (Thanksgiving): the answer is held and sweep()
+        # sends it in its thread once the day is open. Sundays are NOT held:
+        # a family who writes in gets answered (owner, Nov 25).
         from app.services.programs import outreach_slots as _os
-        if _os.closed_for_org(db, lead.organization_id, now):
+        if _os.closed_for_replies(now):
             return _turn(db, conv, "ai", text, action=action, delivery="held",
-                         response_id=resp.id, reason="closed day - nothing is sent today (Sunday or a no-contact day)")
+                         response_id=resp.id, reason="no-contact day - nothing is sent today")
         # AUTO, and this conversation is the AI's: answer the email in its own
         # thread, to the person who wrote it, from the mailbox it came to.
         from app.services.programs import email_reply
@@ -1381,7 +1382,13 @@ def _deliver(db, prog, lead, conv, resp, text, action, mode, *, now) -> ProgramC
                  notify=True)
         return _turn(db, conv, "ai", text, action=action, delivery="blocked",
                      reason=(res.get("error") or "email not sent")[:240], response_id=resp.id)
-    hours = contact_hours.check(lead, now)
+    # An answer to a family who wrote in: the program's closed day (Sunday)
+    # does not hold it - only outreach stops on Sundays (owner, Nov 25). The
+    # contact hours and a no-contact day (Thanksgiving) still do.
+    from app.services.programs import outreach_slots as _os_r
+    hours = contact_hours.check(lead, now, program_days=False)
+    if hours.get("permitted") and _os_r.closed_for_replies(now):
+        hours = {"permitted": False, "reason": "no-contact day"}
     if not hours.get("permitted"):
         # The held reply itself is released by sweep(). next_followup_at only
         # moves when nothing is set or it is earlier than the next allowed
@@ -2008,11 +2015,12 @@ def sweep(db: Session, now: Optional[datetime] = None) -> Dict:
         _resp = (db.query(ProgramResponse).filter(ProgramResponse.id == t.response_id).first()
                  if t.response_id else None)
         _is_email = _resp is not None and _resp.channel == "email"
-        if _is_email:
-            from app.services.programs import outreach_slots as _os
-            if _os.closed_for_org(db, lead.organization_id, now):
-                continue                                 # closed day: waits for the next open day
-        elif not contact_hours.check(lead, now).get("permitted"):
+        # Held answers to families who wrote in: Sundays release them (owner,
+        # Nov 25); a no-contact day and the contact hours still hold them.
+        from app.services.programs import outreach_slots as _os
+        if _os.closed_for_replies(now):
+            continue                                     # no-contact day: waits for the next day
+        if not _is_email and not contact_hours.check(lead, now, program_days=False).get("permitted"):
             continue
         from app.services.sci_staging_demo import is_demo_lead
         from app.services.test_records import is_owner_test_lead
