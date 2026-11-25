@@ -1041,13 +1041,68 @@ def day_part(body: str) -> Optional[str]:
     return None
 
 
-def day_named(body: str, today) -> Optional[object]:
-    """The next date for a weekday the family named ("Can you do Friday?")."""
-    t = (body or "").lower()
+_DAY_RX = r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues?|wed|thur?s?|fri|sat|sun)s?"
+# "I work Monday through Friday", "I'm busy Mon-Fri", "I work weekdays"
+_BUSY_RANGE = re.compile(r"\b(work|working|busy|at work|on the job|job|shift|unavailable|can'?t)\b[^.!?\n]{0,40}?\b"
+                         + _DAY_RX + r"\s*(?:through|thru|to|-|–|—|and)\s*" + _DAY_RX + r"\b", re.I)
+_BUSY_WEEKDAYS = re.compile(r"\b(work|working|busy)\b[^.!?\n]{0,30}?\b(weekdays|during the week|all week)\b", re.I)
+_WEEKEND = re.compile(r"\b(weekends?|saturday or sunday|sat or sun)\b", re.I)
+
+
+def _day_index(word: str) -> Optional[int]:
+    w = (word or "").lower().rstrip("s")
     for i, name in enumerate(_DAYS):
-        if re.search(r"\b(%s|%s)\b" % (name, name[:3]), t):
-            ahead = (i - today.weekday()) % 7 or 7
-            return today + timedelta(days=ahead)
+        if w and name.startswith(w[:3]) and (w == name or w == name[:len(w)]):
+            return i
+    return None
+
+
+def day_wishes(body: str):
+    """(days they want, days they can't do) as weekday numbers (Mon=0), from
+    what they wrote. Owner, Nov 24 (Gloria): "meet on a Saturday. I work Monday
+    through Friday" wants {5}, can't do {0..4} - never "Monday" because Monday
+    comes first in the week."""
+    t = body or ""
+    avoid, spans = set(), []
+    for m in _BUSY_RANGE.finditer(t):
+        a, b = _day_index(m.group(2)), _day_index(m.group(3))
+        if a is not None and b is not None:
+            i = a
+            while True:
+                avoid.add(i)
+                if i == b:
+                    break
+                i = (i + 1) % 7
+            spans.append(m.span())
+    for m in _BUSY_WEEKDAYS.finditer(t):
+        avoid.update(range(5))
+        spans.append(m.span())
+    want = set()
+    if _WEEKEND.search(t):
+        want.update((5, 6))
+    for m in re.finditer(r"\b" + _DAY_RX + r"\b", t, re.I):
+        if any(a <= m.start() < b for a, b in spans):
+            continue
+        i = _day_index(m.group(1))
+        if i is not None and i not in avoid:
+            want.add(i)
+    if not want and avoid:
+        want = set(range(7)) - avoid
+    return want, avoid
+
+
+def day_named(body: str, today) -> Optional[object]:
+    """The next date for a weekday the family asked for ("Can you do Friday?").
+    A day they said they CAN'T do (they work it) is never picked."""
+    t = (body or "").lower()
+    want, avoid = day_wishes(body)
+    named = [i for i in range(7) if re.search(r"\b(%s|%s)\b" % (_DAYS[i], _DAYS[i][:3]), t)]
+    if named and not want:
+        return None                                 # every day they named is one they can't do
+    if want and (named or _WEEKEND.search(t)):
+        aheads = [((i - today.weekday()) % 7 or 7) for i in want if not named or i in named or _WEEKEND.search(t)]
+        if aheads:
+            return today + timedelta(days=min(aheads))
     if re.search(r"\btomorrow\b", t):
         return today + timedelta(days=1)
     return None
@@ -1734,8 +1789,23 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                 if _s:
                     preferred_day = _mon + timedelta(days=_i)
                     break
+        # Owner, Nov 24 (Gloria): the days they can and can't do, from this
+        # message or their earlier ones ("Okay" after "only Saturdays" still
+        # means Saturdays).
+        _wish_text = " ".join([t.text or "" for t in (
+            db.query(ProgramConversationTurn).filter(ProgramConversationTurn.conversation_id == conv.id,
+                                                     ProgramConversationTurn.role == "family")
+            .order_by(ProgramConversationTurn.created_at.desc()).limit(6).all())][::-1] + [body or ""])
+        _want, _avoid = day_wishes(_wish_text)
+        if preferred_day is not None and _avoid and preferred_day.weekday() in _avoid:
+            preferred_day = None
         if preferred_day is not None:
             slots, why = A.slots_on_day(db, prog, preferred_day, kind=conv.appointment_kind or A.VISIT)
+        if not slots and _want and len(_want) < 7:
+            slots, why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT, part=day_part(body),
+                                           weekdays=_want, days=28)
+            if slots:
+                merge_memory(conv, {"best_times": ", ".join(_DAYS[i].title() + "s" for i in sorted(_want))})
         if not slots and day_part(body):
             slots, why = A.available_slots(db, prog, kind=conv.appointment_kind or A.VISIT, part=day_part(body))
         if not slots:
