@@ -11,7 +11,7 @@ once the envelope is voided, declined or expired).
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
@@ -65,13 +65,15 @@ class SignIn(BaseModel):
     consent: bool = False
     typed_name: str = Field("", max_length=200)
     drawn_png: Optional[str] = Field(None, max_length=450_000)
+    fields: Optional[Dict[str, str]] = None
 
 
 @router.post("/{token}/sign")
 def sign(token: str, payload: SignIn, request: Request, db: Session = Depends(get_db)):
     ip, ua = _who(request)
     return _run(ev.sign, db, token, consent=payload.consent, typed_name=payload.typed_name,
-                drawn_png=payload.drawn_png, ip=ip, ua=ua)
+                drawn_png=payload.drawn_png, ip=ip, ua=ua,
+                fields={k[:40]: (v or "")[:400] for k, v in (payload.fields or {}).items()})
 
 
 class DeclineIn(BaseModel):

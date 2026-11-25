@@ -157,6 +157,8 @@ def _is_lock_contention(exc) -> bool:
 # undo it on databases that already have the column, and a stale no-op
 # entry costs nothing to leave in place).
 COLUMNS_TO_ADD = [
+    ("esign_envelopes", "cc_emails", "TEXT"),
+    ("esign_signers", "fields_json", "TEXT"),
     # #441 - per-touch campaign copy
     ("program_campaign_families", "touch_copy_json", "TEXT"),
     ("program_source_records", "journey_started_at", "TIMESTAMP"),

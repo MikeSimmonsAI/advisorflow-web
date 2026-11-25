@@ -212,6 +212,7 @@ from app.routers.evosense_router import router as evosense_router  # noqa: E402
 from app.routers.source_feed_router import router as source_feed_router  # noqa: E402
 from app.routers.esign_webhook_router import router as esign_webhook_router  # noqa: E402
 from app.routers.esign_public_router import router as esign_public_router  # noqa: E402
+from app.routers.esign_owner_router import router as esign_owner_router  # noqa: E402
 from app.routers.client_growth_router import router as client_growth_router  # noqa: E402
 from app.routers.client_growth_router import god_router as client_growth_god_router  # noqa: E402
 from app.routers.client_growth_router import public_router as client_growth_public_router  # noqa: E402
@@ -1344,6 +1345,7 @@ app.include_router(evosense_router)
 app.include_router(source_feed_router)   # /source-feeds - token-only file feed (TAD from the operator's PC)
 app.include_router(esign_webhook_router)  # /esign/docuseal/webhook - provider callback; status re-read from DocuSeal
 app.include_router(esign_public_router)   # /esign/sign/{token} - EvoSys e-signature, signer side; the link token IS the authorization
+app.include_router(esign_owner_router)    # /esign/owner/... - platform owner sends any document for signature from an organization
 app.include_router(client_growth_router)         # /client-growth - discovery questionnaires (God Mode, owners, client_growth grant)
 app.include_router(client_growth_god_router)     # /god/client-growth - owner-only controls
 app.include_router(client_growth_public_router)  # /client-growth-public - private invitation link; the token IS the authorization

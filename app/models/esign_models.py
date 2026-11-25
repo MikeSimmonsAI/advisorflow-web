@@ -42,6 +42,7 @@ class EsignEnvelope(Base):
     void_reason = Column(String, nullable=True)
     final_pdf = Column(LargeBinary, nullable=True)
     final_sha256 = Column(String, nullable=True)
+    cc_emails = Column(Text, nullable=True)                       # comma-separated; get the sealed copy only
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
@@ -76,6 +77,8 @@ class EsignSigner(Base):
     sign_user_agent = Column(String, nullable=True)
     declined_at = Column(DateTime, nullable=True)
     decline_reason = Column(String, nullable=True)
+    # Blanks this signer fills in while signing: {"requested": [{key, label}], "values": {key: text}}
+    fields_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
