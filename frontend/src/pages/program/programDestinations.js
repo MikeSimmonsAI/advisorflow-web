@@ -48,6 +48,11 @@ export function openProgramItem(item, navigate, opts = {}) {
     clearWorkspaceContext()
     navigate(item.path || '/acquisition-ops'); return
   }
+  if (item.type === 'restland_bookit') {
+    // The Restland workspace is the one BookIT reads; the server re-checks it.
+    setWorkspaceContext(item.organization_id)
+    navigate(item.path || '/program/restland-bookit'); return
+  }
   if (item.type === 'client_growth') {
     clearWorkspaceContext()
     navigate(item.path || '/client-growth'); return
