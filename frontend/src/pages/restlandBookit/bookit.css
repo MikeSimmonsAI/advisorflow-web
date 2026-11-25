@@ -122,8 +122,8 @@
 .bk-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
 /* slide-over / sheet */
-.bk-scrim { position: fixed; inset: 0; background: rgba(23,42,34,.25); z-index: 20; animation: bkfade .15s ease; }
-.bk-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 100vw); background: var(--canvas); z-index: 21;
+.bk-scrim { position: fixed; inset: 0; background: rgba(23,42,34,.25); z-index: 1000; animation: bkfade .15s ease; }
+.bk-panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 100vw); background: var(--canvas); z-index: 1001;
   border-left: 1px solid var(--line); display: flex; flex-direction: column; animation: bkslide .2s ease; }
 .bk-panel .ph { padding: 14px 18px; background: var(--card); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
 .bk-panel .ph h3 { margin: 0; font-size: 17px; }
@@ -141,7 +141,7 @@
 .bk-msg.in { background: var(--card); border: 1px solid var(--line); }
 .bk-msg.out { background: var(--emerald-s); margin-left: auto; }
 .bk-msg small { display: block; color: var(--ink3); font-size: 11px; margin-top: 2px; }
-.bk-toast { position: fixed; bottom: 86px; left: 50%; transform: translateX(-50%); background: var(--forest); color: #fff; padding: 10px 16px; border-radius: 10px; z-index: 40; box-shadow: var(--shadow); max-width: 92vw; }
+.bk-toast { position: fixed; bottom: 86px; left: 50%; transform: translateX(-50%); background: var(--forest); color: #fff; padding: 10px 16px; border-radius: 10px; z-index: 1003; box-shadow: var(--shadow); max-width: 92vw; }
 .bk-toast.err { background: var(--err); }
 .bk-empty { text-align: center; padding: 26px 10px; color: var(--ink3); }
 .bk-skel { height: 14px; border-radius: 6px; background: linear-gradient(90deg, var(--canvas2), #fff, var(--canvas2)); background-size: 200% 100%; animation: bksk 1.2s infinite; margin: 8px 0; }
@@ -177,7 +177,7 @@
 .bk-progress span { font-size: 11.5px; color: var(--ink2); }
 
 /* copilot */
-.bk-copilot { position: fixed; right: 16px; bottom: 16px; width: min(400px, calc(100vw - 32px)); max-height: 72vh; background: var(--card); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 12px 40px rgba(23,42,34,.16); z-index: 30; display: flex; flex-direction: column; }
+.bk-copilot { z-index: 1002 !important; position: fixed; right: 16px; bottom: 16px; width: min(400px, calc(100vw - 32px)); max-height: 72vh; background: var(--card); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 12px 40px rgba(23,42,34,.16); z-index: 30; display: flex; flex-direction: column; }
 .bk-copilot .ch { padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
 .bk-copilot .cb { padding: 12px 14px; overflow: auto; flex: 1; }
 .bk-copilot .cf { padding: 10px; border-top: 1px solid var(--line); display: flex; gap: 6px; }
@@ -186,7 +186,7 @@
 
 /* bottom nav (mobile) */
 .bk-bottom { display: none; }
-.bk-more { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-radius: 18px 18px 0 0; z-index: 25; padding: 12px 12px 76px; box-shadow: 0 -8px 30px rgba(23,42,34,.12); }
+.bk-more { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-radius: 18px 18px 0 0; z-index: 1001; padding: 12px 12px 76px; box-shadow: 0 -8px 30px rgba(23,42,34,.12); }
 .bk-more button { display: flex; width: 100%; gap: 12px; align-items: center; padding: 12px; border: 0; background: none; border-radius: 10px; font-size: 15px; color: var(--ink); }
 .bk-more button svg { width: 20px; height: 20px; color: var(--emerald); }
 
