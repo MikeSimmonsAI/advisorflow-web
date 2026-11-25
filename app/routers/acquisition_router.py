@@ -280,7 +280,7 @@ def put_availability(payload: dict = Body(...), ctx: C.Ctx = Depends(ctx_dep)):
 @router.put("/logo", dependencies=_WRITE)
 def put_logo(payload: dict = Body(...), ctx: C.Ctx = Depends(ctx_dep)):
     """The company's own logo for its portal. Checked and re-drawn as a PNG by
-    the same code that handles EvoSys Sales logos; stored on the company."""
+    the same code that handles EvoSys BookIt logos; stored on the company."""
     C.require_manager(ctx)
     from app.services.evosys_sales import logos as L
     import base64

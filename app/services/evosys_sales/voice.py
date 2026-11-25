@@ -1,8 +1,8 @@
-"""EvoSys Sales calling from the team number (owner, 2026-11-20).
+"""EvoSys BookIt calling from the team number (owner, 2026-11-20).
 
 * Outbound: the browser places the call through Twilio Voice (no tel: link).
   Twilio asks /evosys-sales-public/voice/outbound what to do; we check the
-  caller is an EvoSys Sales member, the lead belongs to EvoSys Sales, is not on
+  caller is an EvoSys BookIt member, the lead belongs to EvoSys BookIt, is not on
   Do Not Contact, and dial the lead's number WITH THE TEAM NUMBER AS CALLER ID.
   Never a personal number, never another program's line.
 * Inbound: a call to the team number (someone calling back) rings the
@@ -56,7 +56,7 @@ def status(s) -> Dict:
     num = team_number(s)
     ready = bool(num and s.voice_app_sid and s.voice_key_sid and s.voice_key_secret_enc)
     return {"ready": ready, "number": num, "forward_to": s.voice_forward_to or s.alert_phone,
-            "blocker": None if ready else ("No EvoSys Sales number is saved." if not num
+            "blocker": None if ready else ("No EvoSys BookIt number is saved." if not num
                                            else "Calling isn't set up yet (owner: Set up calling).")}
 
 
@@ -78,7 +78,7 @@ def ensure_setup(db: Session, s) -> Dict:
         return {"error": "%s can't make or take calls (Twilio says voice is off for it)." % num.phone_number}
     done = []
     if not s.voice_app_sid:
-        app = client.applications.create(friendly_name="EvoSys Sales calling", voice_method="POST",
+        app = client.applications.create(friendly_name="EvoSys BookIt calling", voice_method="POST",
                                           voice_url=base + PUBLIC + "/outbound",
                                           status_callback=base + PUBLIC + "/status", status_callback_method="POST")
         s.voice_app_sid = app.sid
@@ -87,7 +87,7 @@ def ensure_setup(db: Session, s) -> Dict:
         client.applications(s.voice_app_sid).update(voice_url=base + PUBLIC + "/outbound", voice_method="POST",
                                                     status_callback=base + PUBLIC + "/status")
     if not (s.voice_key_sid and s.voice_key_secret_enc):
-        key = client.new_keys.create(friendly_name="EvoSys Sales browser calling")
+        key = client.new_keys.create(friendly_name="EvoSys BookIt browser calling")
         s.voice_key_sid, s.voice_key_secret_enc = key.sid, encrypt_value(key.secret)
         done.append("browser key created")
     before = num.voice_url or None
@@ -152,7 +152,7 @@ def outbound(db: Session, s, params: Dict) -> str:
              to_address=to, body="Call from %s" % (user.full_name or user.email), status="ringing",
              provider_message_id=params.get("CallSid"), actor_user_id=user.id, created_at=now))
     db.add(OpportunityEvent(opportunity_id=opp.id, event_type="call", actor_user_id=user.id,
-                            summary="Called from the EvoSys Sales number", occurred_at=now))
+                            summary="Called from the EvoSys BookIt number", occurred_at=now))
     db.commit()
     r = VoiceResponse()
     d = r.dial(caller_id=frm, answer_on_bridge=True, timeout=30)
@@ -179,10 +179,10 @@ def inbound(db: Session, s, params: Dict) -> str:
     now = datetime.utcnow()
     if opp is not None:
         db.add(M(brand_sales_org_id=s.brand_sales_org_id, opportunity_id=opp.id, direction="in", channel="call",
-                 to_address=team_number(s), body="Called the EvoSys Sales number", status="ringing",
+                 to_address=team_number(s), body="Called the EvoSys BookIt number", status="ringing",
                  provider_message_id=params.get("CallSid"), created_at=now))
         db.add(OpportunityEvent(opportunity_id=opp.id, event_type="call",
-                                summary="Called us back on the EvoSys Sales number", occurred_at=now))
+                                summary="Called us back on the EvoSys BookIt number", occurred_at=now))
         db.commit()
     r = VoiceResponse()
     if not dest:
@@ -211,10 +211,10 @@ def inbound_done(db: Session, s, params: Dict) -> str:
             who = (o.company_name if o else None) or who
         try:
             from app.services.evosys_sales import sms_inbound as SI
-            SI.notify_owner(s, "EvoSys Sales - MISSED CALL: %s (%s) called the Sales number."
+            SI.notify_owner(s, "EvoSys BookIt - MISSED CALL: %s (%s) called the BookIt number."
                             % (who, params.get("From") or "unknown"),
-                            "EvoSys Sales - missed call from %s" % who,
-                            "<p>%s (%s) called the EvoSys Sales number and nobody answered.</p>"
+                            "EvoSys BookIt - missed call from %s" % who,
+                            "<p>%s (%s) called the EvoSys BookIt number and nobody answered.</p>"
                             % (who, params.get("From") or "unknown"))
         except Exception:                                            # noqa: BLE001
             log.exception("[evosys voice] missed-call alert failed")

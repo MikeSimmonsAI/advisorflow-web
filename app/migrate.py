@@ -249,7 +249,7 @@ def main(argv=None) -> int:
         finally:
             _db.close()
     except Exception as e:                                   # noqa: BLE001
-        log.error("EvoSys Sales owner changes errored (deploy continues): %s: %s", type(e).__name__, str(e)[:200])
+        log.error("EvoSys BookIt owner changes errored (deploy continues): %s: %s", type(e).__name__, str(e)[:200])
 
     # ── 3f. WORKSPACE DATA RESET (#507) - inert unless switched on ──
     # WORKSPACE_RESET="<organization id>:<plan|apply|configure>:<run key>" or

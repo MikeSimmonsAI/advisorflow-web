@@ -1,4 +1,4 @@
-"""EvoSys Sales text inbox rules, shared by the Today screen, the AI auto-answer
+"""EvoSys BookIt text inbox rules, shared by the Today screen, the AI auto-answer
 and the person's Send button (owner, 2026-11-20).
 
 - A reply is ANSWERED once anything real went back to that lead after it: a

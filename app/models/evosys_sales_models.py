@@ -1,4 +1,4 @@
-"""EvoSys Sales program (owner request 2026-11-16).
+"""EvoSys BookIt program (owner request 2026-11-16).
 
 EvoSys's own sales team signing up businesses (cleaning companies first). The
 leads themselves stay `opportunities` rows on the EvoSys Pro brand sales team;
@@ -174,7 +174,7 @@ class EvoSysCampaign(Base):
 
 
 class EvoSysLead(Base):
-    """EvoSys Sales facts about one opportunity: its industry + market group,
+    """EvoSys BookIt facts about one opportunity: its industry + market group,
     where that came from, and whether a person needs to look at it."""
     __tablename__ = "evosys_leads"
 
@@ -199,7 +199,7 @@ class EvoSysLead(Base):
 
 
 class EvoSysAITask(Base):
-    """Every AI request EvoSys Sales makes and what became of it: what it was
+    """Every AI request EvoSys BookIt makes and what became of it: what it was
     asked, which facts it was given, what it suggested, whether a person
     accepted, edited or ignored it - or why it failed. A retry with the same
     inputs returns the saved result instead of asking again."""

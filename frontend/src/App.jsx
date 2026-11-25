@@ -179,7 +179,7 @@ const InsReports = insPage('ReportsPage')
 const InsAutomation = insPage('AutomationPage')
 const InsImport = insPage('ImportPage')
 const InsSettings = insPage('SettingsPage')
-// EvoSys Sales program (/program/evosys-sales/*): EvoSys's own sales team.
+// EvoSys BookIt program (/program/evosys-sales/*): EvoSys's own sales team.
 const EvsShell = lazyPage(() => import('./pages/evosysSales/EvoSysSales'))
 const evsPage = name => lazyPage(() => import('./pages/evosysSales/EvoSysSales').then(m => ({ default: m[name] })))
 const EvsLeads = evsPage('Leads')
@@ -1748,7 +1748,7 @@ export default function App() {
           <Route path="import" element={<InsImport />} />
           <Route path="settings" element={<InsSettings />} />
         </Route>
-        {/* EvoSys Sales program: /sales/evosys/* admits only the EvoSys Pro sales team. */}
+        {/* EvoSys BookIt program: /sales/evosys/* admits only the EvoSys Pro sales team. */}
         <Route path="/program/evosys-sales" element={<ProtectedRoute bare><EvsShell /></ProtectedRoute>}>
           <Route index element={<EvsInbox />} />
           <Route path="leads" element={<EvsLeads />} />

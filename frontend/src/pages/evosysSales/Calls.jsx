@@ -1,4 +1,4 @@
-// EvoSys Sales "Calls": Business Growth Calls (design pages 11-18).
+// EvoSys BookIt "Calls": Business Growth Calls (design pages 11-18).
 // Everything books, moves and cancels through the existing scheduler, so the
 // Zoom room, calendar event, invite and double-booking checks are the real ones.
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -306,7 +306,7 @@ export function NewCall() {
         <dl className="v2-dl">
           <dt>To</dt><dd>{who}{f.guest_email ? ' · ' + f.guest_email : ''}{(lead?.phone || f.guest_phone) ? ' · text to ' + (lead?.phone || f.guest_phone) : ''}</dd>
           <dt>Calendar</dt><dd>{hostName} · creates the calendar event and a Zoom participant link</dd>
-          <dt>Invite and reminders</dt><dd>{f.guest_email ? 'Calendar invite by email. ' : 'No email on file, so no calendar invite. '}{(lead?.phone || f.guest_phone) && lead ? 'Confirmation text from the EvoSys Sales number with the Zoom link, then reminders the day before and 1 hour before.' : ''}</dd>
+          <dt>Invite and reminders</dt><dd>{f.guest_email ? 'Calendar invite by email. ' : 'No email on file, so no calendar invite. '}{(lead?.phone || f.guest_phone) && lead ? 'Confirmation text from the EvoSys BookIt number with the Zoom link, then reminders the day before and 1 hour before.' : ''}</dd>
           <dt>Message preview</dt><dd>Looking forward to talking through your growth goals. Your meeting details are in the invite.</dd>
           {f.notes && <><dt>Note for the guest</dt><dd>{f.notes}</dd></>}
         </dl>
@@ -373,7 +373,7 @@ function Reschedule({ call, onDone }) {
   }, [at, call.id, call.duration_minutes, host])
   const save = async () => {
     setBusy(true); setErr(null)
-    try { await api.post(`/sales/appointments/${call.id}/reschedule`, { starts_at: at, reason: 'Moved from EvoSys Sales', notify: true }); onDone('Call moved. The invite and Zoom link were updated.') }
+    try { await api.post(`/sales/appointments/${call.id}/reschedule`, { starts_at: at, reason: 'Moved from EvoSys BookIt', notify: true }); onDone('Call moved. The invite and Zoom link were updated.') }
     catch (e) { setErr(errText(e)) } finally { setBusy(false) }
   }
   return (
@@ -452,7 +452,7 @@ export function CallDetail() {
       )}
       {confirmCancel && (
         <div className="v2-confirm" role="alertdialog"><b>Cancel this call?</b> The guest gets a cancellation and the Zoom meeting is removed.
-          <div className="v2-row"><button className="v2-btn v2-primary" onClick={() => { setConfirmCancel(false); act(() => api.post(`/sales/appointments/${c.id}/cancel`, { reason: 'Cancelled from EvoSys Sales' }), 'Call cancelled.') }}>Yes, cancel it</button><button className="v2-btn" onClick={() => setConfirmCancel(false)}>Keep it</button></div></div>
+          <div className="v2-row"><button className="v2-btn v2-primary" onClick={() => { setConfirmCancel(false); act(() => api.post(`/sales/appointments/${c.id}/cancel`, { reason: 'Cancelled from EvoSys BookIt' }), 'Call cancelled.') }}>Yes, cancel it</button><button className="v2-btn" onClick={() => setConfirmCancel(false)}>Keep it</button></div></div>
       )}
       {mode === 'move' && <Reschedule call={c} onDone={done} />}
       {mode === 'outcome' && <Outcome call={c} onDone={done} />}
@@ -556,7 +556,7 @@ function HoursEditor({ onSaved, onError }) {
   )
 }
 
-// The signed-in person's calendar connection, without leaving EvoSys Sales.
+// The signed-in person's calendar connection, without leaving EvoSys BookIt.
 function CalendarPanel({ host, hostIsMe }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState(null)
@@ -612,7 +612,7 @@ export function CallsSettings() {
   const [toast, setToast] = useState(back)
   const load = useCallback(() => api.get(`${API}/calls-settings`).then(x => { setD(x); setFwd(x.calling?.forward_to || '') }).catch(e => setErr(errText(e))), [])
   useEffect(() => { load() }, [load])
-  const saveFwd = async () => { try { await api.put(`${API}/outreach`, { voice_forward_to: fwd }); setToast('Saved. Calls to the Sales number ring ' + fwd + '.'); load() } catch (e) { setErr(errText(e)) } }
+  const saveFwd = async () => { try { await api.put(`${API}/outreach`, { voice_forward_to: fwd }); setToast('Saved. Calls to the BookIt number ring ' + fwd + '.'); load() } catch (e) { setErr(errText(e)) } }
   return (
     <div className="v2-page">
       <Head title="Appointment settings" sub="Manage availability, calendar, Zoom, reminders, and alerts." />
@@ -650,14 +650,14 @@ export function CallsSettings() {
         <article className="v2-card">
           <b>Reminders to the guest</b>{d.reminders.map((r, k) => <div key={k} className="v2-listrow"><span>{r}</span></div>)}
           <b>Reply and booking alerts</b>{d.alerts.map((a, k) => <div key={k} className="v2-listrow"><b>{a.who}</b><span>{[a.phone && 'text ' + a.phone, a.email && 'email ' + a.email].filter(Boolean).join(' · ') || 'no contact set'}</span></div>)}
-          <div className="v2-hint">Staff alerts come from the EvoSys notifications line, never the Sales number customers see.</div>
+          <div className="v2-hint">Staff alerts come from the EvoSys notifications line, never the BookIt number customers see.</div>
           <div className="v2-row"><Link className="v2-btn" to={`${BASE}/outreach`}>Edit alert recipients</Link></div>
         </article>
       )}
       {d && tab === 'calling' && (
         <article className="v2-card v2-form">
-          <div className="v2-listrow"><b>Sales number</b><span>{d.calling.number || 'not set'} · {d.calling.ready ? 'Calls and texts ready' : d.calling.blocker}</span></div>
-          <label className="v2-field"><span>When someone calls the Sales number, ring</span><input className="v2-input" type="tel" value={fwd} onChange={e => setFwd(e.target.value)} /></label>
+          <div className="v2-listrow"><b>BookIt number</b><span>{d.calling.number || 'not set'} · {d.calling.ready ? 'Calls and texts ready' : d.calling.blocker}</span></div>
+          <label className="v2-field"><span>When someone calls the BookIt number, ring</span><input className="v2-input" type="tel" value={fwd} onChange={e => setFwd(e.target.value)} /></label>
           <div className="v2-row"><button className="v2-btn v2-primary" onClick={saveFwd}>Save settings</button></div>
         </article>
       )}

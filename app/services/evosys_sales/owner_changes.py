@@ -1,4 +1,4 @@
-"""EvoSys Sales one-time owner-ordered changes (run at deploy by app.migrate).
+"""EvoSys BookIt one-time owner-ordered changes (run at deploy by app.migrate).
 
 Nov 23, 2026 - owner: "If they click the booking link, that means yes. I don't
 want to see another text come back that means yes." The two government-list

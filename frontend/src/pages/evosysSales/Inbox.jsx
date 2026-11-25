@@ -1,4 +1,4 @@
-// EvoSys Sales Inbox (design pages 03-05, 27-31): who needs you, the
+// EvoSys BookIt Inbox (design pages 03-05, 27-31): who needs you, the
 // conversation, the AI draft, and Call / Text / Book a call in one place.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
@@ -101,7 +101,7 @@ function Draft({ lead, lastIn, saved, onSent, onDone }) {
             {lastIn && <button className="v2-btn" disabled={busy} onClick={onDone}>Mark done</button>}
           </div>
           {(out.needs_person || []).length > 0 && <div className="v2-why">AI paused for Mike · {out.needs_person[0]}</div>}
-          <div className="v2-hint">{body.length} characters · sends from the EvoSys Sales number</div>
+          <div className="v2-hint">{body.length} characters · sends from the EvoSys BookIt number</div>
         </>
       )}
       {err && <p className="v2-err" role="alert">{err}</p>}
@@ -147,7 +147,7 @@ export function Thread({ id, onBack, onChanged, toast }) {
       </div>
       {dnc && (
         <div className="v2-confirm" role="alertdialog">
-          <b>Put {lead.company} on Do Not Contact?</b> They won't get another text or call from EvoSys Sales.
+          <b>Put {lead.company} on Do Not Contact?</b> They won't get another text or call from EvoSys BookIt.
           <div className="v2-row"><button className="v2-btn v2-primary" onClick={doDnc}>Yes, Do Not Contact</button><button className="v2-btn" onClick={() => setDnc(false)}>Cancel</button></div>
         </div>
       )}

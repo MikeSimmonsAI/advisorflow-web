@@ -385,7 +385,7 @@ function AddCompanyWizard({ opts, prefill, onDone, onCancel }) {
     <div className="aq-actions"><button className="aq-btn" onClick={onCancel}>Close</button></div></section>
   return (
     <section className="aq-card">
-      <div className="aq-card__head"><h2>Add Service Company{f.sales_opportunity_id ? ' (from EvoSys Sales)' : ''}</h2><button className="aq-btn aq-btn--sm" onClick={onCancel}>Cancel</button></div>
+      <div className="aq-card__head"><h2>Add Service Company{f.sales_opportunity_id ? ' (from EvoSys BookIt)' : ''}</h2><button className="aq-btn aq-btn--sm" onClick={onCancel}>Cancel</button></div>
       <Stepper steps={STEPS} current={step} />
       {step === 0 && <div className="aq-grid aq-two">
         <div className="aq-field"><label htmlFor="w-name">Company name *</label><input id="w-name" value={f.name} onChange={set('name')} autoFocus /></div>
@@ -463,7 +463,7 @@ function BulkConvert({ opts, onDone, onCancel }) {
   return (
     <section className="aq-card">
       <div className="aq-card__head"><h2>Convert Sales prospects → client workspaces</h2><button className="aq-btn aq-btn--sm" onClick={onCancel}>Cancel</button></div>
-      <p className="hb-muted">Service companies from EvoSys Sales. Choose the ones that agreed; each gets its own private, paused workspace. Their Sales record is kept and linked.</p>
+      <p className="hb-muted">Service companies from EvoSys BookIt. Choose the ones that agreed; each gets its own private, paused workspace. Their BookIt record is kept and linked.</p>
       {err && <div className="aq-err">{errText(err)}</div>}
       {!cands ? <Loading /> : <div className="hb-table-wrap" style={{ maxHeight: 380 }}><table className="aq-table"><thead><tr><th /><th>Company</th><th>Contact</th><th>Source</th><th>Status</th><th>City (optional)</th></tr></thead>
         <tbody>{items.map(c => <tr key={c.id}>

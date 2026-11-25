@@ -3,7 +3,7 @@
 A facility or property manager who saw Mike's LinkedIn offer fills in the
 public page /evosys-sales-public/walkthrough. Each request is one row here.
 These people are NOT EvoSys Pro sales prospects (they want a cleaning quote,
-not our software), so they are kept out of EvoSys Sales opportunities and
+not our software), so they are kept out of EvoSys BookIt opportunities and
 never enter any automatic outreach. Mike matches each one to a cleaning
 company by hand.
 """

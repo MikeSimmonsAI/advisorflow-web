@@ -7,7 +7,7 @@ qualified platform-owned business to ONE cleaning tenant using the existing
 Acquisition engine. No import batches, sends, calls or subscriptions result.
 
 A prospect from a CUSTOMER tenant's CRM is never accepted as a source here.
-EvoSys Sales opportunities (prospective cleaning company CUSTOMERS) are a
+EvoSys BookIt opportunities (prospective cleaning company CUSTOMERS) are a
 separate domain and are never considered for distribution.
 """
 from __future__ import annotations

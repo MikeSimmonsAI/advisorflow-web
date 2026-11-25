@@ -1,4 +1,4 @@
-"""EvoSys Sales: which industry + market group a lead belongs to.
+"""EvoSys BookIt: which industry + market group a lead belongs to.
 
 DETERMINISTIC FIRST. A lead is grouped by rule only when it is clear:
   industry  - one configured industry's keywords appear in its industry /

@@ -1,6 +1,6 @@
 /**
  * EVOSYS BUSINESS DEVELOPMENT (/program/evosys-business-development/*) - PR #663,
- * shown next to EvoSys Sales (/program/evosys-sales) on the same data so the two
+ * shown next to EvoSys BookIt (/program/evosys-sales) on the same data so the two
  * versions can be compared.
  *
  * How EvoSys reaches out to people and businesses it wants to work with:
@@ -9,7 +9,7 @@
  * reach-out campaign around what you're working on.
  *
  * Today, Leads, Conversations, Outreach, Appointments, Results. Design:
- * "EvoSys Sales workflow dashboard redesign.png" (compact navy sidebar, EP
+ * "EvoSys BookIt workflow dashboard redesign.png" (compact navy sidebar, EP
  * emblem, light work area, cobalt actions, gold only for what needs
  * attention). 
  *

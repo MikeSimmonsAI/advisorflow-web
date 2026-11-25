@@ -189,7 +189,7 @@ test('Pinned: phone pins first; otherwise desktop pins; otherwise desktop featur
 
 test('phone cards use desktop V2 identity: photo, short line, category', () => {
   const sci = { type: 'workspace', program: 'sci', display: 'SCI', orgLabel: 'Service Corporation International' }
-  const sales = { type: 'workspace', program: 'evosys_sales', display: 'EvoSys Sales' }
+  const sales = { type: 'workspace', program: 'evosys_sales', display: 'EvoSys BookIt' }
   const db = { type: 'deal_builder', key: 'executive', display: 'Executive Deal Builder' }
   assert.equal(photoKeyFor(sci), 'sci'); assert.equal(shortLine(sci), 'Service Corporation International')
   assert.equal(shortLine(sales), 'Prospects & Outreach'); assert.equal(categoryOf(sales), 'sales')

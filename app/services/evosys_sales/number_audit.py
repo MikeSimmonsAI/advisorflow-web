@@ -1,4 +1,4 @@
-"""EvoSys Sales number audit (owner, 2026-11-20): what the PROVIDER says about
+"""EvoSys BookIt number audit (owner, 2026-11-20): what the PROVIDER says about
 the team's number, not what our settings say.
 
 Reads (never changes) the platform Twilio account:
@@ -6,7 +6,7 @@ Reads (never changes) the platform Twilio account:
     inbound texts and calls are sent;
   * toll-free verification status for it;
   * the last messages and calls from / to it, by status and error code;
-  * for recent EvoSys Sales texts in our database, the number Twilio actually
+  * for recent EvoSys BookIt texts in our database, the number Twilio actually
     sent each one from, grouped by kind (campaign, AI answer, person, booking
     confirmation, reminder).
 No credential is returned. Phone numbers of leads are masked to the last 4.
@@ -93,7 +93,7 @@ def run(db: Session, s) -> Dict:
                                       "newest": str(calls_in[0].start_time) if calls_in else None}}
     except Exception as e:                                           # noqa: BLE001
         out["calls"] = {"error": str(e)[:200]}
-    # What Twilio says each kind of EvoSys Sales text was really sent from.
+    # What Twilio says each kind of EvoSys BookIt text was really sent from.
     rows = (db.query(M).filter(M.brand_sales_org_id == s.brand_sales_org_id, M.channel == "text",
                                M.direction == "out", M.provider_message_id.isnot(None))
             .order_by(M.created_at.desc()).limit(400).all())

@@ -1,5 +1,5 @@
 /**
- * EvoSys Sales - Outreach: pick a campaign (one per industry + market group),
+ * EvoSys BookIt - Outreach: pick a campaign (one per industry + market group),
  * edit its emails, offer, link and schedule, let AI draft copy, preview it for
  * a real lead, approve THIS version, turn it on. The team's sender, From,
  * Reply-To and mailing address are shared by every campaign.

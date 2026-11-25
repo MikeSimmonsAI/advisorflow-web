@@ -113,7 +113,7 @@ def commit_batch(batch_id: str, org_id: str, db: Session, committer_id: str) -> 
     if not batch:
         raise ValueError(f"Batch {batch_id} not found")
     if getattr(batch, "pipeline", None):
-        # A batch with a pipeline (universal intake, master pool, EvoSys Sales,
+        # A batch with a pipeline (universal intake, master pool, EvoSys BookIt,
         # customer Acquisition) is committed only by its own importer. This
         # service would turn every accepted row into a lead.
         raise UniversalBatchError(

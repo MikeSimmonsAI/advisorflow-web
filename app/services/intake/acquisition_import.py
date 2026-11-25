@@ -10,10 +10,10 @@ modified here).
   * Who: God, or an operator the owner granted for THAT customer. Re-checked
     on every call. The customer is chosen explicitly when the import starts.
   * Purpose, not industry: a prospect here is a business that might buy
-    cleaning from THIS customer. The same business may also be an EvoSys Sales
+    cleaning from THIS customer. The same business may also be an EvoSys BookIt
     prospect for a different reason; that never blocks the row and nothing is
     copied or moved - the platform owner just sees a note. An operator is never
-    told what EvoSys Sales or another customer holds.
+    told what EvoSys BookIt or another customer holds.
   * Nothing is emailed, assigned elsewhere or started. Notes and intro drafts
     become evidence notes on the prospect.
 """
@@ -95,12 +95,12 @@ def related(db: Session, b, n: Dict[str, Any]) -> List[str]:
     sid = n.get("source_record_id")
     if sid and (q.filter(func.lower(Opportunity.source_record_id) == sid.lower()).first()
                 or any(BI.id_in_text(sid, o.source) for o in q.filter(Opportunity.source.ilike("%" + sid + "%")).limit(20).all())):
-        return ["Also an EvoSys Sales prospect (a company EvoSys sells to)"]
+        return ["Also an EvoSys BookIt prospect (a company EvoSys sells to)"]
     if n.get("phone10"):
         for (phone,) in q.with_entities(Opportunity.phone).filter(
                 Opportunity.phone.ilike("%" + n["phone10"][-4:] + "%")).limit(200).all():
             if BI.digits10(phone) == n["phone10"]:
-                return ["Same phone as an EvoSys Sales prospect"]
+                return ["Same phone as an EvoSys BookIt prospect"]
     return []
 
 

@@ -1,4 +1,4 @@
-// In-app calling from the EvoSys Sales number (Twilio Voice in the browser).
+// In-app calling from the EvoSys BookIt number (Twilio Voice in the browser).
 // Caller ID is set by the server (always the team number); this panel only
 // shows what is happening and lets the person mute, hang up and log an outcome.
 import { useEffect, useRef, useState } from 'react'
@@ -84,7 +84,7 @@ export default function CallPanel({ lead, onClose, onLogged }) {
     <div className="v2-callpanel" role="dialog" aria-label={`Call ${lead.company}`}>
       <div className="v2-callpanel-head">
         <div>
-          <div className="v2-eyebrow">Calling from {from ? fmtNum(from) : 'the EvoSys Sales number'}</div>
+          <div className="v2-eyebrow">Calling from {from ? fmtNum(from) : 'the EvoSys BookIt number'}</div>
           <div className="v2-callname">{lead.company}</div>
           <div className="v2-callnum">{fmtNum(lead.phone)}</div>
         </div>

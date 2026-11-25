@@ -1,4 +1,4 @@
-"""EvoSys Sales texting number: check it and connect its replies.
+"""EvoSys BookIt texting number: check it and connect its replies.
 
 Uses the platform Twilio account (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN). The
 number is looked up by its exact value; nothing is listed without one (Twilio
@@ -26,7 +26,7 @@ def _number(client, s):
     from app.services.evosys_sales.outreach import e164
     n = e164(s.sms_from_number)
     if not n:
-        return None, "No texting number is saved for EvoSys Sales."
+        return None, "No texting number is saved for EvoSys BookIt."
     found = [x for x in client.incoming_phone_numbers.list(phone_number=n, limit=2)
              if (x.phone_number or "") == n]
     if not found:

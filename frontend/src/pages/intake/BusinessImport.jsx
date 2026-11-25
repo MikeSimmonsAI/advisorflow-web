@@ -1,4 +1,4 @@
-// #470 Stage B - import businesses into EvoSys Sales or one cleaning
+// #470 Stage B - import businesses into EvoSys BookIt or one cleaning
 // customer's Acquisition pipeline. The destination is fixed in the URL, shown
 // on every step, re-checked by the server on every call, and confirmed again
 // at commit. Location-pending and excluded rows are never created. Nothing is sent.

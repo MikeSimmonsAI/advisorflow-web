@@ -1,4 +1,4 @@
-"""EvoSys Sales: Mike's one booking link for anybody (services/evosys_sales/open_booking.py).
+"""EvoSys BookIt: Mike's one booking link for anybody (services/evosys_sales/open_booking.py).
 
 GET  /evosys-sales-public/meet   the "who are you" step (no login)
 POST /evosys-sales-public/meet   find or add the lead, return their own booking page

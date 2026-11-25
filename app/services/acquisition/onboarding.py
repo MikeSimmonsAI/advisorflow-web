@@ -1,7 +1,7 @@
 """RAPID CLEANING-COMPANY ONBOARDING (#452 / #474).
 
 One provisioning service, two doors:
-  * Convert an EvoSys Sales opportunity (a cleaning company the owner recruited)
+  * Convert an EvoSys BookIt opportunity (a cleaning company the owner recruited)
     -> REUSES app.services.provisioning.provision_customer, the platform's only
        Won -> Customer path (Implementation row, customer_organization_id link,
        idempotent by opportunity).
@@ -331,7 +331,7 @@ def directory(db: Session) -> Dict[str, Any]:
 
 
 def sales_candidates(db: Session) -> Dict[str, Any]:
-    """Cleaning companies in EvoSys Sales the owner might convert. Read-only:
+    """Cleaning companies in EvoSys BookIt the owner might convert. Read-only:
     nothing here moves or copies a Sales record."""
     from app.models.sales_models import BrandSalesOrg, Opportunity
     plat = db.query(Platform).filter(Platform.slug == PLATFORM_SLUG).first()

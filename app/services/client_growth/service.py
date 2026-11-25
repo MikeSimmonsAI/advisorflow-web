@@ -3,7 +3,7 @@
 RULES THIS FILE KEEPS
   * Prospects are existing EvoSys Pro Sales `opportunities`; a new one is made
     only after a duplicate check, in the `discovery` stage (never a cold
-    outreach stage, so EvoSys Sales automation never picks it up) and with
+    outreach stage, so EvoSys BookIt automation never picks it up) and with
     provenance saying why it exists.
   * Creating or copying a link sends nothing. "Sent" is recorded only when a
     person says they sent it; delivery is never claimed.
