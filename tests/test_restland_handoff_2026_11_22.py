@@ -744,14 +744,23 @@ def test_a_person_tab_lists_their_work_and_their_edits_reach_the_main_tab_and_th
     now = datetime(2026, 11, 23, 23, 0)
     today = int(__import__("app.services.volt.sheets_export", fromlist=["x"]).central_serial(now))
     sheet = _board([("Ann", "TRUE"), ("Bob", "TRUE")])
-    sheet["__titles__"] = {3: "Ann", 4: "Bob"}
+    fut = RS.fu_tab_title("Ann")
+    sheet["__titles__"] = {3: "Ann", 4: "Bob", 11: fut, 12: RS.fu_tab_title("Bob")}
     appts = [_appt(b.id, today + 7)]
     fus = [_fu("FU-x1")]
     _run_team(db, prog, sheet, appts, fus, now)                   # appointment -> Ann, follow-up -> Ann
     ann = sheet["Ann"]
-    a0, f0 = RS.PT_APPT_FIRST - 1, RS.PT_FU_FIRST - 1
-    assert ann[a0][0] == b.id and ann[a0][3] == "Fam " + b.id        # MY APPOINTMENTS block
-    assert ann[f0][0] == "FU-x1"                                     # MY FOLLOW-UPS block, below it
+    a0, f0 = RS.PT_APPT_FIRST - 1, RS.FT_FIRST - 1
+    assert ann[a0][0] == b.id and ann[a0][3] == "Fam " + b.id        # MY APPOINTMENTS on her tab
+    assert len(ann) <= RS.PT_APPT_LAST_ROW                           # and nothing below them
+    assert sheet[fut][f0][0] == "FU-x1"                              # MY FOLLOW-UPS on her own Follow-Ups tab
+    # Owner, Nov 24: what she types on her Follow-Ups tab reaches the main tab
+    fu_row = _pad(sheet[fut][f0], 15)
+    fu_row[13] = "Left her a voicemail"
+    out = _run_team(db, prog, sheet, appts, fus, now + timedelta(minutes=1))
+    assert out["person_tab_edits"] == 1
+    main_fu = sheet[RS.FOLLOW_UPS][1]
+    assert "Left her a voicemail" in [str(v) for v in main_fu]
     # Ann types on HER tab: outcome, sold, what was sold, notes
     row = _pad(ann[a0], 14)
     row[8], row[9], row[10], row[12] = "Showed", "Yes", "Lawn crypt", "Great visit"
@@ -835,10 +844,46 @@ def test_person_tab_header_rows_heal_themselves(setter):
     prog = _prog(setter)
     now = datetime(2026, 11, 23, 23, 0)
     sheet = _board([("Ann", "TRUE")])
-    sheet["__titles__"] = {3: "Ann"}
+    fut = RS.fu_tab_title("Ann")
+    sheet["__titles__"] = {3: "Ann", 11: fut}
     _run_team(db, prog, sheet, [], [], now)
-    ann = sheet["Ann"]
-    assert ann[RS.PT_APPT_HEAD - 1][3] == "Family" and ann[RS.PT_FU_BANNER - 1][0].startswith("MY FOLLOW-UPS")
-    ann[RS.PT_FU_HEAD - 1][2] = "junk"                               # something overwrote a header
+    ann, afu = sheet["Ann"], sheet[fut]
+    assert ann[RS.PT_APPT_HEAD - 1][3] == "Family" and afu[RS.FT_BANNER - 1][0].startswith("MY FOLLOW-UPS")
+    afu[RS.FT_HEAD - 1][2] = "junk"                                  # something overwrote a header
     out = _run_team(db, prog, sheet, [], [], now + timedelta(minutes=2))
-    assert out["person_tab_headers_fixed"] == 1 and sheet["Ann"][RS.PT_FU_HEAD - 1][2] == "Family"
+    assert out["person_tab_headers_fixed"] == 1 and sheet[fut][RS.FT_HEAD - 1][2] == "Family"
+
+
+def test_each_person_gets_their_own_follow_ups_tab(setter):
+    """Owner, Nov 24: 'Kitty Arnold - Follow-Ups' made next to her tab, renamed
+    with the Team name, hidden for a placeholder; laid out once."""
+    db = setter["db"]
+    prog = _prog(setter)
+    calls = []
+    props = {3: {"sheetId": 3, "title": "Ann", "index": 4}, 4: {"sheetId": 4, "title": "Person 2", "index": 5},
+             12: {"sheetId": 12, "title": "Old - Follow-Ups", "index": 6}}
+
+    class C:
+        def spreadsheets(self):
+            return self
+
+        def batchUpdate(self, spreadsheetId, body):
+            calls.append(body["requests"])
+            return _Exec({})
+
+        def get(self, spreadsheetId, fields=None):
+            return _Exec({"sheets": [{"properties": p} for p in props.values()]})
+    team = [{"name": "Ann", "row": 2, "active": True, "placeholder": False},
+            {"name": "Person 2", "row": 3, "active": True, "placeholder": True}]
+    out = RS.ensure_fu_tabs(db, prog, C(), "sid", team)
+    first = calls[0]
+    assert {"addSheet": {"properties": {"sheetId": 11, "title": RS.fu_tab_title("Ann"), "hidden": False,
+                                        "index": 5}}} in first
+    assert {"updateSheetProperties": {"properties": {"sheetId": 12, "title": RS.fu_tab_title("Person 2"),
+                                                     "hidden": True}, "fields": "title,hidden"}} in first
+    assert out["created"] == [11] and sorted(out["laid_out"]) == [11, 12]
+    calls.clear()
+    props[11] = {"sheetId": 11, "title": RS.fu_tab_title("Ann"), "index": 5}
+    props[12] = {"sheetId": 12, "title": RS.fu_tab_title("Person 2"), "index": 7, "hidden": True}
+    out = RS.ensure_fu_tabs(db, prog, C(), "sid", team)
+    assert calls == [] and out["laid_out"] == []                     # nothing to do the second time
