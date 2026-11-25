@@ -1376,7 +1376,12 @@ def person_tab_layout_requests(ids=PERSON_TAB_IDS, kind: str = "appt") -> List[D
                   lst(sid, F0, f_end, 10, list(TIME_CHOICES)),
                   lst(sid, F0, f_end, 11, HOW_PICK),
                   _when(sid, "B%d:F%d" % (F0, f_end), '=AND($A%d<>"",OR($B%d="",$B%d<TODAY()+1))' % (F0, F0, F0),
-                        "#FCEBD9")]
+                        "#FCEBD9"),
+                  # Last Update as a date and time, set on its own (Nov 24: on the
+                  # live Follow-Ups tabs it was missing and showed 46350.79)
+                  {"repeatCell": {"range": g(sid, F0, f_end, 14, 15), "cell": {"userEnteredFormat": {
+                      "numberFormat": {"type": "DATE_TIME", "pattern": "m/d h:mm am/pm"}}},
+                      "fields": "userEnteredFormat.numberFormat"}}]
         for c, px in enumerate(widths[:W]):
             r.append({"updateDimensionProperties": {"range": {"sheetId": sid, "dimension": "COLUMNS",
                                                               "startIndex": c, "endIndex": c + 1},
