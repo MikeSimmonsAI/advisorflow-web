@@ -630,3 +630,29 @@ def test_missing_calendar_events_are_added_once(rl):
     n = len(calls)
     OPS.add_missing_calendar_events(db, creator=creator)
     assert len(calls) == n                                            # never twice
+
+
+# ── Owner, Nov 24 (Gloria): offer the days the family can do ────────────────
+
+def test_the_days_a_family_can_and_cannot_do():
+    from app.services.programs import ai_setter as S
+    gloria = ("Mr Simmons  is  a way we can meet on a  Saturday. I work Monday through Friday. "
+              "I work from 9am to 2pm and from 3pm to 5:30.pm we can talk  or text  me 214 534 0357")
+    assert S.day_wishes(gloria) == ({5}, {0, 1, 2, 3, 4})
+    tue = date(2026, 11, 24)
+    assert S.day_named(gloria, tue) == date(2026, 11, 28)            # Saturday - never "Monday"
+    assert S.day_wishes("I'm busy Mon-Fri") == ({5, 6}, {0, 1, 2, 3, 4})
+    assert S.day_named("I'm busy Mon-Fri", tue) is None              # no day asked; weekends offered later
+    assert S.day_wishes("weekends are best")[0] == {5, 6}
+    assert S.day_named("Can you do Friday?", tue) == date(2026, 11, 27)
+    assert S.day_named("I can come by tomorrow", tue) == date(2026, 11, 25)
+    assert S.day_wishes("Okay") == (set(), set())
+
+
+def test_times_are_offered_only_on_the_days_they_can_do(rl):
+    from app.services.programs import appointments as A
+    configured(rl)
+    slots, why = A.available_slots(rl["db"], prog_of(rl), weekdays={5}, days=28)
+    assert slots and all(s.weekday() == 5 for s in slots), (slots, why)
+    slots, _ = A.available_slots(rl["db"], prog_of(rl), weekdays={5, 6}, days=28)
+    assert slots and all(s.weekday() in (5, 6) for s in slots)

@@ -76,7 +76,7 @@ def program_advisor(db: Session, prog):
 
 def available_slots(db: Session, prog, *, want: int = 2, days: int = 14,
                     now_central: Optional[datetime] = None, kind: str = VISIT,
-                    part: Optional[str] = None) -> Tuple[List[datetime], Optional[str]]:
+                    part: Optional[str] = None, weekdays=None) -> Tuple[List[datetime], Optional[str]]:
     """Up to `want` genuine open times (naive Central), spread over different
     days when possible. ([], reason) when nothing can honestly be offered."""
     from app.routers.calendar_router import compute_day_slots
@@ -92,6 +92,8 @@ def available_slots(db: Session, prog, *, want: int = 2, days: int = 14,
         d = today + timedelta(days=i)
         if not _bookable_day(prog, d):
             continue
+        if weekdays is not None and d.weekday() not in weekdays:
+            continue                              # only the days the family can do
         res = compute_day_slots(db, advisor, d, program_visit=True, today=today, minutes=minutes_for(kind))
         if res.get("calendar_error"):
             return [], "the calendar cannot be read right now"
@@ -117,7 +119,7 @@ def available_slots(db: Session, prog, *, want: int = 2, days: int = 14,
         if s not in out:
             out.append(s)
     out.sort()
-    return out[:want], (None if out else "no open times in the next two weeks")
+    return out[:want], (None if out else "no open times in the next %s" % ("two weeks" if days == 14 else "%d days" % days))
 
 
 def slots_on_day(db: Session, prog, day, want: int = 2, kind: str = VISIT) -> Tuple[List[datetime], Optional[str]]:
