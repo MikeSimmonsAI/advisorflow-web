@@ -114,7 +114,7 @@ def _auto_closed_hours(setter, monkeypatch, nxt):
     db, prog = setter["db"], setter["prog"]
     prog.ai_setter_mode = "auto"
     db.commit()
-    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": False})
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None, **_k: {"permitted": False})
     monkeypatch.setattr("app.services.contact_hours.next_permitted_utc", lambda lead, now=None: nxt)
 
 

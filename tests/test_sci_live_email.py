@@ -150,7 +150,7 @@ def test_human_handling_stops_ai_and_ai_handling_resumes_after_a_manual_text(set
     db, org, prog = setter["db"], setter["org"], setter["prog"]
     prog.ai_setter_mode = "auto"
     db.commit()
-    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": True})
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None, **_k: {"permitted": True})
     lead = _lead_for(db, org, sample_advisor, "L001")
     conv = ProgramConversation(organization_id=org.id, lead_id=lead.id, state="offered",
                                next_followup_at=datetime.utcnow() + timedelta(hours=1))
@@ -309,7 +309,7 @@ def test_one_scheduled_follow_up_respects_spacing_and_handling(setter, sample_ad
     db.add(Message(lead_id=lead.id, sender_id=sample_advisor.id, body="Thank you", send_source="manual",
                    twilio_sid="SMf", sent_at=datetime.utcnow()))
     db.commit()
-    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": True})
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None, **_k: {"permitted": True})
     h = _h(db, setter["admin"])
     r = client.post("/program/command/follow-up", headers=h,
                     json={"lead_id": lead.id, "reason": "invite them in to go over the guide; offer two real times"})
@@ -338,7 +338,7 @@ def test_a_follow_up_may_honour_a_mail_request_and_invite_in(setter, sample_advi
     db, org, prog = setter["db"], setter["org"], setter["prog"]
     prog.ai_setter_mode = "auto"
     db.commit()
-    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": True})
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None, **_k: {"permitted": True})
     lead = _lead_for(db, org, sample_advisor, "L001")
     conv = ai_setter.conversation_for(db, lead)
     conv.state, conv.next_followup_at = "info_requested", datetime.utcnow() - timedelta(minutes=1)
@@ -356,7 +356,7 @@ def test_an_ai_text_reply_marks_the_message_answered(setter, sample_advisor, mon
     db, org, prog = setter["db"], setter["org"], setter["prog"]
     prog.ai_setter_mode = "auto"
     db.commit()
-    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": True})
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None, **_k: {"permitted": True})
     lead = _lead_for(db, org, sample_advisor, "L001")
     fake = _Fake([_d("offer_times", "Glad to help. Would {TIMES} work for a short visit?")])
     with patch.object(ai_setter, "_get_client", return_value=fake), \

@@ -111,7 +111,7 @@ def journey(wired, sample_advisor, monkeypatch):
     from app.services import ai_gateway
     ai_gateway._reset_for_tests()
     hours = {"open": True}
-    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": hours["open"]})
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None, **_k: {"permitted": hours["open"]})
     monkeypatch.setattr("app.services.contact_hours.next_permitted_utc",
                         lambda lead, now=None: datetime.utcnow() + timedelta(hours=1))
     line = _FamilyLine()

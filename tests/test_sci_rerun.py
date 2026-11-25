@@ -161,7 +161,7 @@ def test_the_restarted_family_gets_text_1_in_the_re_engagement_wording(world, mo
     sci_rerun.ensure_staged(db, prog)
     daily_batch.run_for(db, prog, FRI_9)
     _sending_on(monkeypatch)
-    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None: {"permitted": True, "reason": ""})
+    monkeypatch.setattr("app.services.contact_hours.check", lambda lead, now=None, **_k: {"permitted": True, "reason": ""})
     sent = []
 
     def fake_send(db=None, advisor=None, lead=None, template=None, **k):
