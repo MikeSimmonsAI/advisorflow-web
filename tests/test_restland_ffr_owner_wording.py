@@ -1,7 +1,7 @@
 """Owner, Nov 17: the Restland File Review opening, in his words - and
 {tomorrow_offer} asks "What time tomorrow works best for you, X or Y?" with
 two times really open; {full_name} stands in for "Mr./Mrs. ___"."""
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.services.programs import booking_policy as BP
 from app.services.programs import identity as I
@@ -20,12 +20,18 @@ def _days(slots_by_day, error=False):
 
 
 def test_two_times_tomorrow_spread_across_the_day(monkeypatch):
+    # Nov 25: the pair rotates family to family (test_offer_rotation); it is
+    # always two real times on one day, at least two hours apart.
+    monkeypatch.setattr(BP, "slot_load", lambda db, adv, a, b: {})
     monkeypatch.setattr(BP, "day_slots", _days({"2026-11-18": ["09:00", "10:30", "12:00", "13:30", "15:00"]}))
-    out = BP.tomorrow_offer(None, object(), {"x": 1}, now_local=NOW)
-    assert out == "What time tomorrow works best for you, 9:00 AM or 12:00 PM?"
+    out = BP.tomorrow_offer(None, object(), {"x": 1}, now_local=NOW, seed="fam-1")
+    assert out.startswith("What time tomorrow works best for you, ")
+    a, b = [datetime.strptime(x, "%I:%M %p") for x in out.split("you, ")[1].rstrip("?").split(" or ")]
+    assert b - a >= timedelta(hours=2)
 
 
 def test_a_full_tomorrow_names_the_next_open_day(monkeypatch):
+    monkeypatch.setattr(BP, "slot_load", lambda db, adv, a, b: {})
     monkeypatch.setattr(BP, "day_slots", _days({"2026-11-18": ["16:00"], "2026-11-19": ["10:00", "14:30"]}))
     out = BP.tomorrow_offer(None, object(), {"x": 1}, now_local=NOW)
     assert out == "What time Thursday works best for you, 10:00 AM or 2:30 PM?"

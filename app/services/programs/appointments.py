@@ -76,7 +76,8 @@ def program_advisor(db: Session, prog):
 
 def available_slots(db: Session, prog, *, want: int = 2, days: int = 14,
                     now_central: Optional[datetime] = None, kind: str = VISIT,
-                    part: Optional[str] = None, weekdays=None) -> Tuple[List[datetime], Optional[str]]:
+                    part: Optional[str] = None, weekdays=None,
+                    seed: Optional[str] = None) -> Tuple[List[datetime], Optional[str]]:
     """Up to `want` genuine open times (naive Central), spread over different
     days when possible. ([], reason) when nothing can honestly be offered."""
     from app.routers.calendar_router import compute_day_slots
@@ -104,9 +105,22 @@ def available_slots(db: Session, prog, *, want: int = 2, days: int = 14,
             slots = [s for s in slots if s.hour >= 12]
         if not slots:
             continue
-        # one morning-ish and one afternoon-ish option across two days
-        pick = slots[0] if not out or out[-1].hour >= 12 else (
-            next((s for s in slots if s.hour >= 13), slots[0]))
+        # one morning-ish and one afternoon-ish option across two days, from
+        # the quietest times (owner, Nov 25: rotate them - never the same
+        # first opening for every family, and steer off crowded times).
+        from app.services.programs import booking_policy as _bp
+        if seed is not None:
+            _load = _bp.slot_load(db, advisor, datetime.combine(d, datetime.min.time()),
+                                  datetime.combine(d, datetime.min.time()) + timedelta(days=1))
+            want_pm = bool(out) and out[-1].hour < 12
+            pool = [s for s in slots if (s.hour >= 13) == want_pm] or slots
+            low = min(_load.get(s, 0) for s in pool)
+            quiet = [s for s in pool if _load.get(s, 0) <= low + 1 and _load.get(s, 0) < _bp.CROWDED] or \
+                [s for s in pool if _load.get(s, 0) == low]
+            pick = quiet[_bp.seed_index("%s|%s|%s" % (seed, today.isoformat(), d.isoformat()), len(quiet))]
+        else:
+            pick = slots[0] if not out or out[-1].hour >= 12 else (
+                next((s for s in slots if s.hour >= 13), slots[0]))
         if d not in seen_days:
             out.append(pick)
             seen_days.add(d)

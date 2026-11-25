@@ -562,7 +562,7 @@ def tomorrow_offer_for(db: Session, lead: Lead, channel: str = "sms") -> str:
         policy = bp.for_program(prog) if prog is not None else None
         uid = getattr(prog, "booking_user_id", None) if prog is not None else None
         advisor = db.query(User).filter(User.id == uid).first() if uid else None
-        return bp.tomorrow_offer(db, advisor, policy, channel)
+        return bp.tomorrow_offer(db, advisor, policy, channel, seed=getattr(lead, "id", None))
     except Exception:                                    # noqa: BLE001 - never names a time it could not verify
         import logging as _l
         _l.getLogger(__name__).exception("tomorrow offer failed for lead %s", getattr(lead, "id", None))

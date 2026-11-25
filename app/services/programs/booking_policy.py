@@ -527,8 +527,70 @@ def _clock(t: datetime) -> str:
     return t.strftime("%-I:%M %p")
 
 
+# ROTATE THE OFFERED TIMES (owner, Nov 25): every family was offered the same
+# "10:00 AM or 1:00 PM" and Friday 1:00 PM filled with six appointments.
+# Offers now spread over several open days and every set start time, steer
+# away from times that already have appointments (double booking stays
+# allowed - a crowded time is only passed over while quieter ones exist),
+# and differ family to family (and send to send) instead of always the
+# first opening.
+OFFER_DAYS = 4            # open days one offer may name
+CROWDED = 3               # appointments at one time before it is passed over
+SPREAD = 1.5              # how far above the quietest choice an offer may be
+
+
+def seed_index(seed: Optional[str], n: int) -> int:
+    """A stable, even pick 0..n-1 for this family (and send)."""
+    import hashlib
+    if n <= 1:
+        return 0
+    return int(hashlib.sha1((seed or "").encode("utf-8")).hexdigest()[:12], 16) % n
+
+
+def slot_load(db: Session, advisor, start: datetime, end: datetime) -> Dict[datetime, int]:
+    """Appointments already at each start time for this person."""
+    from app.models.models import BookingLink
+    out: Dict[datetime, int] = {}
+    if advisor is None:
+        return out
+    for (t,) in (db.query(BookingLink.booked_time)
+                 .filter(BookingLink.user_id == advisor.id, BookingLink.status.in_(("booked", "confirmed")),
+                         BookingLink.booked_time >= start, BookingLink.booked_time < end).all()):
+        if t is None:
+            continue
+        t = t.replace(tzinfo=None, second=0, microsecond=0) if getattr(t, "tzinfo", None) else \
+            t.replace(second=0, microsecond=0)
+        out[t] = out.get(t, 0) + 1
+    return out
+
+
+def rotate_pair(days: List, load: Dict[datetime, int], seed: Optional[str]):
+    """Pick (day_index, a, b): two times on one open day, at least two hours
+    apart when the day allows, from the quietest choices across the days, a
+    different one family to family. days = [(date, [slot datetimes]), ...]."""
+    def score(i, a, b):
+        la, lb = load.get(a, 0), load.get(b, 0)
+        crowd = 10 if max(la, lb) >= CROWDED else 0
+        return la + lb + crowd + 0.5 * i
+    for gap in (timedelta(hours=2), timedelta(minutes=90), timedelta(0)):
+        pairs = [(score(i, a, b), i, a, b) for i, (_d, slots) in enumerate(days)
+                 for a in slots for b in slots if a < b and b - a >= gap]
+        if pairs:
+            best = min(p[0] for p in pairs)
+            tier = sorted((p for p in pairs if p[0] <= best + SPREAD), key=lambda p: (p[1], p[2], p[3]))
+            _s, i, a, b = tier[seed_index(seed, len(tier))]
+            return i, a, b
+    return None
+
+
+def _day_word(d: date_cls, today: date_cls) -> str:
+    if d == today + timedelta(days=1):
+        return "tomorrow"
+    return d.strftime("%A") if d - today <= timedelta(days=6) else d.strftime("%A, %b %-d")
+
+
 def tomorrow_offer(db: Session, advisor, policy: Dict, channel: str = "sms", *,
-                   now_local: Optional[datetime] = None, busy_reader=None) -> str:
+                   now_local: Optional[datetime] = None, busy_reader=None, seed: Optional[str] = None) -> str:
     """Owner, Nov 17 (Restland File Review): "What time tomorrow works best
     for you, 10:00 AM or 2:30 PM?" - two times really open TOMORROW (read from
     the calendar at send time, failing closed), spread across the day. A full
@@ -538,19 +600,27 @@ def tomorrow_offer(db: Session, advisor, policy: Dict, channel: str = "sms", *,
     if advisor is None or not policy:
         return ask
     now_local = now_local or _today_central()
-    for i in range(1, 8):
-        d = (now_local + timedelta(days=i)).date()
+    today = now_local.date()
+    days = []
+    for i in range(1, 15):                      # the next OFFER_DAYS open days
+        d = today + timedelta(days=i)
         res = day_slots(db, advisor, d, policy, now_local=now_local, busy_reader=busy_reader)
         if res.get("calendar_error"):
             return ask
         slots = sorted(datetime.strptime(s, "%Y-%m-%dT%H:%M:00") for s in (res.get("slots") or []))
-        if len(slots) < 2:
-            continue
-        first = slots[0]
-        later = next((s for s in slots[1:] if s - first >= timedelta(hours=3)), slots[-1])
-        day = "tomorrow" if i == 1 else d.strftime("%A")
-        return "What time %s works best for you, %s or %s?" % (day, _clock(first), _clock(later))
-    return ask
+        if len(slots) >= 2:
+            days.append((d, slots))
+        if len(days) >= OFFER_DAYS:
+            break
+    if not days:
+        return ask
+    load = slot_load(db, advisor, datetime.combine(days[0][0], datetime.min.time()),
+                     datetime.combine(days[-1][0], datetime.min.time()) + timedelta(days=1))
+    pick = rotate_pair(days, load, "%s|%s" % (seed or "", today.isoformat()))
+    if pick is None:
+        return ask
+    i, a, b = pick
+    return "What time %s works best for you, %s or %s?" % (_day_word(days[i][0], today), _clock(a), _clock(b))
 
 
 def time_offer(db: Session, advisor, policy: Dict, channel: str = "sms", **kw) -> str:
