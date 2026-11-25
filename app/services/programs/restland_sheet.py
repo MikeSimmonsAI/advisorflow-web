@@ -235,7 +235,7 @@ def _plain_why(reason: Optional[str]) -> str:
     return ("Needs a person: " + r) if r else "Needs a person"
 
 
-def _conv_row(db, conv, lead) -> List[Any]:
+def _conv_row(db, conv, lead, ev: Optional[Dict[str, Any]] = None) -> List[Any]:
     from app.services.volt.sheets_export import central_serial, safe, safe_phone
     state = conv.state or ""
     if state == "waiting_future":
@@ -245,12 +245,104 @@ def _conv_row(db, conv, lead) -> List[Any]:
     else:
         why = _plain_why(conv.handoff_reason)
     status = ("Open" if state in OPEN_STATES else DONE_STATES.get(state, "In progress"))
+    # A family whose newest message came after anything we sent is waiting on
+    # us - Open, unless the case is done (booked / closed / opted out).
+    if (ev and status == "In progress" and ev.get("family_at")
+            and (ev.get("out_at") is None or ev["family_at"] > ev["out_at"])):
+        status = "Open"
     # The date a follow-up is due: the family's own "later" date, or a date the
     # team set on a needs-a-person follow-up (that one never texts the family).
     fu_on = (central_serial(conv.next_followup_at)
              if conv.next_followup_at and state in ("waiting_future", "human") else "")
     return ["FU-" + conv.id, central_serial(conv.created_at), safe(_name(lead)), _phone(lead.phone),
             safe(lead.email), safe(why[:300]), fu_on, safe(_last_family_words(db, lead.id)), status]
+
+
+# ── what happened on a follow-up in the app (owner, Nov 24) ─────────────────
+#
+# A person's reply sent from the app (Send text, Send & keep human control,
+# email) is a follow-up done: it goes in Followed Up On / What Happened. A later
+# family message updates What They Said and Last Update. Everything is read
+# from the message history on every pass, so a retry or an out-of-order event
+# lands on the same answer. Only a reply that went out counts - a failed or
+# undelivered send is not a follow-up.
+FAILED_SMS = ("failed", "undelivered", "canceled", "cancelled", "rejected")
+FAILED_EMAIL = ("failed", "bounced", "rejected", "dropped")
+REPLIED_PREFIX = "Replied by "
+
+
+def followup_events(db: Session, convs) -> Dict[str, Dict[str, Any]]:
+    """{conversation id: {"human_at", "human_channel", "family_at", "out_at"}}
+    from the conversation's own start: the newest reply a PERSON sent from the
+    app that went out, the newest family message, and the newest message of
+    any kind that went out to the family."""
+    from app.models.models import EmailMessage, Message
+    from app.models.program_models import ProgramConversationTurn
+    from app.services import send_source as SS
+    from sqlalchemy import func
+    convs = [c for c in convs if c is not None]
+    if not convs:
+        return {}
+    by_lead = {c.lead_id: c for c in convs}
+    since = {c.lead_id: (c.created_at or datetime.min) for c in convs}
+    out: Dict[str, Dict[str, Any]] = {c.id: {"human_at": None, "human_channel": None, "family_at": None,
+                                              "out_at": None} for c in convs}
+    leads = list(by_lead)
+
+    def put(lid, key, at, channel=None):
+        c = by_lead.get(lid)
+        if c is None or at is None or at < since[lid]:
+            return
+        ev = out[c.id]
+        if ev[key] is None or at > ev[key]:
+            ev[key] = at
+            if key == "human_at":
+                ev["human_channel"] = channel
+    for i in range(0, len(leads), 500):
+        part = leads[i:i + 500]
+        for lid, src, at, st1, st2, st3 in (db.query(Message.lead_id, Message.send_source, Message.sent_at,
+                                                     Message.delivery_status, Message.twilio_status,
+                                                     Message.send_state)
+                                            .filter(Message.lead_id.in_(part), Message.sent_at.isnot(None)).all()):
+            if any((x or "").lower() in FAILED_SMS for x in (st1, st2, st3)):
+                continue
+            put(lid, "out_at", at)
+            if src == SS.MANUAL:
+                put(lid, "human_at", at, "text")
+        for lid, src, at, st in (db.query(EmailMessage.lead_id, EmailMessage.send_source, EmailMessage.sent_at,
+                                          EmailMessage.status)
+                                 .filter(EmailMessage.lead_id.in_(part), EmailMessage.sent_at.isnot(None)).all()):
+            if (st or "").lower() in FAILED_EMAIL or (st or "").lower() == "queued":
+                continue
+            put(lid, "out_at", at)
+            if src == SS.MANUAL:
+                put(lid, "human_at", at, "email")
+    for cid, at in (db.query(ProgramConversationTurn.conversation_id, func.max(ProgramConversationTurn.created_at))
+                    .filter(ProgramConversationTurn.conversation_id.in_([c.id for c in convs]),
+                            ProgramConversationTurn.role == "family")
+                    .group_by(ProgramConversationTurn.conversation_id).all()):
+        if cid in out:
+            out[cid]["family_at"] = at
+    return out
+
+
+def _central(at: datetime) -> datetime:
+    from datetime import timezone
+    from app.services.volt.sheets_export import CENTRAL
+    a = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+    return a.astimezone(CENTRAL)
+
+
+def _ct_text(at: datetime) -> str:
+    t = _central(at)
+    return "%d/%d/%d %d:%02d %s" % (t.month, t.day, t.year, (t.hour % 12) or 12, t.minute,
+                                    "AM" if t.hour < 12 else "PM")
+
+
+def _replied_text(ev: Dict[str, Any]) -> str:
+    t = _central(ev["human_at"])
+    return "%s%s (%d:%02d %s)" % (REPLIED_PREFIX, ev["human_channel"] or "text", (t.hour % 12) or 12, t.minute,
+                                  "AM" if t.hour < 12 else "PM")
 
 
 def follow_up_rows(db: Session, org_id: str, known_ids=()) -> List[List[Any]]:
@@ -267,11 +359,16 @@ def follow_up_rows(db: Session, org_id: str, known_ids=()) -> List[List[Any]]:
                      | (ProgramConversation.id.in_(list(known) or ["-"]))).all())
     leads = {l.id: l for l in db.query(Lead).filter(Lead.id.in_([c.lead_id for c in convs] or ["-"])).all()}
     out = []
+    try:
+        events = followup_events(db, convs)
+    except Exception:                                    # noqa: BLE001 - the rows still go in
+        log.exception("follow-up events lookup failed")
+        events = {}
     for c in convs:
         lead = leads.get(c.lead_id)
         if _skip(lead) or c.is_test:
             continue
-        out.append(_conv_row(db, c, lead))
+        out.append(_conv_row(db, c, lead, events.get(c.id)))
     # Told a time by a person, nothing on the calendar: lock it in.
     told_known = {k[5:] for k in known_ids if str(k).startswith("TOLD-")}
     try:
@@ -1026,10 +1123,13 @@ def person_tabs_write(client, sid: str, tabs: List[Dict[str, Any]], rows: Dict[s
             cur, rec = staff[FOLLOW_UPS].get(rid) or {}, known.get(rid)
             if not mine(FOLLOW_UPS, rid) or str(r[8] or "") != "Open" or (cur.get("done") or "").upper() == "TRUE":
                 continue
+            last_ev = getattr(rec, "_last_event", None) if rec is not None else None
             fus.append([rid, r[6], r[2], r[3], r[5], r[7], False, cur.get("fu_date", ""), cur.get("fu_result", ""),
                         cur.get("appt_date", ""), cur.get("appt_time", ""), cur.get("appt_how", ""),
                         cur.get("appt_address", ""), cur.get("notes", ""),
-                        central_serial(rec.staff_changed_at) if _team_touched(rec, PT_FU_EDIT) else ""])
+                        central_serial(last_ev) if last_ev is not None and (
+                            _team_touched(rec, PT_FU_EDIT) or last_ev != rec.staff_changed_at)
+                        else central_serial(rec.staff_changed_at) if _team_touched(rec, PT_FU_EDIT) else ""])
         fus.sort(key=lambda x: (x[1] if isinstance(x[1], (int, float)) and x[1] else 0, str(x[0])))
         fus = fus[:FT_MAX]
         old = grids.get(t["title"]) or {}
@@ -1371,6 +1471,69 @@ def ensure_fu_tabs(db: Session, prog, client, sid: str, team: List[Dict[str, Any
     return {"created": made, "laid_out": laid, "changed": len(reqs)}
 
 
+def _app_followups(db, client, sid: str, fu_staff: Dict[str, Dict[str, Any]], known) -> Dict[str, int]:
+    """A person's reply sent from the app -> Followed Up On / What Happened;
+    the newest app event -> Last Update (CT). Reconciling with the team:
+      * Followed Up On / What Happened are the team's (gold) columns. The app
+        fills them from its newest successful reply when they are blank, when
+        they hold an earlier app entry ("Replied by ..."), or when the reply is
+        newer than the team's last change to the row. Anything the team typed
+        after the reply stays.
+      * Last Update moves forward only, to the newest of: the team's last
+        change, the reply, the family's newest message.
+    What the app wrote is recorded as the row's known state, so the next pass
+    never reads it back as a team edit (no notes, no booking, no done)."""
+    from app.models.program_models import ProgramConversation
+    from app.services.volt.sheets_export import central_serial, column
+    rids = [r for r in fu_staff if str(r).startswith("FU-")]
+    if not rids:
+        return {"followed_up": 0, "last_update": 0}
+    convs = []
+    for i in range(0, len(rids), 500):
+        convs += db.query(ProgramConversation).filter(
+            ProgramConversation.id.in_([r[3:] for r in rids[i:i + 500]])).all()
+    events = followup_events(db, convs)
+    head = client.spreadsheets().values().get(spreadsheetId=sid, range=_rng(FOLLOW_UPS, "A1:AN1")).execute()
+    header = [str(c).strip() for c in ((head.get("values") or [[]])[0])]
+    labels = dict(zip(FU_WORK_KEYS, FU_WORK_COLUMNS))
+    cols = {k: header.index(lbl) for k, lbl in labels.items() if lbl in header}
+    lu = header.index(LAST_UPDATE_HEADER) if LAST_UPDATE_HEADER in header else None
+    data, done, moved = [], 0, 0
+    for rid in rids:
+        ev, cur, rec = events.get(rid[3:]), fu_staff[rid], known.get(rid)
+        if ev is None or rec is None:
+            continue
+        snap = json.loads(rec.staff_json or "{}")
+        team_at = rec.staff_changed_at
+        last = max([t for t in (team_at, ev["human_at"], ev["family_at"]) if t is not None] or [None])
+        rec._last_event = last                           # read by the person tabs
+        if ev["human_at"] is not None and len(cols) == 2:
+            want = {"fu_date": _ct_text(ev["human_at"]), "fu_result": _replied_text(ev)}
+            have = {k: (cur.get(k) or "") for k in FU_WORK_KEYS}
+            app_entry = have["fu_result"].startswith(REPLIED_PREFIX) or not (have["fu_date"] or have["fu_result"])
+            team_newer = team_at is not None and team_at > ev["human_at"]
+            if have != want and (not team_newer or (app_entry and have["fu_result"].startswith(REPLIED_PREFIX))):
+                for k, v in want.items():
+                    data.append({"range": _rng(FOLLOW_UPS, "%s%d" % (column(cols[k] + 1), cur["row"])),
+                                 "values": [[v]]})
+                    cur[k] = v
+                    snap[k] = v
+                done += 1
+        if lu is not None and last is not None and (team_at is None or last > team_at) \
+                and snap.get("_last_update") != last.isoformat():
+            data.append({"range": _rng(FOLLOW_UPS, "%s%d" % (column(lu + 1), cur["row"])),
+                         "values": [[central_serial(last)]]})
+            snap["_last_update"] = last.isoformat()
+            moved += 1
+        rec.staff_json = json.dumps(snap)
+    if data:
+        for i in range(0, len(data), 500):
+            client.spreadsheets().values().batchUpdate(
+                spreadsheetId=sid, body={"valueInputOption": "RAW", "data": data[i:i + 500]}).execute()
+    db.flush()
+    return {"followed_up": done, "last_update": moved}
+
+
 def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any]]],
               now: Optional[datetime] = None) -> Dict[str, Any]:
     """Read the team's columns back into the app, pause anyone with no
@@ -1413,6 +1576,12 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
                     rec.assigned_to, rec.auto_assigned = vals.get("assigned") or None, False
                     rec.assigned_at = now if vals.get("assigned") else None
     db.flush()
+    # 1b. what happened in the app -> the follow-up rows (owner, Nov 24)
+    try:
+        out["app_followups"] = _app_followups(db, client, sid, staff[FOLLOW_UPS], known)
+    except Exception as exc:                             # noqa: BLE001 - the rest of the pass still runs
+        from app.services.volt.sheets_export import categorize
+        log.warning("follow-up app events not written: %s", categorize(exc))
     # 2. who is open for new families: active, a real name, not paused
     cfg = _cfg(prog)
     paused = dict(cfg.get("paused") or {})
