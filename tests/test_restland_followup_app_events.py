@@ -293,3 +293,19 @@ def test_new_person_gets_an_appointments_tab_and_fresh_tabs_title_their_own_row(
     assert out["created"] == [RS.PERSON_TAB_IDS[5]] and out["laid_out"] == [RS.PERSON_TAB_IDS[5]]
     assert "person_tabs_v6_ids" in _json.loads(prog.booking_policy_json)["handoff_sheet"]
     assert RS.team_row_of(RS.PERSON_TAB_IDS[5]) == 7 and RS.team_row_of(14) == 5
+
+
+def test_a_note_a_person_writes_on_the_family_shows_on_the_follow_up(setter, sample_advisor):
+    """Owner, Nov 25: 'book me in about two weeks' - the note typed in the app
+    has to reach whoever works the follow-up on the sheet."""
+    db, lead, conv = _case(setter, sample_advisor, state="waiting_future")
+    db.add(LeadNote(organization_id=lead.organization_id, lead_id=lead.id, kind="internal",
+                    body="Restland sheet: assigned to Kit (automatic)"))          # the system's own - left out
+    db.add(LeadNote(organization_id=lead.organization_id, lead_id=lead.id, author_user_id=sample_advisor.id,
+                    body="Wants to book in about two weeks - call first part of December"))
+    db.commit()
+    rows = {r[0]: r for r in RS.follow_up_rows(db, lead.organization_id)}
+    why = rows["FU-" + conv.id][5]
+    assert "NOTE " in why and "call first part of December" in why and "assigned to Kit" not in why
+    ev = RS.followup_events(db, [conv])[conv.id]
+    assert ev["note_at"] is not None
