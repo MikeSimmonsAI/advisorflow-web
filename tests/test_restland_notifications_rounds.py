@@ -294,6 +294,26 @@ def test_reschedule_supersedes_old_messages_and_cancel_cancels_the_rest(rl):
     assert len(_rows(rl, b, purpose="cancelled")) == 2
 
 
+
+def test_cancel_without_telling_the_family_and_hand_back_to_a_person(rl):
+    """Owner, Nov 24: Cancel button - the family can be told or not; either way
+    the conversation goes back to a person to set a new time."""
+    db = rl["db"]
+    configured(rl)
+    from app.services.programs import appointments as A
+    from app.services.programs import ai_setter
+    sun = _next(6)
+    lead = rl["leads"][12]
+    r = A.book(db, prog_of(rl), lead, datetime(sun.year, sun.month, sun.day, 10, 0), A.VISIT,
+               family_text=True, meeting_key="office")
+    b = db.query(BookingLink).filter_by(id=r["booking_id"]).one()
+    OPS.cancel(db, prog_of(rl), b, rl["staff"], acknowledge=False)
+    db.refresh(b)
+    assert b.status == "cancelled"
+    assert len(_rows(rl, b, purpose="cancelled")) == 0                 # nobody told
+    conv = ai_setter.conversation_for(db, lead)
+    assert conv.state != "booked" and "new time" in (conv.handoff_reason or "")
+
 # ── the 24-hour survey ──────────────────────────────────────────────────────
 
 def _completed(rl, lead, start_local, meeting="office", now=None, ended=None):

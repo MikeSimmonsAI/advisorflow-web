@@ -2074,13 +2074,18 @@ def appointment_attendance(booking_id: str, body: AttendanceIn, db: Session = De
         raise HTTPException(status_code=409, detail=str(e))
 
 
+class CancelIn(BaseModel):
+    notify: bool = True              # send the family the "has been cancelled" text/email
+
+
 @router.post("/appointments/{booking_id}/cancel")
-def appointment_cancel(booking_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+def appointment_cancel(booking_id: str, body: Optional[CancelIn] = None, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user)):
     from app.services.programs import appointment_ops as OPS
     prog = _program(db, user, managers_only=False)
     b = _appt(db, prog, booking_id)
     try:
-        return OPS.cancel(db, prog, b, user)
+        return OPS.cancel(db, prog, b, user, acknowledge=(body.notify if body is not None else True))
     except OPS.OpError as e:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(e))

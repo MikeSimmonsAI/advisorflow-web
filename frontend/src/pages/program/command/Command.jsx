@@ -580,14 +580,37 @@ function Inbox({ items, act, open, empty, selected }) {
 // WHAT ALREADY HAPPENED WITH THIS FAMILY (Issue #507), read in place:
 // booking history, appointment case files and the earlier follow-up record.
 // Read-only; nothing here starts, resumes or changes anything.
-function FamilyHistory({ f }) {
+function FamilyHistory({ f, reload, toast }) {
+  const [asking, setAsking] = useState(null)     // booking id being cancelled
+  const [notify, setNotify] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const cancel = async b => {
+    setBusy(true)
+    try {
+      await api.post(`/program/command/appointments/${b.id}/cancel`, { notify })
+      toast?.(notify ? 'Appointment cancelled. Removed from the calendar and the family was told.' : 'Appointment cancelled and removed from the calendar.')
+      setAsking(null); reload?.()
+    } catch (e) { toast?.(e.message || 'Could not cancel.') } finally { setBusy(false) }
+  }
   const d = iso => (iso ? new Date(iso).toLocaleString([], { timeZone: 'America/Chicago', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : '—')
   const day = iso => (iso ? new Date(iso).toLocaleDateString([], { timeZone: 'America/Chicago', month: 'short', day: 'numeric', year: 'numeric' }) : '—')
   const er = f.earlier_record
   return <>
     {f.bookings?.length > 0 && <section className="cmd-card rl-section" aria-label="Appointment history">
       <h3><Icon n="cal" /> Appointment history</h3>
-      {f.bookings.map(b => <p key={b.id} className="small"><b>{d(b.when)}</b> · {b.status === 'cancelled' ? 'Cancelled' : b.status === 'completed' ? 'Completed' : b.status === 'confirmed' ? 'Confirmed' : 'Booked'}{b.label ? ` · ${b.label}` : ''}{b.staff ? ` · with ${b.staff}` : ''}</p>)}
+      {f.bookings.map(b => {
+        const live = b.status === 'booked' || b.status === 'confirmed'
+        return <div key={b.id}>
+          <p className="small"><b>{d(b.when)}</b> · {b.status === 'cancelled' ? 'Cancelled' : b.status === 'completed' ? 'Completed' : b.status === 'no_show' ? 'No-show' : b.status === 'confirmed' ? 'Confirmed' : 'Booked'}{b.label ? ` · ${b.label}` : ''}{b.staff ? ` · with ${b.staff}` : ''}
+            {live && !f.is_demo && asking !== b.id && <> · <button className="link" onClick={() => { setAsking(b.id); setNotify(true) }}>Cancel appointment</button></>}</p>
+          {asking === b.id && <div className="small" style={{ margin: '4px 0 10px' }}>
+            <p><b>Cancel this appointment?</b> It comes off the calendar and the sheet, and its reminders stop.</p>
+            <label><input type="checkbox" checked={notify} onChange={e => setNotify(e.target.checked)} /> Let the family know it's cancelled (they can reply for a new time)</label>
+            <p><button className="primary" disabled={busy} onClick={() => cancel(b)}>{busy ? 'Cancelling…' : 'Yes, cancel it'}</button>{' '}
+              <button disabled={busy} onClick={() => setAsking(null)}>Keep it</button></p>
+          </div>}
+        </div>
+      })}
     </section>}
     {f.case_files?.length > 0 && <section className="cmd-card rl-section" aria-label="Case files">
       <h3><Icon n="flag" /> Appointment case files</h3>
@@ -926,7 +949,7 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
           </div></Fragment>)) : <p className="cmd-muted">No messages yet.</p>}
         {f.thread_total > f.thread.length && <p className="cmd-muted small">Showing the latest {f.thread.length} of {f.thread_total} messages. <button className="link" onClick={() => setHistN(500)}>Show all</button></p>}
       </section>}
-      {view === 'conversation' && <FamilyHistory f={f} />}
+      {view === 'conversation' && <FamilyHistory f={f} reload={load} toast={toast} />}
 
       <section className="cmd-card cmd-ctx">
         <h3><Icon n="person" /> Family context <Link className="cmd-edit" to={`/program?tab=leads&person=${id}`}>Edit</Link></h3>
