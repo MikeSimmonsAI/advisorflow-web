@@ -49,19 +49,20 @@ def is_live(prog) -> bool:
 class Who:
     """The caller, decided on the server."""
 
-    def __init__(self, user, manager: bool, name: Optional[str], member_id: Optional[str]):
+    def __init__(self, user, manager: bool, name: Optional[str], member_id: Optional[str], view_only: bool = False):
         self.user_id = user.id
         self.user_name = getattr(user, "full_name", None) or name or ""
         self.manager = manager
         self.name = name                                 # their team name (None for a manager with no seat)
         self.member_id = member_id
+        self.view_only = view_only                       # the owner's test login: sees, never changes
 
     def sees(self, *assignees: Optional[str]) -> bool:
         """May this caller see a record assigned to any of these names?"""
         return self.manager or (self.name is not None and self.name in [a for a in assignees if a])
 
     def as_dict(self) -> Dict[str, Any]:
-        return {"name": self.name or self.user_name, "manager": self.manager}
+        return {"name": self.name or self.user_name, "manager": self.manager, "view_only": self.view_only}
 
 
 # Standing order (Nov 21): a new feature is visible only to the owner's own
@@ -80,6 +81,13 @@ def previewer(prog, user) -> bool:
 def who(db: Session, prog, user, manager: bool) -> Who:
     from app.models.program_models import ProgramTeamMember as M
     m = (db.query(M).filter(M.organization_id == prog.organization_id, M.user_id == user.id).first())
+    test = cfg(prog).get("test_login") or {}
+    if m is not None and test.get("member_id") == m.id:
+        # The owner's test login (Nov 26): BookIT exactly as the chosen advisor
+        # sees it, view only - even before BookIT is opened to the team.
+        if not test.get("mirrors"):
+            raise BookitError("Pick which advisor the test login shows (Management > Settings).", 403)
+        return Who(user, False, test["mirrors"], m.id, view_only=True)
     if manager:
         if not is_live(prog) and not previewer(prog, user):
             raise BookitError("Restland BookIT isn't open for this login yet.", 403)
@@ -118,9 +126,20 @@ def _extra_owners(db: Session, org: str, lead_id: str) -> Iterable[str]:
     return [a for a in out if a]
 
 
+def is_view_only(db: Session, user) -> bool:
+    """Is this login the owner's view-only test login for any BookIT program?"""
+    from app.models.program_models import OutreachProgram as P, ProgramTeamMember as M
+    for (org,) in db.query(M.organization_id).filter(M.user_id == user.id).all():
+        prog = db.query(P).filter(P.organization_id == org).first()
+        t = cfg(prog).get("test_login") or {} if prog else {}
+        if t.get("user_id") == user.id:
+            return True
+    return False
+
+
 def team_names(db: Session, org: str, active_only: bool = False):
     from app.models.program_models import ProgramTeamMember as M
-    q = db.query(M.name).filter(M.organization_id == org)
+    q = db.query(M.name).filter(M.organization_id == org, M.name != "Test Advisor")
     if active_only:
         q = q.filter(M.active.is_(True))
     return [n for (n,) in q.all()]

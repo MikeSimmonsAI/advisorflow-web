@@ -511,7 +511,8 @@ def _bookit_contexts(db: Session, user: User, workspaces: List[Dict[str, Any]]) 
             member = db.query(_TM.id).filter(_TM.organization_id == w["organization_id"],
                                              _TM.user_id == user.id).first()
             manager = w.get("role") in ("org_admin", "super_admin", "manager")
-            if (manager and (_bk.is_live(prog) or _bk.previewer(prog, user))) or (member and _bk.is_live(prog)):
+            test = (_bk.cfg(prog).get("test_login") or {}).get("user_id") == user.id   # owner's test login
+            if (manager and (_bk.is_live(prog) or _bk.previewer(prog, user))) or (member and (_bk.is_live(prog) or test)):
                 out.append({"type": "restland_bookit", "label": "Restland BookIT",
                             "organization_id": w["organization_id"], "path": "/program/restland-bookit"})
     except Exception:

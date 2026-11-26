@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -20,7 +20,16 @@ from app.services.bookit import core, insights, network, sales, workflow
 from app.services.programs import restland_sheet as RS
 from app.services.programs import team_board as TB
 
-router = APIRouter(prefix="/restland-bookit", tags=["restland-bookit"])
+def _view_only_guard(request: Request, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """The owner's test login reads everything its advisor would, and changes
+    nothing (FSA Coach questions excepted - they change no record)."""
+    if request.method in ("GET", "HEAD", "OPTIONS") or request.url.path.rstrip("/").endswith("/coach"):
+        return
+    if core.is_view_only(db, user):
+        raise HTTPException(status_code=403, detail="This is the test login - it shows the advisor's side but can't change anything.")
+
+
+router = APIRouter(prefix="/restland-bookit", tags=["restland-bookit"], dependencies=[Depends(_view_only_guard)])
 
 
 class Body(BaseModel):
@@ -418,10 +427,16 @@ def team(response: Response, db: Session = Depends(get_db), user: User = Depends
     _nostore(response)
     prog, w = _ctx(db, user)
     _mgr(w)
-    rows = TB.team(db, prog)
+    rows = [r for r in TB.team(db, prog) if r["name"] != "Test Advisor"]
     susp = core.cfg(prog).get("suspended") or {}
+    from app.models.models import User as _U
+    from app.models.program_models import ProgramTeamMember as _M
+    links = {m.id: m.user_id for m in db.query(_M).filter(_M.organization_id == prog.organization_id)}
     for r in rows:
         r["access_suspended"] = bool(susp.get(r["id"]))
+        u = db.query(_U).filter(_U.id == links.get(r["id"])).first() if links.get(r["id"]) else None
+        r["login_email"] = u.email if u else None
+        r["signed_in"] = bool(u and u.last_login_at)
     return {"team": rows, "live_for_team": core.is_live(prog)}
 
 
@@ -470,6 +485,52 @@ def audit_log(response: Response, entity: Optional[str] = None, entity_id: Optio
                        "old": a.old_value, "new": a.new_value, "reason": a.reason, "by": a.user_name,
                        "at": a.at.isoformat() + "Z" if a.at else None}
                       for a in q.order_by(A.at.desc()).limit(300)]}
+
+
+# ── logins ──────────────────────────────────────────────────────────────────
+
+def _base(request: Request) -> str:
+    origin = request.headers.get("origin") or ""
+    return origin if origin.startswith("https://") else "https://app.evosyspro.live"
+
+
+@router.post("/team/{member_id}/login")
+def create_login(member_id: str, body: Body, request: Request, db: Session = Depends(get_db),
+                 user: User = Depends(require_tenant_user)):
+    """Management: make (or connect) this person's BookIT login. Sends nothing."""
+    from app.services.bookit import logins
+    prog, w = _ctx(db, user)
+    return _run(db, logins.create_login, db, prog, w, user, member_id, body.data.get("email"))
+
+
+@router.post("/team/{member_id}/setup-link")
+def setup_link(member_id: str, body: Body, request: Request, db: Session = Depends(get_db),
+               user: User = Depends(require_tenant_user)):
+    """Management: a one-time set-password link - emailed (email: true) or handed back."""
+    from app.services.bookit import logins
+    prog, w = _ctx(db, user)
+    return _run(db, logins.send_setup, db, prog, w, user, member_id, _base(request), bool(body.data.get("email")))
+
+
+@router.get("/test-login")
+def get_test_login(response: Response, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    _nostore(response)
+    from app.services.bookit import logins
+    prog, w = _ctx(db, user)
+    _mgr(w)
+    return logins.test_login(db, prog)
+
+
+@router.put("/test-login")
+def put_test_login(body: Body, request: Request, db: Session = Depends(get_db),
+                   user: User = Depends(require_tenant_user)):
+    from app.services.bookit import logins
+    prog, w = _ctx(db, user)
+    out = _run(db, logins.set_test_login, db, prog, w, user, body.data.get("email"), body.data.get("mirrors"))
+    if body.data.get("send_link"):
+        t = logins.test_login(db, prog)
+        out["link"] = _run(db, logins.send_setup, db, prog, w, user, t["member_id"], _base(request), True)
+    return out
 
 
 # ── FSA Coach ───────────────────────────────────────────────────────────────
