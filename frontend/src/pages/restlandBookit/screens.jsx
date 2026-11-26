@@ -1031,17 +1031,36 @@ export function Advisors() {
 
 export function Team() {
   const { say, refresh } = useBk()
-  const [d] = useData(R + '/team')
+  const [d, , setD] = useData(R + '/team')
+  const [link, setLink] = useState(null)
   if (!d) return <div className="bk-card"><Skeleton rows={5} /></div>
+  const reload = () => api.get(R + '/team').then(setD)
   const toggle = async (m) => { if (await send(() => api.patch(R + '/team/' + m.id, { data: { access_suspended: !m.access_suspended } }), say, 'Updated.')) refresh() }
+  const make = async (m) => {
+    if (!m.email) { say('Add an email for ' + m.name + ' on the Team tab first.', true); return }
+    if (!window.confirm('Create a BookIT login for ' + m.name + ' (' + m.email + ')? Nothing is emailed yet.')) return
+    if (await send(() => api.post(R + '/team/' + m.id + '/login', { data: {} }), say, 'Login created for ' + m.name + '.')) reload()
+  }
+  const setup = async (m, email) => {
+    if (email && !window.confirm('Email ' + m.name + ' a link to set their password (' + (m.login_email || m.email) + ')?')) return
+    const r = await send(() => api.post(R + '/team/' + m.id + '/setup-link', { data: { email } }), say)
+    if (r) { if (r.emailed) say('Emailed ' + r.to + '.'); else setLink({ name: m.name, url: r.setup_url, failed: email }) }
+  }
   return (
     <div className="bk-grid">
-      <div className="bk-card"><h2>Advisors<small>{d.live_for_team ? 'BookIT is open to the team' : 'BookIT is visible only to the owner until opened'}</small></h2>
+      <div className="bk-card"><h2>Advisors<small>{d.live_for_team ? 'BookIT is open to the team' : 'Logins can be made now - nobody gets in until you open BookIT to the team'}</small></h2>
         <div className="bk-scroll"><table className="bk-table"><thead><tr><th>Name</th><th>Email</th><th>Rotation</th><th>Login</th><th>BookIT access</th><th /></tr></thead>
-          <tbody>{d.team.map(m => <tr key={m.id}><td><b>{m.name}</b></td><td>{m.email}</td><td>{m.status}</td><td>{m.has_login ? 'Linked' : 'Not created yet'}</td>
+          <tbody>{d.team.map(m => <tr key={m.id}><td><b>{m.name}</b></td><td>{m.login_email || m.email || '—'}</td><td>{m.status}</td>
+            <td>{!m.has_login ? <button className="bk-btn pri" onClick={() => make(m)}>Create login</button>
+              : <div className="bk-actions"><span>{m.signed_in ? 'Signed in' : 'Made - not signed in yet'}</span>
+                  {!m.signed_in && <><button className="bk-btn" onClick={() => setup(m, true)}>Email setup link</button>
+                    <button className="bk-btn ghost" onClick={() => setup(m, false)}>Get link</button></>}</div>}</td>
             <td>{m.access_suspended ? <span className="badge err">Paused</span> : <span className="badge ok">Allowed</span>}</td>
             <td><button className="bk-btn" onClick={() => toggle(m)}>{m.access_suspended ? 'Restore access' : 'Pause access'}</button></td></tr>)}</tbody></table></div>
-        <p className="faint">Names, emails and who's in the rotation still come from the sheet's Team tab until cutover, so the two never disagree. Pausing access keeps all of a person's history.</p></div>
+        {link && <div className="bk-alert" style={{ marginTop: 12 }}>{link.failed ? 'The email didn\u2019t go out. ' : ''}One-time link for <b>{link.name}</b> (works once, 3 days) - send it to them yourself:
+          <div style={{ wordBreak: 'break-all', marginTop: 6 }}><code>{link.url}</code></div>
+          <button className="bk-btn" style={{ marginTop: 8 }} onClick={() => { navigator.clipboard?.writeText(link.url); say('Copied.') }}>Copy link</button></div>}
+        <p className="faint">Names, emails and who's in the rotation come from the sheet's Team tab. "Create login" uses the email shown; it sends nothing. "Email setup link" sends them a one-time link to set their own password. Pausing access keeps all of a person's history.</p></div>
     </div>
   )
 }
@@ -1062,7 +1081,32 @@ export function Settings() {
     <div className="bk-card"><h2>Campaign templates</h2>
       <p>File Review 6 Block: <b>{d.campaigns?.evo6?.approved ? 'approved' : 'not approved yet'}</b> · At-Need 6 Block: <b>{d.campaigns?.add?.approved ? 'approved' : 'not approved yet'}</b></p>
       <p className="faint">No contact is enrolled until the matching template is approved. Nothing has been sent from BookIT.</p></div>
-    <CoachSettings /></div>)
+    <TestLogin /><CoachSettings /></div>)
+}
+
+function TestLogin() {
+  const { me, say } = useBk()
+  const [d, , setD] = useData(R + '/test-login')
+  const [email, setEmail] = useState('')
+  const [who, setWho] = useState('')
+  useEffect(() => { if (d) { setEmail(d.email || 'simmonsmj242+bookittest@gmail.com'); setWho(d.mirrors || (me.team || [])[0] || '') } }, [d])
+  if (!d) return <div className="bk-card"><Skeleton rows={3} /></div>
+  const save = async (sendLink) => {
+    const r = await send(() => api.put(R + '/test-login', { data: { email, mirrors: who, send_link: sendLink } }), say,
+      sendLink ? 'Saved. Check ' + email + ' for the set-password link.' : 'Saved.')
+    if (r) { setD(r); if (r.link && !r.link.emailed) say('The email didn\u2019t go out - use this link: ' + r.link.setup_url, true) }
+  }
+  return (
+    <div className="bk-card"><h2>Test login<small>{d.email ? (d.has_signed_in ? 'Signed in before' : 'Not signed in yet') : 'Not set up'}</small></h2>
+      <p>A separate login that shows BookIT exactly as an advisor sees it, view only. It works now, before BookIT is opened to the team, and it's never in the rotation.</p>
+      <div className="bk-line"><span>Login email</span><input value={email} onChange={e => setEmail(e.target.value)} style={{ width: 290 }} aria-label="Test login email" /></div>
+      <div className="bk-line"><span>Show me the side of</span><select value={who} onChange={e => setWho(e.target.value)} aria-label="Advisor to show">
+        {(me.team || []).map(n => <option key={n}>{n}</option>)}</select></div>
+      <div className="bk-line"><span className="muted">Switch the advisor any time; the login stays the same.</span>
+        <div className="bk-actions"><button className="bk-btn" onClick={() => save(false)}>Save</button>
+          {!d.has_signed_in && <button className="bk-btn pri" onClick={() => save(true)}>Save and email me the link</button>}</div></div>
+    </div>
+  )
 }
 
 function CoachSettings() {

@@ -399,5 +399,57 @@ def test_fsa_coach_says_plainly_when_the_ai_account_is_out_of_credit(setter, sam
     ann = core.who(db, prog, _U("u-ann"), manager=False)
     with pytest.raises(core.BookitError) as e:
         coach.ask(db, prog, ann, _U("u-ann"), "Who should I call?")
-    assert "out of credit" in str(e.value)
+    assert "taking a break" in str(e.value) and "credit" not in str(e.value)   # advisors get a plain line
     assert coach.remaining(db, prog, ann)["used_today"] == 0          # a failed question isn't counted
+    boss = core.who(db, prog, _U("owner"), manager=True)
+    with pytest.raises(core.BookitError) as e:
+        coach.ask(db, prog, boss, _U("owner"), "Who should I call?")
+    assert "out of credit" in str(e.value) and "platform.openai.com" in str(e.value)
+    assert db.query(BookitNotification).filter_by(organization_id=org.id, kind="coach_credit").count() == 1
+
+
+# ── logins and the owner's test login (owner, Nov 26) ───────────────────────
+
+def test_create_login_links_the_team_member_and_sends_nothing(setter, sample_advisor, monkeypatch):
+    from app.models.models import User
+    from app.services.bookit import logins
+    db, org, prog, sheet, appts, mine, other = _team(setter, sample_advisor)
+    sent = []
+    monkeypatch.setattr(logins, "_email", lambda u, url, base: sent.append((u.email, url)) or True)
+    boss_user = db.query(User).filter(User.id == sample_advisor.id).first()
+    boss = core.who(db, prog, _U("owner"), manager=True)
+    cara = ProgramTeamMember(organization_id=org.id, name="Cara", email="cara.test@nsmg.example", active=True)
+    db.add(cara)
+    db.commit()
+    out = logins.create_login(db, prog, boss, boss_user, cara.id)
+    db.commit()
+    u = db.query(User).filter(User.email == "cara.test@nsmg.example").one()
+    assert out["new_account"] and cara.user_id == u.id and u.must_change_password and not sent
+    with pytest.raises(core.BookitError):                       # not before BookIT is opened to the team
+        core.who(db, prog, u, manager=False)
+    _live(db, prog)
+    assert core.who(db, prog, u, manager=False).name == "Cara"   # her own name, so her own work
+    r = logins.send_setup(db, prog, boss, boss_user, cara.id, "https://app.evosyspro.live", True)
+    assert r["emailed"] and sent[0][0] == u.email and "/activate?token=stf_" in sent[0][1]
+    ann = core.who(db, prog, _U("u-ann"), manager=False)
+    with pytest.raises(core.BookitError):
+        logins.create_login(db, prog, ann, boss_user, cara.id)    # advisors can't make logins
+
+
+def test_test_login_shows_one_advisors_side_view_only_before_launch(setter, sample_advisor):
+    from app.models.models import User
+    from app.services.bookit import logins
+    db, org, prog, sheet, appts, mine, other = _team(setter, sample_advisor)
+    boss_user = db.query(User).filter(User.id == sample_advisor.id).first()
+    boss = core.who(db, prog, _U("owner"), manager=True)
+    with pytest.raises(core.BookitError):                       # not one of his real logins
+        logins.set_test_login(db, prog, boss, boss_user, boss_user.email, "Ann")
+    t = logins.set_test_login(db, prog, boss, boss_user, "owner+bookittest@example.com", "Ann")
+    db.commit()
+    u = db.query(User).filter(User.email == "owner+bookittest@example.com").one()
+    w = core.who(db, prog, u, manager=False)                     # BookIT isn't live, and it still gets in
+    assert w.name == "Ann" and w.view_only and not w.manager and core.is_view_only(db, u)
+    assert "Test Advisor" not in core.team_names(db, org.id)    # never in a list or the rotation
+    logins.set_test_login(db, prog, boss, boss_user, None, "Bob")
+    assert core.who(db, prog, u, manager=False).name == "Bob"
+    assert not core.is_view_only(db, boss_user)

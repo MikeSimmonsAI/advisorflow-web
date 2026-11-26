@@ -14,12 +14,13 @@ export const useBk = () => useContext(Bk)
 // Layout of the owner's preview (Restland-BookIT-Preview.html, Nov 26):
 // "Advisor workspace" then "Operations" in the side menu.
 const ADVISOR_NAV = [
-  ['', 'My Day'], ['appointments', 'Appointments'], ['follow-ups', 'Follow-Ups'], ['families', 'My Families'],
-  ['evo6', 'File Review 6 Block'], ['calendar', 'Calendar'], ['performance', 'Performance'], ['notifications', 'Notifications'],
-  ['profile', 'My Profile'],
+  ['', 'My Day'], ['appointments', 'Appointments'], ['calendar', 'Calendar'], ['follow-ups', 'Follow-Ups'],
+  ['families', 'My Families'], ['evo6', 'File Review 6 Block'], ['add-leads', 'At-Need 6 Block'],
+  ['service', 'Service Requests'], ['sales', 'Sales & Revenue'], ['performance', 'Performance'],
+  ['notifications', 'Notifications'], ['profile', 'My Profile'],
 ]
+// Operations: management only (owner, Nov 26: the 6 Blocks belong with the advisor's own work).
 const OPS_MANAGER = [['advisors', 'Team'], ['command', 'Management']]
-const OPS_NAV = [['add-leads', 'At-Need 6 Block'], ['service', 'Service Requests'], ['sales', 'Sales & Revenue']]
 // Management is one menu item; its four screens are tabs inside it.
 const MANAGEMENT = [['command', 'Command Center'], ['team', 'Advisor Management'], ['audit', 'Activity Audit'], ['settings', 'Settings']]
 const MANAGEMENT_KEYS = MANAGEMENT.map(([p]) => p)
@@ -119,20 +120,18 @@ export default function BookitApp() {
               <span>{l}</span>{p === 'notifications' && unread > 0 && <span className="badge err">{unread}</span>}
             </button>
           ))}
-          <div className="caption">Operations</div>
+          {manager && <div className="caption">Operations</div>}
           {(manager ? OPS_MANAGER : []).map(([p, l]) => {
             const on = p === 'command' ? inManagement : sub === p
             return <button key={p} className={'bk-nav' + (on ? ' on' : '')} onClick={() => go(p)} aria-current={on ? 'page' : undefined}><span>{l}</span></button>
           })}
-          {OPS_NAV.map(([p, l]) => (
-            <button key={p} className={'bk-nav' + (sub === p ? ' on' : '')} onClick={() => go(p)} aria-current={sub === p ? 'page' : undefined}><span>{l}</span></button>
-          ))}
           <div className="grow" />
           <button className="bk-nav" onClick={() => nav('/workspaces')}><span>Program Access</span></button>
           <div className="bk-powered">Powered by EvoSys Pro</div>
         </aside>
         <main className="bk-main">
           <div className="bk-page">
+            {me?.me?.view_only && <div className="bk-alert" style={{ marginBottom: 16 }}><b>Test login</b> - you're seeing BookIT exactly as <b>{me.me.name}</b> sees it. View only: nothing you click here changes anything.</div>}
             {me && head && <div className="bk-toolbar">
               <div><p className="muted">Restland · {manager ? head[2] : head[1]}</p><h1>{head[0]}</h1></div>
               <div className="bk-toolbar-slot" ref={setToolbar} />

@@ -227,8 +227,19 @@ def ask(db: Session, prog, w: Who, user, question: str, history: Optional[List[D
         raise BookitError("FSA Coach isn't available right now (%s)." % e, 503)
     except Exception as e:                               # noqa: BLE001 - provider error, already logged
         if "insufficient_quota" in str(e) or "credit_balance_exhausted" in str(e):
-            raise BookitError("FSA Coach is paused: the EvoSys AI account is out of credit. "
-                              "Management needs to add credit before it can answer.", 503)
+            from app.services.bookit.core import MANAGEMENT, notify
+            notify(db, prog.organization_id, MANAGEMENT, "coach_credit",
+                   "FSA Coach can't answer: the OpenAI account has no credit",
+                   body="Add credit at platform.openai.com > Settings > Billing. The AI that answers "
+                        "families uses the same account.",
+                   dedupe="coach_credit:%s" % today_ct().isoformat())
+            db.commit()
+            if w.manager:
+                raise BookitError("I can't answer right now because the OpenAI account that runs FSA Coach is out "
+                                  "of credit. Add credit at platform.openai.com > Settings > Billing and I'll work "
+                                  "right away. (The AI that answers families uses the same account.)", 503)
+            raise BookitError("FSA Coach is taking a break right now. Your manager has been let know - "
+                              "please try again later.", 503)
         raise BookitError("FSA Coach couldn't get an answer just now. Please try again.", 503)
     text = (resp.choices[0].message.content or "").strip() if getattr(resp, "choices", None) else ""
     usage = getattr(resp, "usage", None)
