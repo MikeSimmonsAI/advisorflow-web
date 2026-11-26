@@ -315,7 +315,7 @@ function CloseTicket({ d, onDone, onSale }) {
     evo6_status: dis.evo6_status || '', evo6_reason: dis.evo6_reason || '', follow_up_on: dis.follow_up_on || '', final_notes: dis.final_notes || '' })
   const [step, setStep] = useState(0)
   const attended = v.outcome === 'Showed'
-  const steps = attended ? ['Outcome', 'Sale', 'Paperwork', 'Evo 6 Block', 'Notes'] : ['Outcome', 'Notes']
+  const steps = attended ? ['Outcome', 'Sale', 'Paperwork', 'File Review 6 Block', 'Notes'] : ['Outcome', 'Notes']
   const set = (k, x) => setV(o => ({ ...o, [k]: x }))
   const save = async (close, then) => {
     const r = await send(() => api.post(R + '/appointments/' + encodeURIComponent(d.appointment.id) + '/ticket',
@@ -343,7 +343,7 @@ function CloseTicket({ d, onDone, onSale }) {
           <div className="bk-field gold"><label>Permission to Access form</label>{sel('pta_status', me.choices.pta)}</div>
           <div className="bk-field gold"><label>Personal Planning Guide</label>{sel('ppg_status', me.choices.ppg)}</div>
           <p className="faint">Record what actually happened — attending doesn't complete the paperwork by itself.</p></>}
-        {cur === 'Evo 6 Block' && <>
+        {cur === 'File Review 6 Block' && <>
           <div className="bk-field gold"><label>Family contacts collected</label>{sel('evo6_status', me.choices.evo6)}</div>
           {v.evo6_status && v.evo6_status !== 'complete' && <div className="bk-field gold"><label>Why not complete</label><input value={v.evo6_reason} onChange={e => set('evo6_reason', e.target.value)} placeholder="e.g. family will send names later" /></div>}
           <p className="faint">Six contacts is the goal, never a reason to invent one.</p></>}
@@ -353,7 +353,7 @@ function CloseTicket({ d, onDone, onSale }) {
         {step > 0 && <button className="bk-btn" onClick={() => setStep(step - 1)}>Back</button>}
         {step < steps.length - 1 && <button className="bk-btn" onClick={() => setStep(step + 1)}>Next</button>}
         <button className="bk-btn" onClick={() => save(false)}>Save draft</button>
-        {v.pta_status === 'completed' && <button className="bk-btn" onClick={() => save(false, 'evo6')}><Icon name="network" />Save &amp; open Evo 6 Block</button>}
+        {v.pta_status === 'completed' && <button className="bk-btn" onClick={() => save(false, 'evo6')}><Icon name="network" />Save &amp; open File Review 6 Block</button>}
         <button className="bk-btn pri" onClick={() => save(true)}>Save &amp; close</button>
       </div>}
     </div>
@@ -522,7 +522,7 @@ function FollowUpPanel({ id, onClose }) {
   )
 }
 
-// ── Evo 6 Block ─────────────────────────────────────────────────────────────
+// ── File Review 6 Block ─────────────────────────────────────────────────────────────
 
 export function Evo6({ kind = 'evo6' }) {
   const { say, refresh } = useBk()
@@ -542,7 +542,7 @@ export function Evo6({ kind = 'evo6' }) {
   const fams = (w?.appointments || []).filter(a => a.lead_id && (a.outcome || a.status) === 'Showed')
   return (
     <div className="bk-grid">
-      <section className="bk-hero"><h2>Evo 6 Block</h2><p>Each completed family file review grows a family network — every contact worked on their own.</p>
+      <section className="bk-hero"><h2>File Review 6 Block</h2><p>Each completed family file review grows a family network — every contact worked on their own.</p>
         <div className="chips"><span className="bk-chip"><b>{d.networks.length}</b> networks</span>
           <span className="bk-chip"><b>{d.networks.reduce((s, n) => s + n.progress.collected, 0)}</b> contacts collected</span>
           <span className="bk-chip"><b>{d.networks.reduce((s, n) => s + n.progress.eligible, 0)}</b> eligible</span>
@@ -641,7 +641,7 @@ function ContactPanel({ batch, c, onClose, onSaved, manager }) {
   )
 }
 
-// ── ADD Leads ───────────────────────────────────────────────────────────────
+// ── At-Need 6 Blocks ───────────────────────────────────────────────────────────────
 
 const ADD_FLOW = ['intake', 'review', 'contact', 'assist', 'resolved']
 
@@ -657,10 +657,10 @@ export function AddLeads() {
   return (
     <div className="bk-grid">
       <section className="bk-hero" style={{ background: 'linear-gradient(120deg,#FBF5E8,#FFFFFF)', borderColor: '#EFE3C6' }}>
-        <h2>ADD Lead Center</h2><p>Compassionate, timely family assistance.</p>
+        <h2>At-Need 6 Block Center</h2><p>Compassionate, timely family assistance.</p>
         <div className="chips">{[['intake', 'New'], ['review', 'Awaiting review'], ['contact', 'Contact attempted'], ['assist', 'In progress'], ['waiting_family', 'Waiting on family'], ['resolved', 'Resolved']].map(([s, l]) =>
           <span key={s} className="bk-chip"><b>{count(s)}</b> {l}</span>)}</div>
-        <div style={{ marginTop: 12 }}><button className="bk-btn pri" onClick={() => setIntake(true)}><Icon name="plus" />New ADD Lead</button></div>
+        <div style={{ marginTop: 12 }}><button className="bk-btn pri" onClick={() => setIntake(true)}><Icon name="plus" />New At-Need 6 Block</button></div>
       </section>
       <div className="bk-grid g2">{cases.filter(c => c.status !== 'resolved').map(c => (
         <div key={c.id} className="bk-card" style={{ cursor: 'pointer', borderColor: c.priority === 'urgent' ? '#E7D6AE' : undefined }} onClick={() => setOpen(c.id)}>
@@ -670,7 +670,7 @@ export function AddLeads() {
             {me.me.manager && <><dt>Advisor</dt><dd>{c.assigned_advisor || 'Not assigned'}</dd></>}</dl>
           <div className="bk-steps" style={{ marginTop: 10, marginBottom: 0 }}>{ADD_FLOW.map(s => <button key={s} className={c.status === s ? 'on' : ADD_FLOW.indexOf(s) < ADD_FLOW.indexOf(c.status) ? 'done' : ''} tabIndex="-1">{label(s)}</button>)}</div>
         </div>))}</div>
-      {cases.length === 0 && <div className="bk-card"><Empty>No ADD Leads yet.</Empty></div>}
+      {cases.length === 0 && <div className="bk-card"><Empty>No At-Need 6 Blocks yet.</Empty></div>}
       {intake && <AddIntake onClose={() => setIntake(false)} onSaved={() => { setIntake(false); refresh() }} />}
       {sel && <AddCasePanel c={sel} onClose={() => setOpen(null)} onSaved={() => refresh()} />}
     </div>
@@ -683,9 +683,9 @@ function AddIntake({ onClose, onSaved }) {
   const [v, setV] = useState({ deceased_name: '', date_of_passing: '', report_source: '', contact_name: '', contact_relationship: '', contact_phone: '',
     contact_email: '', preferred_channel: 'phone', preferred_time: '', immediate_needs: '', arrangement_status: '', priority: 'high', notes: '', assigned_advisor: '' })
   const F = (k, l, t = 'text') => <div className="bk-field"><label>{l}</label><input type={t} value={v[k]} onChange={e => setV({ ...v, [k]: e.target.value })} /></div>
-  const save = async () => { if (await send(() => api.post(R + '/add-leads', { data: { ...v, idempotency_key: key, date_of_passing: v.date_of_passing || null } }), say, 'ADD Lead created — the advisor is notified.')) onSaved() }
+  const save = async () => { if (await send(() => api.post(R + '/add-leads', { data: { ...v, idempotency_key: key, date_of_passing: v.date_of_passing || null } }), say, 'At-Need 6 Block created — the advisor is notified.')) onSaved() }
   return (
-    <Panel title="New ADD Lead" sub="Human-led. Nothing is sent to the family automatically." onClose={onClose} foot={<button className="bk-btn pri" onClick={save}>Create case</button>}>
+    <Panel title="New At-Need 6 Block" sub="Human-led. Nothing is sent to the family automatically." onClose={onClose} foot={<button className="bk-btn pri" onClick={save}>Create case</button>}>
       <div className="bk-grid g2">{F('deceased_name', 'Name of the person who passed')}{F('date_of_passing', 'Date of passing (if known)', 'date')}
         {F('contact_name', 'Family contact')}{F('contact_relationship', 'Relationship')}{F('contact_phone', 'Phone', 'tel')}{F('contact_email', 'Email', 'email')}
         {F('preferred_time', 'Best time to reach them')}{F('report_source', 'How we learned')}</div>
@@ -907,8 +907,8 @@ export function Performance({ person: fixed }) {
         <Kpi l="Appointments" v={num(m.assigned_appointments)} /><Kpi l="Attended" v={num(m.attended)} /><Kpi l="No-shows" v={num(m.no_shows)} />
         <Kpi l="Show rate" v={pct(m.show_rate)} s="Showed ÷ (Showed + No-Show)" /><Kpi l="Appointments with sales" v={num(m.appointments_with_sales)} />
         <Kpi l="Closing rate" v={pct(m.closing_rate)} /><Kpi l="Follow-ups worked" v={num(m.follow_ups_worked)} /><Kpi l="Follow-up conversion" v={pct(m.follow_up_conversion)} />
-        <Kpi l="Permission to Access done" v={num(m.pta_completed)} /><Kpi l="Evo 6 Blocks" v={num(m.evo6_submitted)} /><Kpi l="Contacts per review" v={m.average_contacts_per_review ?? 'N/A'} />
-        <Kpi l="ADD Leads" v={num(m.add_leads_assigned)} /></div>
+        <Kpi l="Permission to Access done" v={num(m.pta_completed)} /><Kpi l="File Review 6 Blocks" v={num(m.evo6_submitted)} /><Kpi l="Contacts per review" v={m.average_contacts_per_review ?? 'N/A'} />
+        <Kpi l="At-Need 6 Blocks" v={num(m.add_leads_assigned)} /></div>
       <div className="bk-grid g2">
         <div className="bk-card"><h2>Daily activity</h2>{d.daily.length ? <Bars money={false} data={Object.fromEntries(d.daily.map(x => [fmtDate(x.date), x.follow_ups_worked + x.appointments]))} labels={{}} /> : <Empty>No activity in this range.</Empty>}</div>
         <div className="bk-card"><h2>Production by source</h2><Bars data={d.closed_value_by_source_cents} /></div>
@@ -950,8 +950,8 @@ export function Command() {
         <Kpi l="Show rate" v={pct(k.show_rate)} /><Kpi l="Appointments with sales" v={num(k.appointments_with_sales)} />
         <Kpi l="Closing rate" v={pct(k.closing_rate)} /><Kpi l="Open follow-ups" v={num(k.open_follow_ups)} onClick={() => go('follow-ups')} />
         <Kpi l="Overdue follow-ups" v={num(k.overdue_follow_ups)} tone={k.overdue_follow_ups ? '#B7791F' : null} onClick={() => go('follow-ups')} />
-        <Kpi l="Evo 6 Blocks" v={num(k.evo6_blocks)} onClick={() => go('evo6')} /><Kpi l="Family contacts" v={num(k.family_contacts)} />
-        <Kpi l="ADD Leads open" v={num(k.add_leads)} onClick={() => go('add-leads')} /><Kpi l="Priority cases" v={num(k.priority_cases)} />
+        <Kpi l="File Review 6 Blocks" v={num(k.evo6_blocks)} onClick={() => go('evo6')} /><Kpi l="Family contacts" v={num(k.family_contacts)} />
+        <Kpi l="At-Need 6 Blocks open" v={num(k.add_leads)} onClick={() => go('add-leads')} /><Kpi l="Priority cases" v={num(k.priority_cases)} />
         <Kpi l="Unassigned work" v={num(k.unassigned_work)} tone={k.unassigned_work ? '#B94B4B' : null} />
       </div>
       {k.missing_sale_amounts > 0 && <div className="bk-chip warn"><b>{k.missing_sale_amounts}</b> sales marked “Sold” without amounts — kept out of the totals above until amounts are recorded.</div>}
@@ -963,7 +963,7 @@ export function Command() {
         })}</div></div>
       </div>
       <div className="bk-card"><h2>Team performance<small>select an advisor to drill in</small></h2><div className="bk-scroll"><table className="bk-table">
-        <thead><tr><th>Advisor</th><th>Upcoming</th><th>Today</th><th>Showed</th><th>Show rate</th><th>Open FU</th><th>Due now</th><th>Worked 7d</th><th>Evo 6</th><th>ADD</th><th>Contracts</th><th>Closed value</th><th>Last update</th></tr></thead>
+        <thead><tr><th>Advisor</th><th>Upcoming</th><th>Today</th><th>Showed</th><th>Show rate</th><th>Open FU</th><th>Due now</th><th>Worked 7d</th><th>File Review 6</th><th>At-Need 6</th><th>Contracts</th><th>Closed value</th><th>Last update</th></tr></thead>
         <tbody>{d.team.map(p => <tr key={p.name} className="click" onClick={() => p.name !== 'Not assigned' && setDrill(p.name)}><td><b>{p.name}</b></td><td>{p.appointments_upcoming}</td><td>{p.appointments_today}</td>
           <td>{p.showed}</td><td>{pct(p.show_rate)}</td><td>{p.follow_ups_open}</td><td>{p.follow_ups_due_now}</td><td>{p.followed_up_7d}</td><td>{p.evo6_blocks}</td><td>{p.add_leads}</td>
           <td>{p.closed_contracts}</td><td className="money">{usd(p.closed_value_cents)}</td><td className="faint">{fmtStamp(p.last_update)}</td></tr>)}</tbody></table></div></div>
@@ -1060,7 +1060,7 @@ export function Settings() {
   return (<div className="bk-grid"><div className="bk-card"><h2>BookIT status</h2>
     <p>{d.live_for_team ? 'Open to the team — each advisor sees only their own work.' : 'Owner preview — only your logins can open BookIT. Opening it to the team is your call.'}</p></div>
     <div className="bk-card"><h2>Campaign templates</h2>
-      <p>Evo 6 Block: <b>{d.campaigns?.evo6?.approved ? 'approved' : 'not approved yet'}</b> · ADD Lead: <b>{d.campaigns?.add?.approved ? 'approved' : 'not approved yet'}</b></p>
+      <p>File Review 6 Block: <b>{d.campaigns?.evo6?.approved ? 'approved' : 'not approved yet'}</b> · At-Need 6 Block: <b>{d.campaigns?.add?.approved ? 'approved' : 'not approved yet'}</b></p>
       <p className="faint">No contact is enrolled until the matching template is approved. Nothing has been sent from BookIT.</p></div></div>)
 }
 
@@ -1086,7 +1086,7 @@ export function Profile() {
 // ── BookIT Copilot — answers from this login's own BookIT records ───────────
 
 const QUESTIONS = ['Show me the families I need to call today', 'Which appointment outcomes are incomplete?', 'Show my pending sales opportunities',
-  'Which Evo 6 Blocks are incomplete?', 'Show my upcoming appointments', 'How much closed sales value have I recorded this month?', 'Prepare my daily work plan']
+  'Which File Review 6 Blocks are incomplete?', 'Show my upcoming appointments', 'How much closed sales value have I recorded this month?', 'Prepare my daily work plan']
 
 export function Copilot({ onClose }) {
   const { me } = useBk()
@@ -1116,7 +1116,7 @@ async function answer(t, me) {
   if (t.includes('call')) return 'Families to call:\n' + names(day.actions.filter(a => a.kind === 'follow_up'))
   if (t.includes('outcome')) return 'Outcomes still to record:\n' + names(day.actions.filter(a => a.kind === 'missing_outcome'))
   if (t.includes('pending')) return 'Pending sales decisions:\n' + names(day.actions.filter(a => a.kind === 'pending_sale'))
-  if (t.includes('evo') || t.includes('6 block')) return 'Evo 6 Blocks to finish:\n' + names(day.actions.filter(a => a.kind === 'evo6'))
+  if (t.includes('evo') || t.includes('6 block')) return 'File Review 6 Blocks to finish:\n' + names(day.actions.filter(a => a.kind === 'evo6'))
   if (t.includes('upcoming') || t.includes('appointment')) {
     const w = await api.get(R + '/work')
     const up = w.appointments.filter(a => a.upcoming).slice(0, 10)

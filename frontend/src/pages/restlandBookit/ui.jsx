@@ -67,7 +67,9 @@ export function fmtStamp(s) {
   return dt.toLocaleString('en-US', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 
-export const label = s => (s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+// Names the owner chose (Nov 26): the two family networks.
+const NAMES = { evo6_block: 'File Review 6 Block', add_lead: 'At-Need 6 Block', evo6: 'File Review 6 Block', evo6_blocks: 'File Review 6 Blocks' }
+export const label = s => NAMES[s] || (s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 
 export function Kpi({ l, v, s, icon, onClick, tone }) {
   return (
@@ -126,7 +128,7 @@ export function Spark({ values }) {
   return <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} aria-hidden="true"><path d={d} fill="none" stroke="#23885E" strokeWidth="1.6" /></svg>
 }
 
-/** The Evo 6 Block radial network: the family in the middle, each contact
+/** The File Review 6 Block radial network: the family in the middle, each contact
  *  around it, colored AND labeled by state (never color alone). */
 export function Network({ batch, onPick, onAdd }) {
   const contacts = batch.contacts || []

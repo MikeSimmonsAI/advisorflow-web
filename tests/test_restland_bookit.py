@@ -1,5 +1,5 @@
 """Restland BookIT acceptance tests (directive s45) that run without a browser:
-money, idempotency, record-level security, Evo 6 Block, ADD Leads, closing
+money, idempotency, record-level security, File Review 6 Block, At-Need 6 Blocks, closing
 a ticket. Synthetic data only."""
 import json
 from datetime import date, datetime, timedelta
@@ -168,8 +168,8 @@ def test_closing_a_ticket_requires_the_real_answers_and_reaches_the_sheet(setter
     assert draft["disposition"]["is_draft"]
     with pytest.raises(core.BookitError) as e:
         workflow.close_ticket(db, prog, ann, mine.id, {"close": True})
-    assert "sales result" in str(e.value) and "Evo 6 Block" in str(e.value)
-    with pytest.raises(core.BookitError) as e:                 # partial Evo 6 Block needs a reason
+    assert "sales result" in str(e.value) and "File Review 6 Block" in str(e.value)
+    with pytest.raises(core.BookitError) as e:                 # partial File Review 6 Block needs a reason
         workflow.close_ticket(db, prog, ann, mine.id, {"close": True, "sales_disposition": "no_sale",
                                                        "pta_status": "completed", "ppg_status": "provided",
                                                        "evo6_status": "partial", "final_notes": "Good visit"})
@@ -192,7 +192,7 @@ def test_closing_a_ticket_requires_the_real_answers_and_reaches_the_sheet(setter
     assert "record the sale first" in str(e.value)
 
 
-# ── D. Evo 6 Block ──────────────────────────────────────────────────────────
+# ── D. File Review 6 Block ──────────────────────────────────────────────────────────
 
 def test_d_evo6_block_one_parent_six_independent_contacts(setter, sample_advisor):
     db, org, prog, sheet, appts, mine, other = _team(setter, sample_advisor)
@@ -236,7 +236,7 @@ def test_d_evo6_block_one_parent_six_independent_contacts(setter, sample_advisor
     assert "template" in str(e.value)
     states = {c.id: c.enrollment_state for c in db.query(BookitReferralContact).filter_by(batch_id=b["id"])}
     assert list(states.values()).count("pending_approval") == 1                  # only that one moved
-    # a contact's booking/sale keeps the Evo 6 Block origin
+    # a contact's booking/sale keeps the File Review 6 Block origin
     att = workflow.attribution(db, prog, got["contacts"][1]["lead_id"], None)
     assert att["acquisition_source"] == "evo6_block" and att["referring_advisor"] == "Ann"
     # Bob can't open Ann's network
@@ -245,7 +245,33 @@ def test_d_evo6_block_one_parent_six_independent_contacts(setter, sample_advisor
         network._batch(db, prog, bob, b["id"])
 
 
-# ── F. ADD Lead ─────────────────────────────────────────────────────────────
+def test_a_6_block_stays_with_the_advisor_who_entered_it(setter, sample_advisor):
+    """Owner, Nov 26: the 6 Block names an advisor collects stay with that
+    advisor's login - even when the family it came from is reassigned, and
+    even when they are taken out of the rotation."""
+    db, org, prog, sheet, appts, mine, other = _team(setter, sample_advisor)
+    _live(db, prog)
+    ann = core.who(db, prog, _U("u-ann"), manager=False)
+    b = network.create_batch(db, prog, ann, {"idempotency_key": "keep-1", "origin_lead_id": mine.lead_id,
+                                             "source_appointment_id": mine.id})
+    c = network.save_contact(db, prog, ann, b["id"], {"first_name": "Kim", "last_name": "Test", "phone": "2145550311"})
+    # the family the network came from is handed to Bob, and Ann leaves the rotation
+    from app.models.program_models import HandoffSheetRow as R
+    for r in db.query(R).filter_by(organization_id=org.id, lead_id=mine.lead_id):
+        r.assigned_to = "Bob"
+    db.query(ProgramTeamMember).filter_by(organization_id=org.id, name="Ann").one().active = False
+    db.commit()
+    ann = core.who(db, prog, _U("u-ann"), manager=False)          # Ann logs in again
+    bob = core.who(db, prog, _U("u-bob"), manager=False)
+    assert network._batch(db, prog, ann, b["id"]).submitting_advisor == "Ann"
+    core.require_family(db, prog, ann, c["lead_id"])                # the name she collected is still hers
+    with pytest.raises(core.BookitError):
+        network._batch(db, prog, bob, b["id"])                      # Bob doesn't get her network
+    with pytest.raises(core.BookitError):
+        core.require_family(db, prog, bob, c["lead_id"])
+
+
+# ── F. At-Need 6 Block ─────────────────────────────────────────────────────────────
 
 def test_f_add_lead_case_is_human_led_and_private(setter, sample_advisor):
     db, org, prog, sheet, appts, mine, other = _team(setter, sample_advisor)

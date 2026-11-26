@@ -178,7 +178,7 @@ def my_day(db: Session, prog, w: Who, person: Optional[str] = None) -> Dict[str,
         bq = bq.filter(BookitReferralBatch.submitting_advisor == me)
     open_batches = bq.all()
     for b in open_batches[:20]:
-        act("evo6", "network", "referral_batch", b.id, "Evo 6 Block" if b.kind == "evo6" else "ADD family network",
+        act("evo6", "network", "referral_batch", b.id, "File Review 6 Block" if b.kind == "evo6" else "At-Need 6 Block network",
             "Family network %s" % b.collection_status.replace("_", " "), None, b.collection_status,
             "Add the family contacts", 5)
     cq = db.query(BookitAddCase).filter(BookitAddCase.organization_id == org, BookitAddCase.status != "resolved")

@@ -1,18 +1,18 @@
-"""Evo 6 Block family networks and ADD Lead family-care cases (s22-29).
+"""File Review 6 Block family networks and At-Need 6 Block family-care cases (s22-29).
 
 * One parent batch per family file review (idempotent); each contact is its
   own record with its own validation, eligibility and campaign state.
 * Six is the collection target, not a gate: fewer closes with a reason,
   more are welcome.
-* A contact becomes a family record (Lead) of its own - source "Evo 6 Block"
-  or "ADD Lead" - so it is worked, booked and sold like any family and its
+* A contact becomes a family record (Lead) of its own - source "File Review 6 Block"
+  or "At-Need 6 Block" - so it is worked, booked and sold like any family and its
   origin is never lost (workflow.attribution reads it back).
 * Duplicates are caught on normalized phone/email. An advisor is told only
   that the person is already on file - never whose they are.
 * Nothing is sent from here. Enrollment needs a person's documented outreach
   authorization, then management approval, and the campaign template for
   that kind must be approved by management (BookIT settings) before anyone
-  is enrolled. ADD Lead contacts never enter ordinary pre-planning campaigns.
+  is enrolled. At-Need 6 Block contacts never enter ordinary pre-planning campaigns.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ from app.services.bookit.core import (MANAGEMENT, BookitError, Who, audit, cfg, 
 from app.services.programs import restland_sheet as RS
 
 SOURCE = {"evo6": "evo6_block", "add": "add_lead"}
-LABEL = {"evo6": "Evo 6 Block", "add": "ADD Lead"}
+LABEL = {"evo6": "File Review 6 Block", "add": "At-Need 6 Block"}
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
 
 
@@ -335,7 +335,7 @@ def _active_elsewhere(db, org, c) -> bool:
     return bool(other or conv)
 
 
-# ── ADD Lead cases ─────────────────────────────────────────────────────────
+# ── At-Need 6 Block cases ─────────────────────────────────────────────────────────
 
 def _case(db, prog, w: Who, case_id: str) -> BookitAddCase:
     c = db.query(BookitAddCase).filter(BookitAddCase.organization_id == prog.organization_id,
@@ -409,8 +409,8 @@ def create_case(db: Session, prog, w: Who, body: Dict[str, Any]) -> Dict[str, An
     db.flush()
     audit(db, org, w, "add_case", c.id, "create", "assigned_advisor", None, assigned)
     if assigned:
-        notify(db, org, assigned, "add_assigned", "New ADD Lead assigned to you", ref_type="add_case", ref_id=c.id)
-    notify(db, org, MANAGEMENT, "add_new", "New ADD Lead awaiting review", ref_type="add_case", ref_id=c.id)
+        notify(db, org, assigned, "add_assigned", "New At-Need 6 Block assigned to you", ref_type="add_case", ref_id=c.id)
+    notify(db, org, MANAGEMENT, "add_new", "New At-Need 6 Block awaiting review", ref_type="add_case", ref_id=c.id)
     db.flush()
     return case_dict(c)
 
@@ -435,7 +435,7 @@ def update_case(db: Session, prog, w: Who, case_id: str, body: Dict[str, Any]) -
               body["assigned_advisor"])
         c.assigned_advisor = body["assigned_advisor"] or None
         if c.assigned_advisor:
-            notify(db, org, c.assigned_advisor, "add_assigned", "ADD Lead assigned to you", ref_type="add_case",
+            notify(db, org, c.assigned_advisor, "add_assigned", "At-Need 6 Block assigned to you", ref_type="add_case",
                    ref_id=c.id, dedupe="add_assigned:%s:%s" % (c.id, c.assigned_advisor))
     if "status" in body:
         st = body["status"]

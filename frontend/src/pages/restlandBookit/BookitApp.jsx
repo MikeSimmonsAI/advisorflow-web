@@ -15,11 +15,11 @@ export const useBk = () => useContext(Bk)
 // "Advisor workspace" then "Operations" in the side menu.
 const ADVISOR_NAV = [
   ['', 'My Day'], ['appointments', 'Appointments'], ['follow-ups', 'Follow-Ups'], ['families', 'My Families'],
-  ['evo6', 'Evo 6 Block'], ['calendar', 'Calendar'], ['performance', 'Performance'], ['notifications', 'Notifications'],
+  ['evo6', 'File Review 6 Block'], ['calendar', 'Calendar'], ['performance', 'Performance'], ['notifications', 'Notifications'],
   ['profile', 'My Profile'],
 ]
 const OPS_MANAGER = [['advisors', 'Team'], ['command', 'Management']]
-const OPS_NAV = [['add-leads', 'ADD Leads'], ['service', 'Service Requests'], ['sales', 'Sales & Revenue']]
+const OPS_NAV = [['add-leads', 'At-Need 6 Block'], ['service', 'Service Requests'], ['sales', 'Sales & Revenue']]
 // Management is one menu item; its four screens are tabs inside it.
 const MANAGEMENT = [['command', 'Command Center'], ['team', 'Advisor Management'], ['audit', 'Activity Audit'], ['settings', 'Settings']]
 const MANAGEMENT_KEYS = MANAGEMENT.map(([p]) => p)
@@ -29,13 +29,13 @@ const HEADINGS = {
   appointments: ['Appointments', 'Your appointments', 'Every advisor'],
   'follow-ups': ['Follow-Ups', 'Your follow-ups', 'Every advisor'],
   families: ['My Families', 'Your families', 'Every advisor'],
-  evo6: ['Evo 6 Block', 'Family networks from file reviews', 'Family networks from file reviews'],
+  evo6: ['File Review 6 Block', 'Family networks from file reviews', 'Family networks from file reviews'],
   calendar: ['Calendar', 'Central time', 'Central time · every advisor'],
   performance: ['Performance', 'Your numbers', 'Team and advisor numbers'],
   notifications: ['Notifications', 'Reminders and alerts', 'Reminders and alerts'],
   profile: ['My Profile', 'Your account', 'Your account'],
   advisors: ['Team', 'Advisors and their work', 'Advisors and their work'],
-  'add-leads': ['ADD Leads', 'At-death families', 'At-death families'],
+  'add-leads': ['At-Need 6 Block', 'At-need families', 'At-need families'],
   service: ['Service Requests', 'Family requests', 'Family requests'],
   sales: ['Sales & Revenue', 'Your recorded sales', 'Every advisor'],
   command: ['Command Center', 'Management', 'Management'],
@@ -44,7 +44,7 @@ const HEADINGS = {
   settings: ['Settings', 'Management', 'Management'],
 }
 const BOTTOM = [['', 'My Day', 'day'], ['appointments', 'Appointments', 'calendar'], ['follow-ups', 'Follow-Ups', 'repeat'],
-  ['evo6', 'Evo 6 Block', 'network']]
+  ['evo6', 'File Review 6 Block', 'network']]
 const BASE = '/program/restland-bookit'
 const POLL_MS = 30000
 
@@ -173,7 +173,7 @@ export default function BookitApp() {
             {[['families', 'My Families', 'family'], ['calendar', 'Calendar', 'calendar'], ['performance', 'Performance', 'chart'],
               ['notifications', 'Notifications', 'bell'], ['profile', 'My Profile', 'user'],
               ...(me?.me?.manager ? [['advisors', 'Team', 'users'], ['command', 'Management', 'shield']] : []),
-              ['add-leads', 'ADD Leads', 'heart'], ['service', 'Service Requests', 'wrench'], ['sales', 'Sales & Revenue', 'dollar']].map(([p, l, ic]) =>
+              ['add-leads', 'At-Need 6 Block', 'heart'], ['service', 'Service Requests', 'wrench'], ['sales', 'Sales & Revenue', 'dollar']].map(([p, l, ic]) =>
               <button key={p} onClick={() => go(p)}><Icon name={ic} />{l}</button>)}
             <button onClick={() => { setMore(false); setCopilot(true) }}><Icon name="spark" />Copilot</button>
             <button onClick={() => nav('/workspaces')}><Icon name="out" />Program Access</button>
