@@ -225,7 +225,10 @@ def ask(db: Session, prog, w: Who, user, question: str, history: Optional[List[D
                                  max_tokens=MAX_ANSWER_TOKENS, temperature=0.3)
     except G.AIRefused as e:
         raise BookitError("FSA Coach isn't available right now (%s)." % e, 503)
-    except Exception:                                    # noqa: BLE001 - provider error, already logged
+    except Exception as e:                               # noqa: BLE001 - provider error, already logged
+        if "insufficient_quota" in str(e) or "credit_balance_exhausted" in str(e):
+            raise BookitError("FSA Coach is paused: the EvoSys AI account is out of credit. "
+                              "Management needs to add credit before it can answer.", 503)
         raise BookitError("FSA Coach couldn't get an answer just now. Please try again.", 503)
     text = (resp.choices[0].message.content or "").strip() if getattr(resp, "choices", None) else ""
     usage = getattr(resp, "usage", None)

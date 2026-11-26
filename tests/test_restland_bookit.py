@@ -381,3 +381,23 @@ def test_fsa_coach_reads_only_your_families_and_counts_against_your_limit(setter
         coach.ask(db, prog, ann, _U("u-ann"), "Who should I call?")    # switched off
     rep = coach.usage_report(db, prog)
     assert rep["total"]["today"] == 1 and rep["people"][0]["name"] == "Ann" and rep["total"]["cost_month"] > 0
+
+
+def test_fsa_coach_says_plainly_when_the_ai_account_is_out_of_credit(setter, sample_advisor, monkeypatch):
+    from app.services.bookit import coach
+    db, org, prog, sheet, appts, mine, other = _team(setter, sample_advisor)
+    _live(db, prog)
+
+    class _Broke:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kw):
+                    raise RuntimeError("Error code: 429 - {'error': {'type': 'insufficient_quota', "
+                                       "'code': 'credit_balance_exhausted'}}")
+    monkeypatch.setattr(coach, "_get_client", lambda: _Broke())
+    ann = core.who(db, prog, _U("u-ann"), manager=False)
+    with pytest.raises(core.BookitError) as e:
+        coach.ask(db, prog, ann, _U("u-ann"), "Who should I call?")
+    assert "out of credit" in str(e.value)
+    assert coach.remaining(db, prog, ann)["used_today"] == 0          # a failed question isn't counted
