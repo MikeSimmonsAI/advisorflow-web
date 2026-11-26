@@ -51,7 +51,7 @@ def appointment(db: Session, prog, w: Who, appointment_id: str):
 
 def attribution(db: Session, prog, lead_id: Optional[str], appointment_id: Optional[str]) -> Dict[str, Any]:
     """Where this family came from - decided from the records, never from the
-    request. A referral or ADD Lead keeps that origin however they booked."""
+    request. A referral or At-Need 6 Block keeps that origin however they booked."""
     from app.models.bookit_models import BookitReferralBatch
     from app.models.models import Lead
     from app.models.program_models import HandoffSheetRow as R, ProgramSourceRecord
@@ -161,7 +161,7 @@ def disposition_dict(d: Optional[BookitDisposition]) -> Optional[Dict[str, Any]]
 def close_ticket(db: Session, prog, w: Who, appointment_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
     """Save the ticket as a draft, or close it (`close: true`). Closing an
     attended appointment requires the sales disposition, both paperwork
-    statuses, the Evo 6 Block status (with a reason when not complete) and a
+    statuses, the File Review 6 Block status (with a reason when not complete) and a
     follow-up date when one is needed. It never marks paperwork done because
     the family showed, never invents referrals, and never counts a pending
     decision as a sale."""
@@ -182,7 +182,7 @@ def close_ticket(db: Session, prog, w: Who, appointment_id: str, body: Dict[str,
         raise BookitError("Sales result isn't one of the choices.")
     ev = body.get("evo6_status", d.evo6_status)
     if ev and ev not in EVO6_COLLECTION:
-        raise BookitError("Evo 6 Block status isn't one of the choices.")
+        raise BookitError("File Review 6 Block status isn't one of the choices.")
     for k in ("pta_status", "ppg_status"):
         v = body.get(k, getattr(d, k))
         if v and v not in (PTA_STATUSES if k == "pta_status" else PPG_STATUSES):
@@ -209,9 +209,9 @@ def close_ticket(db: Session, prog, w: Who, appointment_id: str, body: Dict[str,
             if not d.ppg_status:
                 missing.append("the Planning Guide status")
             if not d.evo6_status:
-                missing.append("the Evo 6 Block status")
+                missing.append("the File Review 6 Block status")
             elif d.evo6_status != "complete" and not d.evo6_reason:
-                missing.append("why the Evo 6 Block isn't complete")
+                missing.append("why the File Review 6 Block isn't complete")
             if d.sales_disposition in ("pending_decision", "follow_up_needed") and not d.follow_up_on:
                 missing.append("the follow-up date")
             if d.sales_disposition == "closed_sale" and not _has_closed_sale(db, org, appointment_id):

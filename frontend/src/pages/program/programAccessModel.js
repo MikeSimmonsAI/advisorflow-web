@@ -81,7 +81,7 @@ const PROGRAMS = {
   // RESTLAND BOOKIT (Nov 25): each advisor's own workspace + the owner's Command Center.
   restland_bookit: { rank: 1, variant: 'office', symbol: 'B', kind: 'RESTLAND · POWERED BY EVOSYS PRO',
                      summary: 'Book It. Close It. Track It.',
-                     facts: ['My Day', 'Evo 6 Block', 'Sales'] },
+                     facts: ['My Day', 'File Review 6 Block', 'Sales'] },
   back_office: { rank: 8, variant: 'office', symbol: '▤', kind: 'BACK OFFICE',
                  summary: 'Sales pipeline, customers and brand operations',
                  facts: ['Pipeline', 'Customers', 'Brand ops'] },

@@ -275,7 +275,7 @@ def set_categories(body: Body, db: Session = Depends(get_db), user: User = Depen
     return {"categories": sales.categories(db, org)}
 
 
-# ── Evo 6 Block / family networks ───────────────────────────────────────────
+# ── File Review 6 Block / family networks ───────────────────────────────────────────
 
 @router.get("/networks")
 def list_networks(response: Response, kind: Optional[str] = None, db: Session = Depends(get_db),
@@ -328,7 +328,7 @@ def enrollment(contact_id: str, body: Body, db: Session = Depends(get_db), user:
     return _run(db, network.enroll, db, prog, w, contact_id, body.data.get("action") or "", body.data.get("reason"))
 
 
-# ── ADD Leads ───────────────────────────────────────────────────────────────
+# ── At-Need 6 Blocks ───────────────────────────────────────────────────────────────
 
 @router.get("/add-leads")
 def list_cases(response: Response, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
