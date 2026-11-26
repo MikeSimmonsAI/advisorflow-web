@@ -175,12 +175,12 @@ export default function BookitApp() {
               ...(me?.me?.manager ? [['advisors', 'Team', 'users'], ['command', 'Management', 'shield']] : []),
               ['add-leads', 'At-Need 6 Block', 'heart'], ['service', 'Service Requests', 'wrench'], ['sales', 'Sales & Revenue', 'dollar']].map(([p, l, ic]) =>
               <button key={p} onClick={() => go(p)}><Icon name={ic} />{l}</button>)}
-            <button onClick={() => { setMore(false); setCopilot(true) }}><Icon name="spark" />Copilot</button>
+            <button onClick={() => { setMore(false); setCopilot(true) }}><Icon name="spark" />FSA Coach</button>
             <button onClick={() => nav('/workspaces')}><Icon name="out" />Program Access</button>
           </div>
         </>}
-        {!copilot && <button className="bk-btn pri bk-fab" onClick={() => setCopilot(true)}><Icon name="spark" />Copilot</button>}
-        {copilot && <S.Copilot onClose={() => setCopilot(false)} />}
+        {!copilot && <button className="bk-btn pri bk-fab" onClick={() => setCopilot(true)}><Icon name="spark" />FSA Coach</button>}
+        {copilot && <S.Coach onClose={() => setCopilot(false)} />}
         <Toast toast={toast} />
       </div>
     </Bk.Provider>

@@ -472,6 +472,41 @@ def audit_log(response: Response, entity: Optional[str] = None, entity_id: Optio
                       for a in q.order_by(A.at.desc()).limit(300)]}
 
 
+# ── FSA Coach ───────────────────────────────────────────────────────────────
+
+@router.get("/coach")
+def coach_status(response: Response, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    _nostore(response)
+    from app.services.bookit import coach
+    prog, w = _ctx(db, user)
+    return coach.remaining(db, prog, w)
+
+
+@router.post("/coach")
+def coach_ask(body: Body, response: Response, db: Session = Depends(get_db),
+              user: User = Depends(require_tenant_user)):
+    _nostore(response)
+    from app.services.bookit import coach
+    prog, w = _ctx(db, user)
+    return _run(db, coach.ask, db, prog, w, user, body.data.get("question") or "", body.data.get("history") or [])
+
+
+@router.get("/coach/usage")
+def coach_usage(response: Response, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    _nostore(response)
+    from app.services.bookit import coach
+    prog, w = _ctx(db, user)
+    _mgr(w)
+    return coach.usage_report(db, prog)
+
+
+@router.patch("/coach/settings")
+def coach_settings(body: Body, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services.bookit import coach
+    prog, w = _ctx(db, user)
+    return _run(db, coach.save_settings, db, prog, w, body.data)
+
+
 @router.get("/settings")
 def get_settings(response: Response, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     _nostore(response)

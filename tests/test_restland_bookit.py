@@ -315,3 +315,69 @@ def test_service_request_needs_a_resolution_to_close(setter, sample_advisor):
     assert done["status"] == "resolved"
     assert insights.window("custom", "2026-11-30", "2026-11-01")[0] == date(2026, 11, 1)
     assert insights.rate(0, 0) is None
+
+
+# ── FSA Coach (owner, Nov 26) ───────────────────────────────────────────────
+
+class _FakeAI:
+    """Stands in for the AI provider; records what it was sent."""
+    def __init__(self):
+        self.sent = []
+        outer = self
+
+        class _C:
+            def create(self, model, messages, **kw):
+                outer.sent.append({"model": model, "messages": messages, **kw})
+
+                class _M:
+                    content = "Call them back this afternoon."
+
+                class _Ch:
+                    message = _M()
+
+                class _U:
+                    prompt_tokens, completion_tokens = 1200, 80
+
+                class _R:
+                    choices, usage = [_Ch()], _U()
+                return _R()
+
+        class _Chat:
+            completions = _C()
+        self.chat = _Chat()
+
+
+def test_fsa_coach_reads_only_your_families_and_counts_against_your_limit(setter, sample_advisor, monkeypatch):
+    from app.services.bookit import coach
+    from app.models.models import Lead
+    db, org, prog, sheet, appts, mine, other = _team(setter, sample_advisor)
+    _live(db, prog)
+    fake = _FakeAI()
+    monkeypatch.setattr(coach, "_get_client", lambda: fake)
+    monkeypatch.setenv("AI_MANUAL_ACTIONS_ENABLED", "true")
+    ann = core.who(db, prog, _U("u-ann"), manager=False)
+    my_name = db.query(Lead).get(mine.lead_id).first_name
+    their_name = db.query(Lead).get(other.lead_id).first_name
+    out = coach.ask(db, prog, ann, _U("u-ann"), "What should I say to %s and %s?" % (my_name, their_name))
+    assert out["answer"].startswith("Call them back")
+    sent = "\n".join(m["content"] for m in fake.sent[0]["messages"])
+    assert fake.sent[0]["model"] == "gpt-4o-mini" and fake.sent[0]["max_tokens"] == coach.MAX_ANSWER_TOKENS
+    assert "FAMILY DETAIL: %s" % my_name in sent                  # her family, in detail
+    assert "FAMILY DETAIL: %s" % their_name not in sent           # Bob's family never reaches the AI
+    # counted (tokens only - the question isn't stored)
+    from app.models.bookit_models import BookitAudit
+    rows = db.query(BookitAudit).filter_by(organization_id=org.id, entity="coach").all()
+    assert len(rows) == 1 and rows[0].new_value == "1200/80" and their_name not in (rows[0].new_value or "")
+    # the per-person limit holds
+    boss = core.who(db, prog, _U("owner"), manager=True)
+    coach.save_settings(db, prog, boss, {"per_person_day": 1})
+    with pytest.raises(core.BookitError) as e:
+        coach.ask(db, prog, ann, _U("u-ann"), "Who should I call?")
+    assert e.value.status == 429 and len(fake.sent) == 1
+    with pytest.raises(core.BookitError):
+        coach.save_settings(db, prog, ann, {"per_person_day": 99})     # advisors can't raise it
+    coach.save_settings(db, prog, boss, {"per_person_day": 5, "enabled": False})
+    with pytest.raises(core.BookitError):
+        coach.ask(db, prog, ann, _U("u-ann"), "Who should I call?")    # switched off
+    rep = coach.usage_report(db, prog)
+    assert rep["total"]["today"] == 1 and rep["people"][0]["name"] == "Ann" and rep["total"]["cost_month"] > 0
