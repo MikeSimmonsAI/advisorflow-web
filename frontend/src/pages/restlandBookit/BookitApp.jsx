@@ -11,35 +11,37 @@ import * as S from './screens'
 export const Bk = createContext(null)
 export const useBk = () => useContext(Bk)
 
-// Order and names follow the owner's mockup (restland-advisor-portal.html, Nov 25):
-// My Day, Appointments, Follow-Ups, My Families, 6 Block, Calendar, Performance,
-// Notifications, My Profile, Management. The directive's extra screens follow.
+// Layout of the owner's preview (Restland-BookIT-Preview.html, Nov 26):
+// "Advisor workspace" then "Operations" in the side menu.
 const ADVISOR_NAV = [
   ['', 'My Day'], ['appointments', 'Appointments'], ['follow-ups', 'Follow-Ups'], ['families', 'My Families'],
   ['evo6', 'Evo 6 Block'], ['calendar', 'Calendar'], ['performance', 'Performance'], ['notifications', 'Notifications'],
   ['profile', 'My Profile'],
 ]
-const EXTRA_NAV = [['add-leads', 'ADD Leads'], ['service', 'Service Requests'], ['sales', 'Sales & Revenue']]
+const OPS_MANAGER = [['advisors', 'Team'], ['command', 'Management']]
+const OPS_NAV = [['add-leads', 'ADD Leads'], ['service', 'Service Requests'], ['sales', 'Sales & Revenue']]
 // Management is one menu item; its four screens are tabs inside it.
 const MANAGEMENT = [['command', 'Command Center'], ['team', 'Advisor Management'], ['audit', 'Activity Audit'], ['settings', 'Settings']]
 const MANAGEMENT_KEYS = MANAGEMENT.map(([p]) => p)
-// Page headings: [advisor title, manager title, line under it]
+// [title, line for an advisor, line for a manager]
 const HEADINGS = {
-  appointments: ['My Appointments', 'Appointments', 'Assigned records only', 'Every advisor'],
-  'follow-ups': ['My Follow-Ups', 'Follow-Ups', 'Assigned records only', 'Every advisor'],
-  families: ['My Families', 'Families', 'Assigned families only', 'Every advisor'],
-  evo6: ['My Evo 6 Block', 'Evo 6 Block', 'Referral intake', 'Referral intake · every advisor'],
-  calendar: ['My Calendar', 'Calendar', 'Central time', 'Central time · every advisor'],
-  performance: ['My Performance', 'Performance', 'Personal metrics only', 'Team and advisor metrics'],
-  notifications: ['Notifications', 'Notifications', 'Reminders and alerts', 'Reminders and alerts'],
-  profile: ['My Profile', 'My Profile', 'Individual account', 'Individual account'],
-  'add-leads': ['ADD Leads', 'ADD Leads', 'At-death families', 'At-death families · every advisor'],
-  service: ['Service Requests', 'Service Requests', 'Assigned requests only', 'Every advisor'],
-  sales: ['Sales & Revenue', 'Sales & Revenue', 'Your recorded sales', 'Every advisor'],
-  command: ['Restland Command Center', 'Restland Command Center', 'Authorized managers only', 'Authorized managers only'],
-  team: ['Restland Command Center', 'Restland Command Center', 'Authorized managers only', 'Authorized managers only'],
-  audit: ['Restland Command Center', 'Restland Command Center', 'Authorized managers only', 'Authorized managers only'],
-  settings: ['Restland Command Center', 'Restland Command Center', 'Authorized managers only', 'Authorized managers only'],
+  '': ['My Day', 'Your day', 'The whole team'],
+  appointments: ['Appointments', 'Your appointments', 'Every advisor'],
+  'follow-ups': ['Follow-Ups', 'Your follow-ups', 'Every advisor'],
+  families: ['My Families', 'Your families', 'Every advisor'],
+  evo6: ['Evo 6 Block', 'Family networks from file reviews', 'Family networks from file reviews'],
+  calendar: ['Calendar', 'Central time', 'Central time · every advisor'],
+  performance: ['Performance', 'Your numbers', 'Team and advisor numbers'],
+  notifications: ['Notifications', 'Reminders and alerts', 'Reminders and alerts'],
+  profile: ['My Profile', 'Your account', 'Your account'],
+  advisors: ['Team', 'Advisors and their work', 'Advisors and their work'],
+  'add-leads': ['ADD Leads', 'At-death families', 'At-death families'],
+  service: ['Service Requests', 'Family requests', 'Family requests'],
+  sales: ['Sales & Revenue', 'Your recorded sales', 'Every advisor'],
+  command: ['Command Center', 'Management', 'Management'],
+  team: ['Advisor Management', 'Management', 'Management'],
+  audit: ['Activity Audit', 'Management', 'Management'],
+  settings: ['Settings', 'Management', 'Management'],
 }
 const BOTTOM = [['', 'My Day', 'day'], ['appointments', 'Appointments', 'calendar'], ['follow-ups', 'Follow-Ups', 'repeat'],
   ['evo6', 'Evo 6 Block', 'network']]
@@ -58,6 +60,7 @@ export default function BookitApp() {
   const [fresh, setFresh] = useState({ at: null, ok: true })
   const [tick, setTick] = useState(0)                         // bump to refresh every screen
   const toastT = useRef(null)
+  const [toolbar, setToolbar] = useState(null)               // where screens put their filters (top right)
 
   useEffect(() => { document.title = 'Restland BookIT' }, [])
   useEffect(() => {
@@ -87,7 +90,7 @@ export default function BookitApp() {
   const manager = !!me?.me?.manager
   const head = HEADINGS[sub]
   const inManagement = MANAGEMENT_KEYS.includes(sub)
-  const ctx = useMemo(() => ({ me, say, refresh, tick, go, base: BASE }), [me, say, refresh, tick, go])
+  const ctx = useMemo(() => ({ me, say, refresh, tick, go, base: BASE, toolbar }), [me, say, refresh, tick, go, toolbar])
 
   if (err) {
     return (
@@ -101,34 +104,41 @@ export default function BookitApp() {
     <Bk.Provider value={ctx}>
       <div className="bk">
         <header className="bk-top">
-          <div className="bk-top-brand"><b>RESTLAND</b><small>FAMILY SERVICE ADVISOR PORTAL</small></div>
+          <div className="bk-top-brand">Restland <b>BookIT</b></div>
           <S.Search />
           <span className={'bk-status hide-m' + (fresh.ok ? '' : ' stale')} title="When BookIT last checked for updates">
             <i />{fresh.ok ? (fresh.at ? 'Updated ' + fresh.at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : 'Loading') : 'Reconnecting…'}
           </span>
           <button className="bk-iconbtn" onClick={() => go('notifications')} aria-label="Notifications"><Icon name="bell" />{unread > 0 && <span className="dot" />}</button>
-          <div className="bk-top-who" title={me?.me?.name || ''}>{me?.me?.name || ''}</div>
+          <span className="bk-top-who">{me?.me?.name || ''}{me && !me.live_for_team ? ' · Owner preview' : ''}</span>
         </header>
         <aside className="bk-rail" aria-label="BookIT navigation">
+          <div className="caption">Advisor workspace</div>
           {ADVISOR_NAV.map(([p, l]) => (
             <button key={p} className={'bk-nav' + (sub === p ? ' on' : '')} onClick={() => go(p)} aria-current={sub === p ? 'page' : undefined}>
               <span>{l}</span>{p === 'notifications' && unread > 0 && <span className="badge err">{unread}</span>}
             </button>
           ))}
-          {manager && <button className={'bk-nav' + (inManagement ? ' on' : '')} onClick={() => go('command')} aria-current={inManagement ? 'page' : undefined}><span>Management</span></button>}
-          <div className="sep" />
-          {EXTRA_NAV.map(([p, l]) => (
+          <div className="caption">Operations</div>
+          {(manager ? OPS_MANAGER : []).map(([p, l]) => {
+            const on = p === 'command' ? inManagement : sub === p
+            return <button key={p} className={'bk-nav' + (on ? ' on' : '')} onClick={() => go(p)} aria-current={on ? 'page' : undefined}><span>{l}</span></button>
+          })}
+          {OPS_NAV.map(([p, l]) => (
             <button key={p} className={'bk-nav' + (sub === p ? ' on' : '')} onClick={() => go(p)} aria-current={sub === p ? 'page' : undefined}><span>{l}</span></button>
           ))}
           <div className="grow" />
           <button className="bk-nav" onClick={() => nav('/workspaces')}><span>Program Access</span></button>
-          <div className="bk-powered">Restland BookIT · Powered by EvoSys Pro</div>
+          <div className="bk-powered">Powered by EvoSys Pro</div>
         </aside>
         <main className="bk-main">
           <div className="bk-page">
-            {me && head && <div className="bk-title"><h1>{manager ? head[1] : head[0]}</h1><p><small>{manager ? head[3] : head[2]}</small></p></div>}
+            {me && head && <div className="bk-toolbar">
+              <div><p className="muted">Restland · {manager ? head[2] : head[1]}</p><h1>{head[0]}</h1></div>
+              <div className="bk-toolbar-slot" ref={setToolbar} />
+            </div>}
             {me && manager && inManagement && <div className="bk-subtabs" role="tablist">{MANAGEMENT.map(([p, l]) =>
-              <button key={p} role="tab" aria-selected={sub === p} className={sub === p ? 'on' : ''} onClick={() => go(p)}>{l}</button>)}</div>}
+              <button key={p} role="tab" aria-selected={sub === p} className={'bk-btn' + (sub === p ? ' pri' : '')} onClick={() => go(p)}>{l}</button>)}</div>}
             {!me ? <div className="bk-card"><div className="bk-skel" /><div className="bk-skel" style={{ width: '70%' }} /></div> : (
               <Routes>
                 <Route index element={<S.MyDay />} />
@@ -143,6 +153,7 @@ export default function BookitApp() {
                 <Route path="performance" element={<S.Performance />} />
                 <Route path="notifications" element={<S.Notifications onRead={() => setUnread(0)} />} />
                 <Route path="profile" element={<S.Profile />} />
+                {me.me.manager && <Route path="advisors" element={<S.Advisors />} />}
                 {me.me.manager && <Route path="command" element={<S.Command />} />}
                 {me.me.manager && <Route path="team" element={<S.Team />} />}
                 {me.me.manager && <Route path="audit" element={<S.Audit />} />}
@@ -161,7 +172,7 @@ export default function BookitApp() {
           <div className="bk-more" role="dialog" aria-label="More">
             {[['families', 'My Families', 'family'], ['calendar', 'Calendar', 'calendar'], ['performance', 'Performance', 'chart'],
               ['notifications', 'Notifications', 'bell'], ['profile', 'My Profile', 'user'],
-              ...(me?.me?.manager ? [['command', 'Management', 'shield']] : []),
+              ...(me?.me?.manager ? [['advisors', 'Team', 'users'], ['command', 'Management', 'shield']] : []),
               ['add-leads', 'ADD Leads', 'heart'], ['service', 'Service Requests', 'wrench'], ['sales', 'Sales & Revenue', 'dollar']].map(([p, l, ic]) =>
               <button key={p} onClick={() => go(p)}><Icon name={ic} />{l}</button>)}
             <button onClick={() => { setMore(false); setCopilot(true) }}><Icon name="spark" />Copilot</button>

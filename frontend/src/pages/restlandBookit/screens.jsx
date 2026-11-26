@@ -1,6 +1,7 @@
 // Restland BookIT — screens. Data comes only from /restland-bookit/*, which is
 // already scoped on the server to what this login may see.
 import React, { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { api } from '../../api/client'
 import { useBk } from './BookitApp'
 import { AreaChart, Bars, Empty, Icon, Kpi, Network, Skeleton, fmtDate, fmtStamp, fmtTime, label, newKey, num, pct, usd } from './ui'
@@ -65,14 +66,43 @@ function openParam() { try { return new URLSearchParams(window.location.search).
 // ── My Day ──────────────────────────────────────────────────────────────────
 
 
-function greeting() {
-  const h = Number(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hour12: false }))
-  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
+// Filters and buttons go top right, beside the page title (owner's preview).
+export function Toolbar({ children }) {
+  const { toolbar } = useBk()
+  return toolbar ? createPortal(<div className="bk-actions">{children}</div>, toolbar) : <div className="bk-bar">{children}</div>
 }
 
-// My Day — laid out like the owner's mockup: greeting, six numbers, the
-// follow-up alert, today's appointments, the follow-up queue, then the show
-// rate. Every number is real (/my-day, /work, /performance).
+const isDue = s => /^(Due|Needs|Overdue)/.test(s || '')
+export function Pill({ children }) { return <span className={'bk-pill' + (isDue(children) ? ' due' : /^No-?Show|Cancel/.test(children || '') ? ' err' : '')}>{children}</span> }
+
+// One appointment line: "Wed, Nov 25 · 10:00 AM" / family / how · advisor, then status + Open.
+export function ApptRow({ a, onOpen, showWho }) {
+  return (
+    <div className="bk-line">
+      <div style={{ minWidth: 0 }}><div className="time">{fmtDate(a.date, { weekday: 'short', month: 'short', day: 'numeric' })} · {fmtTime(a.time)}</div>
+        <strong>{a.family}</strong><p className="muted">{a.how}{showWho && a.assigned ? ' · ' + a.assigned : ''}{a.saving ? ' · Saving…' : ''}</p></div>
+      <div className="bk-actions"><Pill>{a.outcome || a.status}</Pill><button className="bk-btn" onClick={() => onOpen(a.id)}>Open</button></div>
+    </div>
+  )
+}
+
+// One follow-up: family + status, why · advisor, what they said, Review follow-up.
+export function FuRow({ f, onOpen, showWho, t }) {
+  const late = f.open && f.follow_up_on && f.follow_up_on < t
+  const st = !f.open ? (f.status || 'Done') : late ? 'Overdue' : f.due_now ? 'Due now'
+    : (f.why || '').startsWith('Needs a person') ? 'Needs a person' : f.follow_up_on ? 'Follow up ' + fmtDate(f.follow_up_on, { month: 'short', day: 'numeric' }) : 'Waiting'
+  return (
+    <div className="bk-line col">
+      <div className="bk-line flat"><strong>{f.family}</strong><Pill>{st}</Pill></div>
+      <p className="muted">{(f.why || 'Follow-up').split('\n')[0]}{showWho && f.assigned ? ' · ' + f.assigned : ''}</p>
+      {f.said && <p className="said">{f.said.length > 220 ? f.said.slice(0, 220) + '…' : f.said}</p>}
+      <div className="bk-actions"><button className="bk-btn" onClick={() => onOpen(f.id)}>Review follow-up</button></div>
+    </div>
+  )
+}
+
+// My Day — the owner's preview: a summary banner, four numbers, then today's
+// appointments beside the follow-up queue. Every number is real.
 export function MyDay() {
   const { me, go } = useBk()
   const [person, setPerson] = useState('')
@@ -81,16 +111,18 @@ export function MyDay() {
   const [w] = useData(R + '/work')
   const [perf] = useData(R + '/performance?range=this_month' + (pq ? '&' + pq : ''), [person])
   const [panel, setPanel] = useState(null)
-  if (!d || !w) return <div className="bk-card"><Skeleton rows={6} /></div>
+  const picker = me.me.manager && <Toolbar><select value={person} onChange={e => setPerson(e.target.value)} aria-label="Advisor">
+    <option value="">All advisors</option>{(me.team || []).map(n => <option key={n}>{n}</option>)}</select></Toolbar>
+  if (!d || !w) return <>{picker}<div className="bk-card"><Skeleton rows={6} /></div></>
   const t = today()
   const k = d.kpis, m = perf?.metrics || {}
   const mine = x => !person || x.assigned === person
-  const first = person ? person.split(' ')[0] : (me.me.name || '').split(' ')[0]
   const appts = w.appointments.filter(a => mine(a) && a.date === t && !String(a.status).startsWith('Cancel'))
     .sort((x, y) => String(x.time).localeCompare(String(y.time)))
-  const queue = w.follow_ups.filter(f => mine(f) && f.open && (f.due_now || (f.follow_up_on && f.follow_up_on <= t)))
+  const openFu = w.follow_ups.filter(f => mine(f) && f.open)
+  const queue = openFu.filter(f => f.due_now || (f.follow_up_on && f.follow_up_on <= t) || (f.why || '').startsWith('Needs a person'))
     .sort((x, y) => String(x.follow_up_on || '0').localeCompare(String(y.follow_up_on || '0')))
-  const due = k.follow_ups_due
+  const openToday = appts.filter(a => /^(Booked|Confirmed)/.test(a.status) && !a.outcome).length
   const pick = a => {
     if (a.ref_type === 'appointment') setPanel({ type: 'appt', id: a.ref_id, close: a.kind === 'missing_outcome' })
     else if (a.ref_type === 'follow_up') setPanel({ type: 'fu', id: a.ref_id })
@@ -99,63 +131,36 @@ export function MyDay() {
     else if (a.ref_type === 'service_request') go('service?open=' + a.ref_id)
     else if (a.ref_type === 'sale') go('sales?open=' + a.ref_id)
   }
-  const fuPill = f => {
-    if (f.follow_up_on && f.follow_up_on < t) return <span className="bk-pill warn">Overdue</span>
-    if (f.follow_up_on === t || f.due_now) return <span className="bk-pill">Due today</span>
-    return <span className="bk-pill">Upcoming</span>
-  }
   const other = d.actions.filter(a => !['appointment', 'follow_up'].includes(a.kind))
+  const who = me.me.manager && !person
   return (
     <div>
-      <div className="bk-title"><h1>{greeting()}{first && first !== 'Team' ? ', ' + first : ''}</h1>
-        <p><small>{fmtDate(d.date, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}{me.me.manager && !person ? ' · the whole team' : ''}</small></p></div>
-      {me.me.manager && <div className="bk-bar"><span className="faint">Viewing</span>
-        <select value={person} onChange={e => setPerson(e.target.value)} aria-label="Whose day">
-          <option value="">The whole team</option>{(me.team || []).map(n => <option key={n}>{n}</option>)}</select></div>}
+      {picker}
+      <div className="bk-hero">
+        <h2>{fmtDate(d.date, { weekday: 'long', month: 'long', day: 'numeric' })} · Central time</h2>
+        <p>{num(openToday)} open appointment{openToday === 1 ? '' : 's'} today · {num(queue.length)} follow-up{queue.length === 1 ? '' : 's'} need attention{k.follow_ups_overdue ? ' (' + num(k.follow_ups_overdue) + ' overdue)' : ''}</p>
+      </div>
       <div className="bk-metrics">
-        <Kpi l="Appointments today" v={num(k.appointments_today)} onClick={() => go('appointments')} />
-        <Kpi l="Upcoming" v={num(k.upcoming_appointments)} onClick={() => go('appointments')} />
-        <Kpi l="Follow-ups due" v={num(due)} onClick={() => go('follow-ups')} />
-        <Kpi l="Completed visits" v={perf ? num(m.attended) : '…'} s="This month" onClick={() => go('performance')} />
-        <Kpi l="Families referred" v={perf ? num(m.contacts_collected) : '…'} s="This month" onClick={() => go('evo6')} />
-        <Kpi l="Sales recorded" v={perf ? num(m.closed_contracts) : '…'} s="This month" onClick={() => go('sales')} />
+        <Kpi l="Booked" v={num(k.upcoming_appointments)} s="Upcoming" onClick={() => go('appointments')} />
+        <Kpi l="Showed" v={perf ? num(m.attended) : '…'} s="This month" onClick={() => go('performance')} />
+        <Kpi l="Follow-ups open" v={num(openFu.length)} onClick={() => go('follow-ups')} />
+        <Kpi l="Contracts closed" v={perf ? num(m.closed_contracts) : '…'} s="This month" onClick={() => go('sales')} />
       </div>
-      {due > 0 && <div className="bk-alert" style={{ margin: '15px 0' }}><b>{num(due)}</b> {due === 1 ? 'family requires' : 'families require'} follow-up{k.follow_ups_overdue ? ' (' + num(k.follow_ups_overdue) + ' overdue)' : ''} · Work oldest due first.</div>}
-      <div className="bk-card" style={{ marginTop: due > 0 ? 0 : 15 }}>
-        <h2>Today’s appointments</h2>
-        {appts.length === 0 ? <Empty>No appointments today.</Empty> : appts.map(a => (
-          <div key={a.id} className="bk-line click" onClick={() => setPanel({ type: 'appt', id: a.id })} role="button" tabIndex="0"
-               onKeyDown={e => e.key === 'Enter' && setPanel({ type: 'appt', id: a.id })}>
-            <div><b>{fmtTime(a.time)} · {a.family}</b><br /><small>45 min · {a.how}{me.me.manager && a.assigned ? ' · ' + a.assigned : ''}</small></div>
-            <span className={'bk-pill' + (String(a.outcome || a.status).startsWith('No-Show') ? ' err' : '')}>{a.outcome || a.status}</span>
-          </div>))}
+      <div className="bk-split">
+        <section className="bk-card"><h2>Today’s appointments</h2>
+          {appts.length === 0 ? <p className="bk-line muted">No appointments today.</p>
+            : appts.map(a => <ApptRow key={a.id} a={a} showWho={who} onOpen={id => setPanel({ type: 'appt', id })} />)}</section>
+        <section className="bk-card"><h2>Follow-up queue<small><button className="bk-btn ghost" onClick={() => go('follow-ups')}>See all {num(openFu.length)}</button></small></h2>
+          {queue.length === 0 ? <p className="bk-line muted">No follow-ups need attention.</p>
+            : queue.slice(0, 15).map(f => <FuRow key={f.id} f={f} t={t} showWho={who} onOpen={id => setPanel({ type: 'fu', id })} />)}
+          {queue.length > 15 && <p className="bk-line muted">{queue.length - 15} more in Follow-Ups.</p>}</section>
       </div>
-      <div className="bk-card" style={{ marginTop: 15 }}>
-        <h2>{me.me.manager && !person ? 'Follow-up queue' : 'My follow-up queue'}<small><button className="bk-btn ghost" onClick={() => go('follow-ups')}>See all</button></small></h2>
-        {queue.length === 0 ? <Empty>No follow-ups due.</Empty> : queue.slice(0, 12).map(f => (
-          <div key={f.id} className="bk-line click" onClick={() => setPanel({ type: 'fu', id: f.id })} role="button" tabIndex="0"
-               onKeyDown={e => e.key === 'Enter' && setPanel({ type: 'fu', id: f.id })}>
-            <div style={{ minWidth: 0 }}><b>{f.family}</b><br /><small>{(f.why || 'Follow-up').split('\n')[0]}{f.follow_up_on ? ' · ' + fmtDate(f.follow_up_on, { month: 'short', day: 'numeric' }) : ''}{me.me.manager && f.assigned ? ' · ' + f.assigned : ''}</small></div>
-            {fuPill(f)}
-          </div>))}
-        {queue.length > 12 && <p className="faint" style={{ margin: '10px 0 0' }}>{queue.length - 12} more in Follow-Ups.</p>}
-      </div>
-      <div className="bk-card" style={{ marginTop: 15 }}>
-        <h2>{me.me.manager && !person ? 'Team performance' : 'My performance'}</h2>
-        {!perf ? <Skeleton rows={2} /> : m.show_rate === null || m.show_rate === undefined
-          ? <p className="faint">No finished appointments yet this month, so there's no show rate to show.</p>
-          : <><h3 style={{ margin: '0 0 4px' }}>{pct(m.show_rate)} show rate</h3>
-            <small className="faint">This month · {num(m.attended)} showed, {num(m.no_shows)} no-show</small>
-            <div className="bk-meter"><i style={{ width: Math.round((m.show_rate || 0) * 100) + '%' }} /></div></>}
-      </div>
-      {other.length > 0 && <div className="bk-card" style={{ marginTop: 15 }}>
-        <h2>Also needs attention<small>{other.length}</small></h2>
+      {other.length > 0 && <section className="bk-card" style={{ marginTop: 16 }}><h2>Also needs attention<small>{other.length}</small></h2>
         {other.slice(0, 20).map((a, i) => (
-          <div key={i} className="bk-line click" onClick={() => pick(a)} role="button" tabIndex="0" onKeyDown={e => e.key === 'Enter' && pick(a)}>
-            <div style={{ minWidth: 0 }}><b>{a.name}</b><br /><small>{a.reason} · {a.next}</small></div>
-            <span className={'bk-pill' + (['add_lead', 'service'].includes(a.kind) ? ' err' : ['missing_outcome', 'sale_amounts'].includes(a.kind) ? ' warn' : '')}>{a.status}</span>
-          </div>))}
-      </div>}
+          <div key={i} className="bk-line">
+            <div style={{ minWidth: 0 }}><strong>{a.name}</strong><p className="muted">{a.reason} · {a.next}</p></div>
+            <div className="bk-actions"><Pill>{a.status}</Pill><button className="bk-btn" onClick={() => pick(a)}>Open</button></div>
+          </div>))}</section>}
       {panel?.type === 'appt' && <AppointmentPanel id={panel.id} startClose={panel.close} onClose={() => setPanel(null)} />}
       {panel?.type === 'fu' && <FollowUpPanel id={panel.id} onClose={() => setPanel(null)} />}
     </div>
@@ -194,7 +199,7 @@ export function Appointments({ initialView = 'list' }) {
   if (when === 'past') rows = [...rows].reverse()
   return (
     <div>
-      <div className="bk-bar">
+      <Toolbar>
         <div className="bk-seg">{[['upcoming', 'Upcoming'], ['today', 'Today'], ['needs_outcome', 'Needs outcome'], ['past', 'Past'], ['all', 'All']].map(([k, l]) =>
           <button key={k} className={when === k ? 'on' : ''} onClick={() => setWhen(k)}>{l}</button>)}</div>
         <select value={status} onChange={e => setStatus(e.target.value)} aria-label="Status"><option value="">Any status</option>
@@ -204,16 +209,11 @@ export function Appointments({ initialView = 'list' }) {
         <input placeholder="Family" value={q} onChange={e => setQ(e.target.value)} aria-label="Find a family" />
         <div className="bk-seg" style={{ marginLeft: 'auto' }}><button className={view === 'list' ? 'on' : ''} onClick={() => setView('list')}>List</button>
           <button className={view === 'cal' ? 'on' : ''} onClick={() => setView('cal')}>Calendar</button></div>
-      </div>
+      </Toolbar>
       {view === 'cal' ? <Week rows={w.appointments} onPick={setPanel} /> : (
-        <div className="bk-card">{rows.length === 0 ? <Empty>No appointments here.</Empty> :
-          <div className="bk-list">{rows.map(a => (
-            <div key={a.id} className="bk-row" onClick={() => setPanel(a.id)} role="button" tabIndex="0" onKeyDown={e => e.key === 'Enter' && setPanel(a.id)}>
-              <div className="ic"><Icon name={a.how?.startsWith('Phone') || a.how?.startsWith('Video') ? 'phone' : 'calendar'} /></div>
-              <div style={{ minWidth: 0 }}><div className="t">{a.family}</div>
-                <div className="d">{fmtDate(a.date)} · {fmtTime(a.time)} · {a.how}{me.me.manager && a.assigned ? ' · ' + a.assigned : ''}</div></div>
-              <div className="r">{statusBadge(a.outcome || a.status)}{a.saving && <span className="faint">Saving…</span>}</div>
-            </div>))}</div>}</div>)}
+        <section className="bk-card"><h2>Appointment schedule · CT<small>{rows.length}</small></h2>
+          {rows.length === 0 ? <p className="bk-line muted">No appointments match these filters.</p>
+            : rows.map(a => <ApptRow key={a.id} a={a} showWho={me.me.manager} onOpen={setPanel} />)}</section>)}
       {panel && <AppointmentPanel id={panel} onClose={() => setPanel(null)} />}
     </div>
   )
@@ -453,21 +453,12 @@ export function FollowUps() {
   })
   return (
     <div>
-      <div className="bk-bar"><div className="bk-seg">{FU_VIEWS.map(([k, l]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{l}</button>)}</div>
+      <Toolbar><div className="bk-seg">{FU_VIEWS.map(([k, l]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{l}</button>)}</div>
         {me.me.manager && <select value={who} onChange={e => setWho(e.target.value)} aria-label="Advisor"><option value="">Every advisor</option>{(me.team || []).map(n => <option key={n}>{n}</option>)}</select>}
-        <span className="faint" style={{ marginLeft: 'auto' }}>{rows.length} shown</span></div>
-      <div className="bk-card">{rows.length === 0 ? <Empty>Nothing in this view.</Empty> :
-        <div className="bk-list">{rows.map(f => {
-          const late = f.open && f.follow_up_on && f.follow_up_on < t
-          return (
-            <div key={f.id} className="bk-row" onClick={() => setPanel(f.id)} role="button" tabIndex="0" onKeyDown={e => e.key === 'Enter' && setPanel(f.id)}>
-              <div className={'ic' + (late ? ' warn' : '')}><Icon name={(f.why || '').startsWith('Asked for a call back') ? 'phone' : 'repeat'} /></div>
-              <div style={{ minWidth: 0 }}><div className="t">{f.family}</div><div className="d">{(f.why || '').split('\n')[0]}</div>
-                <div className="d">“{(f.said || '').slice(0, 120)}”</div></div>
-              <div className="r"><span className={'badge' + (late ? ' warn' : f.due_now ? ' gold' : !f.open ? ' ok' : '')}>{late ? 'Overdue' : f.due_now ? 'Due now' : !f.open ? f.status : fmtDate(f.follow_up_on)}</span>
-                <span className="faint">{f.last_update ? 'Updated ' + fmtStamp(f.last_update) : ''}{me.me.manager && f.assigned ? ' · ' + f.assigned : ''}</span></div>
-            </div>)
-        })}</div>}</div>
+        </Toolbar>
+      <section className="bk-card"><h2>Family follow-ups<small>{rows.length}</small></h2>
+        {rows.length === 0 ? <p className="bk-line muted">No follow-ups match these filters.</p>
+          : rows.map(f => <FuRow key={f.id} f={f} t={t} showWho={me.me.manager} onOpen={setPanel} />)}</section>
       {panel && <FollowUpPanel id={panel} onClose={() => setPanel(null)} />}
     </div>
   )
@@ -735,6 +726,7 @@ function AddCasePanel({ c, onClose, onSaved }) {
 // ── Families ────────────────────────────────────────────────────────────────
 
 export function Families() {
+  const { me } = useBk()
   const [w] = useData(R + '/work')
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(() => openParam())
@@ -744,11 +736,12 @@ export function Families() {
   const list = [...fam.values()].filter(f => !q || (f.family || '').toLowerCase().includes(q.toLowerCase()))
   return (
     <div>
-      <div className="bk-bar"><input placeholder="Find a family" value={q} onChange={e => setQ(e.target.value)} aria-label="Find a family" /><span className="faint">{list.length} families</span></div>
-      <div className="bk-card"><div className="bk-list">{list.slice(0, 200).map(f => (
-        <div key={f.lead_id} className="bk-row" onClick={() => setOpen(f.lead_id)} role="button" tabIndex="0">
-          <div className="ic"><Icon name="family" /></div><div><div className="t">{f.family}</div><div className="d">{f.phone} {f.email ? '· ' + f.email : ''}</div></div>
-          <div className="r"><span className="faint">{f.assigned}</span></div></div>))}</div></div>
+      <Toolbar><input placeholder="Find a family" value={q} onChange={e => setQ(e.target.value)} aria-label="Find a family" /></Toolbar>
+      <section className="bk-card"><h2>Family directory<small>{list.length} families</small></h2>
+        {list.length === 0 ? <p className="bk-line muted">No matching families.</p> : list.slice(0, 200).map(f => (
+          <div key={f.lead_id} className="bk-line">
+            <div style={{ minWidth: 0 }}><strong>{f.family}</strong><p className="muted">{[f.phone, f.email, me.me.manager ? f.assigned : null].filter(Boolean).join(' · ')}</p></div>
+            <button className="bk-btn" onClick={() => setOpen(f.lead_id)}>Open family</button></div>))}</section>
       {open && <FamilyPanel id={open} onClose={() => setOpen(null)} />}
     </div>
   )
@@ -794,7 +787,7 @@ export function Service() {
   const sel = d.requests.find(r => r.id === open)
   return (
     <div className="bk-grid">
-      <div className="bk-bar"><button className="bk-btn pri" onClick={() => setAdd(true)}><Icon name="plus" />New service request</button></div>
+      <Toolbar><button className="bk-btn pri" onClick={() => setAdd(true)}><Icon name="plus" />New service request</button></Toolbar>
       <div className="bk-card">{d.requests.length === 0 ? <Empty>No service requests.</Empty> : <div className="bk-list">{d.requests.map(r => (
         <div key={r.id} className="bk-row" onClick={() => setOpen(r.id)} role="button" tabIndex="0"><div className={'ic' + (r.priority === 'urgent' ? ' err' : '')}><Icon name="wrench" /></div>
           <div><div className="t">{r.family || 'Family'}</div><div className="d">{r.description}</div></div>
@@ -905,9 +898,9 @@ export function Performance({ person: fixed }) {
   const m = d.metrics
   return (
     <div className="bk-grid">
-      <div className="bk-bar"><select value={range} onChange={e => setRange(e.target.value)} aria-label="Date range">{RANGES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
-        {me.me.manager && !fixed && <select value={person} onChange={e => setPerson(e.target.value)} aria-label="Advisor"><option value="">The team</option>{(me.team || []).map(n => <option key={n}>{n}</option>)}</select>}
-        <span className="faint">{d.range.cohorts}</span></div>
+      <Toolbar><select value={range} onChange={e => setRange(e.target.value)} aria-label="Date range">{RANGES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+        {me.me.manager && !fixed && <select value={person} onChange={e => setPerson(e.target.value)} aria-label="Advisor"><option value="">All advisors</option>{(me.team || []).map(n => <option key={n}>{n}</option>)}</select>}</Toolbar>
+      <p className="faint" style={{ margin: '0 0 12px' }}>{d.range.cohorts}</p>
       <section className="bk-hero money"><div className="faint">{d.name} · {d.range.label}</div><h2 className="money">{usd(m.closed_value_cents)} closed</h2>
         <p>{m.closed_contracts} contracts · {usd(m.average_contract_cents)} average · {usd(m.closed_value_per_generated_appointment_cents)} per appointment</p></section>
       <div className="bk-grid g8">
@@ -939,11 +932,11 @@ export function Command() {
   const k = d.kpis, h = d.hero
   return (
     <div className="bk-grid">
-      <div className="bk-bar"><b style={{ fontSize: 16 }}>Restland BookIT — Command Center</b>
-        <select value={range} onChange={e => setRange(e.target.value)} aria-label="Date range" style={{ marginLeft: 'auto' }}>{RANGES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+      <Toolbar>
+        <select value={range} onChange={e => setRange(e.target.value)} aria-label="Date range">{RANGES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
         <select value={person} onChange={e => setPerson(e.target.value)} aria-label="Advisor"><option value="">Every advisor</option>{(me.team || []).map(n => <option key={n}>{n}</option>)}</select>
         <select value={source} onChange={e => setSource(e.target.value)} aria-label="Source"><option value="">Every source</option>
-          {['evosys_appointment', 'evosys_follow_up', 'evo6_block', 'add_lead', 'independent', 'unknown'].map(s => <option key={s} value={s}>{label(s)}</option>)}</select></div>
+          {['evosys_appointment', 'evosys_follow_up', 'evo6_block', 'add_lead', 'independent', 'unknown'].map(s => <option key={s} value={s}>{label(s)}</option>)}</select></Toolbar>
       <section className="bk-hero money">
         <div className="faint">TOTAL EVOSYS-GENERATED CLOSED CONTRACT VALUE · {d.range.label}</div>
         <h2 className="money" style={{ fontSize: 40 }}>{usd(h.evosys_closed_value_cents)}</h2>
@@ -980,6 +973,61 @@ export function Command() {
 }
 
 // ── management pages ────────────────────────────────────────────────────────
+
+// Team (owner's preview): a card per advisor with their booked appointments and
+// open follow-ups; "View advisor" shows that person's work. Who is in the
+// rotation still comes from the sheet's Team tab; access is paused here.
+export function Advisors() {
+  const { say, refresh } = useBk()
+  const [d] = useData(R + '/team')
+  const [w] = useData(R + '/work')
+  const [pick, setPick] = useState(null)
+  const [panel, setPanel] = useState(null)
+  if (!d || !w) return <div className="bk-card"><Skeleton rows={5} /></div>
+  const t = today()
+  const work = name => ({
+    appts: w.appointments.filter(a => a.assigned === name && a.date >= t && /^(Booked|Confirmed)/.test(a.status)),
+    fus: w.follow_ups.filter(f => f.assigned === name && f.open),
+  })
+  const inRot = m => /rotation/i.test(m.status || '') && !/not/i.test(m.status || '')
+  const toggle = async (m) => { if (await send(() => api.patch(R + '/team/' + m.id, { data: { access_suspended: !m.access_suspended } }), say, 'Updated.')) refresh() }
+  const panels = <>{panel?.type === 'appt' && <AppointmentPanel id={panel.id} onClose={() => setPanel(null)} />}
+    {panel?.type === 'fu' && <FollowUpPanel id={panel.id} onClose={() => setPanel(null)} />}</>
+  if (pick) {
+    const m = d.team.find(x => x.id === pick), x = work(m.name)
+    return (
+      <div>
+        <div className="bk-hero"><div className="bk-line flat"><div><h2>{m.name}</h2><p><Pill>{inRot(m) ? 'In rotation' : 'Not in rotation'}</Pill></p></div>
+          <button className="bk-btn" onClick={() => setPick(null)}>Back to team</button></div></div>
+        <div className="bk-metrics"><Kpi l="Booked" v={num(x.appts.length)} s="Upcoming" /><Kpi l="Open follow-ups" v={num(x.fus.length)} /></div>
+        <div className="bk-split">
+          <section className="bk-card"><h2>Assigned appointments</h2>{x.appts.length === 0 ? <p className="bk-line muted">None upcoming.</p>
+            : x.appts.map(a => <ApptRow key={a.id} a={a} onOpen={id => setPanel({ type: 'appt', id })} />)}</section>
+          <section className="bk-card"><h2>Assigned follow-ups</h2>{x.fus.length === 0 ? <p className="bk-line muted">No open follow-ups.</p>
+            : x.fus.map(f => <FuRow key={f.id} f={f} t={t} onOpen={id => setPanel({ type: 'fu', id })} />)}</section>
+        </div>
+        {panels}
+      </div>
+    )
+  }
+  const active = d.team.filter(inRot).length
+  return (
+    <div>
+      <div className="bk-metrics"><Kpi l="Advisors" v={num(d.team.length)} /><Kpi l="In rotation" v={num(active)} /><Kpi l="Not in rotation" v={num(d.team.length - active)} /></div>
+      <div className="bk-team">{d.team.map(m => {
+        const x = work(m.name)
+        return (
+          <section key={m.id} className="bk-card">
+            <div className="bk-line flat"><h2 style={{ margin: 0 }}>{m.name}</h2><Pill>{inRot(m) ? 'In rotation' : 'Not in rotation'}</Pill></div>
+            <p className="bk-line"><span><strong>{num(x.appts.length)}</strong> booked · <strong>{num(x.fus.length)}</strong> open follow-ups</span></p>
+            <div className="bk-actions"><button className="bk-btn pri" onClick={() => setPick(m.id)}>View advisor</button>
+              <button className="bk-btn" onClick={() => toggle(m)}>{m.access_suspended ? 'Restore access' : 'Pause access'}</button></div>
+          </section>)
+      })}</div>
+      <p className="faint" style={{ marginTop: 12 }}>Who is in the rotation comes from the sheet's Team tab. Pausing access keeps all of a person's history.</p>
+    </div>
+  )
+}
 
 export function Team() {
   const { say, refresh } = useBk()
