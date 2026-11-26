@@ -1061,7 +1061,32 @@ export function Settings() {
     <p>{d.live_for_team ? 'Open to the team — each advisor sees only their own work.' : 'Owner preview — only your logins can open BookIT. Opening it to the team is your call.'}</p></div>
     <div className="bk-card"><h2>Campaign templates</h2>
       <p>File Review 6 Block: <b>{d.campaigns?.evo6?.approved ? 'approved' : 'not approved yet'}</b> · At-Need 6 Block: <b>{d.campaigns?.add?.approved ? 'approved' : 'not approved yet'}</b></p>
-      <p className="faint">No contact is enrolled until the matching template is approved. Nothing has been sent from BookIT.</p></div></div>)
+      <p className="faint">No contact is enrolled until the matching template is approved. Nothing has been sent from BookIT.</p></div>
+    <CoachSettings /></div>)
+}
+
+function CoachSettings() {
+  const { say } = useBk()
+  const [d, , setD] = useData(R + '/coach/usage')
+  const [v, setV] = useState(null)
+  useEffect(() => { if (d && !v) setV(d.settings) }, [d, v])
+  if (!d || !v) return <div className="bk-card"><Skeleton rows={3} /></div>
+  const save = async () => {
+    if (await send(() => api.patch(R + '/coach/settings', { data: v }), say, 'FSA Coach limits saved.')) api.get(R + '/coach/usage').then(setD)
+  }
+  const money = n => '$' + Number(n || 0).toFixed(n < 1 ? 3 : 2)
+  return (
+    <div className="bk-card"><h2>FSA Coach<small>{v.enabled ? 'On' : 'Off'}</small></h2>
+      <div className="bk-line"><label><input type="checkbox" checked={!!v.enabled} onChange={e => setV({ ...v, enabled: e.target.checked })} /> FSA Coach is on</label></div>
+      <div className="bk-line"><span>Questions per person per day</span><input type="number" min="0" max="500" value={v.per_person_day} onChange={e => setV({ ...v, per_person_day: e.target.value })} style={{ width: 90 }} /></div>
+      <div className="bk-line"><span>Questions for the whole team per day</span><input type="number" min="0" max="5000" value={v.team_day} onChange={e => setV({ ...v, team_day: e.target.value })} style={{ width: 90 }} /></div>
+      <div className="bk-line"><span className="muted">Resets at midnight Central.</span><button className="bk-btn pri" onClick={save}>Save limits</button></div>
+      <h2 style={{ marginTop: 14 }}>Usage this month<small>{d.total.today} today · {d.total.month} this month · about {money(d.total.cost_month)}</small></h2>
+      {d.people.length === 0 ? <p className="bk-line muted">Nobody has asked FSA Coach anything yet.</p> : d.people.map(p => (
+        <div key={p.name} className="bk-line"><strong>{p.name}</strong><span className="muted">{p.today} today · {p.month} this month · about {money(p.cost_month)}</span></div>))}
+      <p className="faint" style={{ marginTop: 10 }}>Cost is an estimate from {d.price.model} list prices (${d.price.in_per_million} per million tokens read, ${d.price.out_per_million} per million tokens written; a token is about three-quarters of a word). The question and answer text are not stored — only the count.</p>
+    </div>
+  )
 }
 
 export function Notifications({ onRead }) {
@@ -1083,53 +1108,40 @@ export function Profile() {
     <p className="faint">Your name, phone and email come from the Restland team list. Ask your manager to change them.</p></div>)
 }
 
-// ── BookIT Copilot — answers from this login's own BookIT records ───────────
+// ── FSA Coach — AI answers from this login's own BookIT records ──────────────
+// The server decides what it may read (only this person's families) and how
+// many questions are left today; it drafts, it never sends or books.
 
-const QUESTIONS = ['Show me the families I need to call today', 'Which appointment outcomes are incomplete?', 'Show my pending sales opportunities',
-  'Which File Review 6 Blocks are incomplete?', 'Show my upcoming appointments', 'How much closed sales value have I recorded this month?', 'Prepare my daily work plan']
+const QUESTIONS = ['Who should I call first today?', 'Which appointments still need an outcome?',
+  'Who said yes and then went quiet?', 'Plan my day', 'Help me answer a family who said "my kids handle that"']
 
-export function Copilot({ onClose }) {
-  const { me } = useBk()
-  const [log, setLog] = useState([{ who: 'bot', text: 'I answer from your own BookIT records. I can read and draft — I never send, book or change anything.' }])
+export function Coach({ onClose }) {
+  const [log, setLog] = useState([{ who: 'bot', text: 'I\u2019m your FSA Coach. I read only your own BookIT families and help you plan, prep and find the words. I never send, book or change anything \u2014 you do. Ask about a family by name.' }])
   const [q, setQ] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [left, setLeft] = useState(null)
+  useEffect(() => { api.get(R + '/coach').then(r => setLeft(r.left_today)).catch(() => {}) }, [])
   const ask = async (text) => {
-    if (!text.trim()) return
-    setLog(l => [...l, { who: 'me', text }]); setQ('')
-    let ans
-    try { ans = await answer(text.toLowerCase(), me) } catch (e) { ans = 'I could not read your records just now: ' + (e.message || 'try again') }
-    setLog(l => [...l, { who: 'bot', text: ans }])
+    if (!text.trim() || busy) return
+    const history = log.slice(1).map(m => ({ role: m.who === 'me' ? 'user' : 'assistant', content: m.text }))
+    setLog(l => [...l, { who: 'me', text }]); setQ(''); setBusy(true)
+    try {
+      const r = await api.post(R + '/coach', { data: { question: text, history } })
+      setLog(l => [...l, { who: 'bot', text: r.answer }]); setLeft(r.left_today)
+    } catch (e) {
+      setLog(l => [...l, { who: 'bot', text: e.message || 'FSA Coach couldn\u2019t answer just now. Please try again.' }])
+    } finally { setBusy(false) }
   }
   return (
-    <div className="bk-copilot" role="dialog" aria-label="BookIT Copilot">
-      <div className="ch"><Icon name="spark" width="18" /><b>BookIT Copilot</b><button className="bk-iconbtn" style={{ marginLeft: 'auto' }} onClick={onClose} aria-label="Close"><Icon name="x" /></button></div>
+    <div className="bk-copilot" role="dialog" aria-label="FSA Coach">
+      <div className="ch"><Icon name="spark" width="18" /><b>FSA Coach</b>
+        {left !== null && <span className="faint" style={{ fontSize: 12 }}>{left} question{left === 1 ? '' : 's'} left today</span>}
+        <button className="bk-iconbtn" style={{ marginLeft: 'auto' }} onClick={onClose} aria-label="Close"><Icon name="x" /></button></div>
       <div className="cb">{log.map((m, i) => <div key={i} className={'bk-msg ' + (m.who === 'me' ? 'out' : 'in')}>{m.text}</div>)}
-        <div className="bk-actions">{QUESTIONS.map(x => <button key={x} className="bk-chip btn" onClick={() => ask(x)}>{x}</button>)}</div></div>
-      <div className="cf"><input value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && ask(q)} placeholder="Ask about your work" aria-label="Ask Copilot" />
-        <button className="bk-btn pri" onClick={() => ask(q)}>Ask</button></div>
+        {busy && <div className="bk-msg in faint">Thinking…</div>}
+        {log.length === 1 && <div className="bk-actions">{QUESTIONS.map(x => <button key={x} className="bk-chip btn" onClick={() => ask(x)}>{x}</button>)}</div>}</div>
+      <div className="cf"><input value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && ask(q)} placeholder="Ask about your families or your day" aria-label="Ask FSA Coach" disabled={busy} />
+        <button className="bk-btn pri" onClick={() => ask(q)} disabled={busy || !q.trim()}>Ask</button></div>
     </div>
   )
-}
-
-async function answer(t, me) {
-  const day = await api.get(R + '/my-day')
-  const names = xs => xs.slice(0, 10).map(a => '• ' + a.name + ' — ' + a.reason).join('\n') || 'None right now.'
-  if (t.includes('call')) return 'Families to call:\n' + names(day.actions.filter(a => a.kind === 'follow_up'))
-  if (t.includes('outcome')) return 'Outcomes still to record:\n' + names(day.actions.filter(a => a.kind === 'missing_outcome'))
-  if (t.includes('pending')) return 'Pending sales decisions:\n' + names(day.actions.filter(a => a.kind === 'pending_sale'))
-  if (t.includes('evo') || t.includes('6 block')) return 'File Review 6 Blocks to finish:\n' + names(day.actions.filter(a => a.kind === 'evo6'))
-  if (t.includes('upcoming') || t.includes('appointment')) {
-    const w = await api.get(R + '/work')
-    const up = w.appointments.filter(a => a.upcoming).slice(0, 10)
-    return 'Upcoming appointments:\n' + (up.map(a => `• ${fmtDate(a.date)} ${fmtTime(a.time)} — ${a.family}`).join('\n') || 'None.')
-  }
-  if (t.includes('closed') || t.includes('sales value') || t.includes('how much')) {
-    const p = await api.get(R + '/performance?range=this_month')
-    return `This month: ${usd(p.metrics.closed_value_cents)} closed across ${p.metrics.closed_contracts} contracts (recorded contract value, not cash collected).`
-  }
-  if (t.includes('plan')) {
-    const k = day.kpis
-    return `Your plan for today:\n1. Family care first: ${day.actions.filter(a => ['add_lead', 'service'].includes(a.kind)).length} priority cases.\n2. Call ${k.follow_ups_due} follow-ups (${k.follow_ups_overdue} overdue) — callbacks first.\n3. ${k.appointments_today} appointments today — close each ticket after.\n4. Record ${k.pending_outcomes} missing outcomes.`
-  }
-  if (t.includes('draft') || t.includes('compassionate')) return 'Draft (edit before you send it yourself):\n"Hi [name], this is [your name] with Restland. I was thinking of your family and wanted to see if there is anything we can help with. There is no rush — whenever is right for you."'
-  return 'I can answer: ' + QUESTIONS.join(' · ')
 }

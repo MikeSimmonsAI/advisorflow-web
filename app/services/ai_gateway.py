@@ -173,6 +173,11 @@ CAPABILITY_MODELS: Dict[str, str] = {
     # are returned as JSON and checked by deterministic rules before use.
     "acquisition_draft":      "gpt-4o-mini",
     "acquisition_reply_assist": "gpt-4o-mini",
+    # Restland BookIT "FSA Coach": answers a signed-in advisor's question from
+    # their own records and drafts words they send themselves. A manual action
+    # (the asking user is the actor), capped per person and per team per day
+    # (app/services/bookit/coach.py).
+    "bookit_coach":           "gpt-4o-mini",
     "voice_call":             "gpt-4o-realtime-preview",
 }
 
