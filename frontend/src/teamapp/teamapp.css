@@ -536,3 +536,4 @@
 .ta-set-parts li.is-bad strong { color: #C62839; }
 .ta-set-chips { display: grid; grid-template-columns: repeat(3, 1fr); overflow: visible; padding-bottom: 0; }
 .ta-set-chips .ta-chip { justify-content: center; padding: 0 6px; }
+.ta-set-more { display: block; margin: 0 6px 6px; padding: 6px 0; font-weight: 700; color: var(--ta-blue); background: none; border: 0; font: inherit; font-size: 15px; font-weight: 700; cursor: pointer; }
