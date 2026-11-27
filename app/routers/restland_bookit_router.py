@@ -536,6 +536,22 @@ def set_preview_access(body: Body, db: Session = Depends(get_db), user: User = D
     return _run(db, core.set_preview_emails, db, prog, w, body.data.get("emails") or [])
 
 
+@router.put("/open-to-team")
+def open_to_team(body: Body, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Owner only: open BookIT to the team (each advisor then signs in to their own
+    side), or close it back to the owner's preview. Audited."""
+    prog, w = _ctx(db, user)
+    if not w.manager or not core.previewer(prog, user):
+        raise HTTPException(status_code=403, detail="Owner only.")
+    c = core.cfg(prog)
+    before = bool(c.get("live"))
+    c["live"] = bool(body.data.get("live"))
+    core.save_cfg(db, prog, c)
+    core.audit(db, prog.organization_id, w, "bookit", prog.id, "open_to_team", "live", before, c["live"])
+    db.commit()
+    return {"live_for_team": c["live"]}
+
+
 @router.post("/appointments/{row_id}/reschedule")
 def appointment_reschedule(row_id: str, body: Body, db: Session = Depends(get_db),
                            user: User = Depends(require_tenant_user)):
