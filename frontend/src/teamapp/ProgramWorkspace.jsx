@@ -301,7 +301,7 @@ export function ProgramDashboard() {
     <Frame entry={entry} tab="dashboard">
       {kind === 'program' && <ProgramDashboardBody item={item} />}
       {kind === 'sales' && <SalesDashboardBody item={item} origin={origin} />}
-      {kind === 'other' && (item.type === 'restland_bookit' && work
+      {kind === 'other' && (item && item.type === 'restland_bookit' && work
         ? <BookitDashboard item={item} />
         : <OtherDashboardBody item={item} origin={origin} />)}
     </Frame>

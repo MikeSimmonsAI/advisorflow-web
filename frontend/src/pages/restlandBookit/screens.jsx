@@ -81,7 +81,7 @@ export function ApptRow({ a, onOpen, showWho }) {
     <div className="bk-line">
       <div style={{ minWidth: 0 }}><div className="time">{fmtDate(a.date, { weekday: 'short', month: 'short', day: 'numeric' })} · {fmtTime(a.time)}</div>
         <strong>{a.family}</strong><p className="muted">{a.how}{showWho && a.assigned ? ' · ' + a.assigned : ''}{a.saving ? ' · Saving…' : ''}</p></div>
-      <div className="bk-actions"><Pill>{a.outcome || a.status}</Pill><button className="bk-btn" onClick={() => onOpen(a.id)}>Open</button></div>
+      <div className="bk-actions"><Pill>{a.outcome || a.status}</Pill><ApptButtons a={a} onOpen={onOpen} /></div>
     </div>
   )
 }
@@ -176,6 +176,17 @@ function useStored(key, init) {
   return [st, set]
 }
 
+// Open, plus Reschedule / Cancel right on the line for a live booking (owner, Nov 27).
+export function ApptButtons({ a, onOpen, sm }) {
+  const c = 'bk-btn' + (sm ? ' sm' : '')
+  const live = /^(Booked|Confirmed)/.test(a.status || '') && !a.outcome
+  return <span className="bk-appt-btns">
+    <button className={c} onClick={() => onOpen(a.id)}>Open</button>
+    {live && <button className={c} onClick={() => onOpen(a.id, 'move')}>Reschedule</button>}
+    {live && <button className={c + ' warn'} onClick={() => onOpen(a.id, 'cancel')}>Cancel</button>}
+  </span>
+}
+
 // Compact appointment table: time (CT), family, visit type, advisor, status, Open.
 export function ApptTable({ rows, onOpen, showWho, showDate = true }) {
   return (
@@ -185,7 +196,7 @@ export function ApptTable({ rows, onOpen, showWho, showDate = true }) {
         <td className="time" data-l="When (CT)">{showDate ? fmtDate(a.date, { weekday: 'short', month: 'short', day: 'numeric' }) + ' · ' : ''}{fmtTime(a.time)}</td>
         <td data-l="Family"><b>{a.family}</b></td><td data-l="Visit"><VisitTag v={a.visit} /></td>{showWho && <td data-l="Advisor">{a.assigned || '—'}</td>}
         <td data-l="Status"><Pill>{a.outcome || a.status}</Pill></td>
-        <td className="act"><button className="bk-btn sm" onClick={() => onOpen(a.id)}>Open</button></td></tr>)}</tbody></table></div>
+        <td className="act"><ApptButtons a={a} onOpen={onOpen} sm /></td></tr>)}</tbody></table></div>
   )
 }
 
@@ -236,7 +247,7 @@ export function MyDay() {
       <div className="bk-split">
         <section className="bk-card"><h2>{todays.length ? 'Today’s appointments' : 'Next appointments'}<small>{todays.length ? num(todays.length) + ' today' : num(upcoming.length) + ' booked ahead'}</small></h2>
           {showing.length === 0 ? <p className="bk-line muted">Nothing on the schedule.</p>
-            : <ApptTable rows={showing.slice(0, 5)} showWho={who} showDate={!todays.length} onOpen={id => setPanel({ type: 'appt', id })} />}
+            : <ApptTable rows={showing.slice(0, 5)} showWho={who} showDate={!todays.length} onOpen={(id, mode) => setPanel({ type: 'appt', id, mode })} />}
           <div className="bk-actions bk-panelfoot"><button className="bk-btn" onClick={() => go('appointments')}>Open appointments</button></div></section>
         <section className="bk-card"><h2>Follow-ups<small>{num(openFu.length)} open{overdue ? ' · ' + num(overdue) + ' overdue' : ''}</small></h2>
           {queue.length === 0 ? <p className="bk-line muted">No open follow-ups.</p>
@@ -248,7 +259,7 @@ export function MyDay() {
           <div key={i} className="bk-qline"><div className="bk-line flat">
             <div style={{ minWidth: 0 }}><strong>{a.name}</strong><p className="muted">{a.reason} · {a.next}</p></div>
             <div className="bk-actions"><Pill>{a.status}</Pill><button className="bk-btn sm" onClick={() => pick(a)}>Open</button></div></div></div>))}</section>}
-      {panel?.type === 'appt' && <AppointmentPanel id={panel.id} startClose={panel.close} onClose={() => setPanel(null)} />}
+      {panel?.type === 'appt' && <AppointmentPanel id={panel.id} startClose={panel.close} startMode={panel.mode} onClose={() => setPanel(null)} />}
       {panel?.type === 'fu' && <FollowUpPanel id={panel.id} onClose={() => setPanel(null)} />}
     </div>
   )
@@ -282,6 +293,7 @@ export function Appointments() {
   const [w] = useData(R + '/work')
   const [st, set] = useStored('bk_appts', { view: 'upcoming', status: '', kind: '', who: '', q: '', page: 0 })
   const [panel, setPanel] = useState(() => openParam())
+  const [panelMode, setPanelMode] = useState(null)
   const [booking, setBooking] = useState(false)
   const bar = <Toolbar><div className="bk-seg">{APPT_VIEWS.map(([k, l]) => <button key={k} className={st.view === k ? 'on' : ''} onClick={() => set({ view: k, page: 0 })}>{l}</button>)}</div>
     {!me.me.view_only && <button className="bk-btn pri" onClick={() => setBooking(true)}>+ Book appointment</button>}</Toolbar>
@@ -305,9 +317,9 @@ export function Appointments() {
       </div>
       <section className="bk-card"><h2>Appointment worklist<small>{num(rows.length)} appointment{rows.length === 1 ? '' : 's'} · Central time</small></h2>
         {rows.length === 0 ? <p className="bk-line muted">No appointments match these filters.</p>
-          : <ApptTable rows={rows.slice(page * APPT_PAGE, page * APPT_PAGE + APPT_PAGE)} showWho={me.me.manager} onOpen={setPanel} />}
+          : <ApptTable rows={rows.slice(page * APPT_PAGE, page * APPT_PAGE + APPT_PAGE)} showWho={me.me.manager} onOpen={(id, mode) => { setPanelMode(mode || null); setPanel(id) }} />}
         <Pager page={page} size={APPT_PAGE} total={rows.length} set={n => set({ page: n })} /></section>
-      {panel && <AppointmentPanel id={panel} onClose={() => setPanel(null)} />}
+      {panel && <AppointmentPanel id={panel} startMode={panelMode} onClose={() => { setPanel(null); setPanelMode(null) }} />}
       {booking && <NewAppointment onClose={() => setBooking(false)} />}
     </div>
   )
@@ -358,10 +370,10 @@ export function Calendar() {
 }
 export const Schedule = Calendar
 
-export function AppointmentPanel({ id, onClose, startClose }) {
+export function AppointmentPanel({ id, onClose, startClose, startMode }) {
   const { say, refresh, me } = useBk()
   const [d, , setD] = useData(R + '/appointments/' + encodeURIComponent(id), [id])
-  const [mode, setMode] = useState(startClose ? 'close' : 'view')
+  const [mode, setMode] = useState(startClose ? 'close' : (startMode || 'view'))
   if (!d) return <Panel title="Appointment" onClose={onClose}><Skeleton rows={6} /></Panel>
   const a = d.appointment || {}
   const reload = () => api.get(R + '/appointments/' + encodeURIComponent(id)).then(setD).catch(() => {})
@@ -1295,7 +1307,7 @@ export function Advisors() {
       out ? m.name + ' is out of the rotation.' : m.name + ' is back in the rotation.')) refresh()
   }
   const toggle = async (m) => { if (await send(() => api.patch(R + '/team/' + m.id, { data: { access_suspended: !m.access_suspended } }), say, 'Updated.')) refresh() }
-  const panels = <>{panel?.type === 'appt' && <AppointmentPanel id={panel.id} onClose={() => setPanel(null)} />}
+  const panels = <>{panel?.type === 'appt' && <AppointmentPanel id={panel.id} startMode={panel.mode} onClose={() => setPanel(null)} />}
     {panel?.type === 'fu' && <FollowUpPanel id={panel.id} onClose={() => setPanel(null)} />}</>
   if (pick) {
     const m = d.team.find(x => x.id === pick), x = work(m.name)
@@ -1306,7 +1318,7 @@ export function Advisors() {
         <div className="bk-metrics"><Kpi l="Booked" v={num(x.appts.length)} s="Upcoming" /><Kpi l="Open follow-ups" v={num(x.fus.length)} /></div>
         <div className="bk-split">
           <section className="bk-card"><h2>Assigned appointments</h2>{x.appts.length === 0 ? <p className="bk-line muted">None upcoming.</p>
-            : <><ApptTable rows={x.appts.slice(0, 10)} onOpen={id => setPanel({ type: 'appt', id })} />
+            : <><ApptTable rows={x.appts.slice(0, 10)} onOpen={(id, mode) => setPanel({ type: 'appt', id, mode })} />
               {x.appts.length > 10 && <p className="faint">Showing the next 10 of {num(x.appts.length)}.</p>}</>}</section>
           <section className="bk-card"><h2>Assigned follow-ups</h2>{x.fus.length === 0 ? <p className="bk-line muted">No open follow-ups.</p>
             : <><FuTable rows={byUrgency(x.fus, t).slice(0, 10)} t={t} onOpen={id => setPanel({ type: 'fu', id })} />

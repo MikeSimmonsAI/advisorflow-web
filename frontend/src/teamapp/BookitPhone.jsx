@@ -37,11 +37,20 @@ export function bookitWhen(date, time, today = todayCentral()) {
   return (day + ' ' + (time || '')).trim()
 }
 
+/** "1:00 PM" -> "13:00" so times sort in clock order. */
+export function clock24(t) {
+  const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(String(t || '').trim())
+  if (!m) return String(t || '')
+  let h = Number(m[1]) % 12
+  if (m[3].toUpperCase() === 'PM') h += 12
+  return String(h).padStart(2, '0') + ':' + m[2]
+}
+
 /** Upcoming (today on, not cancelled) appointments first by date; open follow-ups due now. */
 export function bookitLists(work, today = todayCentral()) {
   const appts = ((work && work.appointments) || [])
     .filter(a => a.date && a.date >= today && !String(a.status || '').startsWith('Cancel'))
-    .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')))
+    .sort((a, b) => (a.date + clock24(a.time)).localeCompare(b.date + clock24(b.time)))
   const due = ((work && work.follow_ups) || []).filter(f => f.open && f.due_now)
     .sort((a, b) => String(a.follow_up_on || '').localeCompare(String(b.follow_up_on || '')))
   return { appts, due }

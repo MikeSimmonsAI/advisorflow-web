@@ -114,7 +114,7 @@ export default function AppointmentSheet({ item, leadId, name, bookings, appoint
     <div className="ta-sheet" role="presentation" onClick={e => { if (e.target === e.currentTarget && !busy) onClose() }}>
       <div className="ta-sheet-card ta-appt" role="dialog" aria-modal="true" aria-labelledby="ta-appt-h">
         <div className="ta-sheet-grip" aria-hidden />
-        <h2 id="ta-appt-h" className="ta-sheet-title">{result ? 'Done' : mode === 'cancel' ? 'Cancel appointment' : moving ? 'Move appointment' : current ? 'Appointment' : 'Book a time'}</h2>
+        <h2 id="ta-appt-h" className="ta-sheet-title">{result ? 'Done' : mode === 'cancel' ? 'Cancel appointment' : moving ? 'Reschedule' : current ? 'Appointment' : 'Book a time'}</h2>
         <p className="ta-muted ta-small">{name}</p>
 
         {result && <>
