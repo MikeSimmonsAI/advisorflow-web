@@ -32,6 +32,10 @@ export async function signInDestination(user, nextPath, priorWorkspace) {
     const priorEntry = (ctx?.workspace_contexts || []).find(w => w.organization_id === priorWorkspace)
     const deadRoofing = nextPath && nextPath.startsWith('/program/roofing') &&
       !(priorEntry && priorEntry.program_route === '/program/roofing')
+    // A system-check incident link (alert text / email) always opens after
+    // sign-in: the incident page selects its own workspace, and the server
+    // refuses it unless this login manages that workspace.
+    if (nextPath && /^\/program\/incident\/[A-Za-z0-9-]+$/.test(nextPath)) return nextPath
     if (nextPath && !deadRoofing) {
       const still = priorWorkspace && (ctx?.contexts || []).some(c => c.type === 'workspace' && c.organization_id === priorWorkspace)
       if (still) { setWorkspaceContext(priorWorkspace); dest = nextPath }

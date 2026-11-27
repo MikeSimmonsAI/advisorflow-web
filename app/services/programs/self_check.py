@@ -29,9 +29,12 @@ def _name(lead) -> str:
     return " ".join(x for x in (lead.first_name, lead.last_name) if x).title() or "Family"
 
 
-def _check(key, title, problems: List[str], ok_text: str, bad_text: str) -> Dict:
+def _check(key, title, problems: List[str], ok_text: str, bad_text: str, lead_ids=None) -> Dict:
+    # lead_ids (Nov 27): WHICH families, so overlapping checks about the same
+    # outreach become one incident (incidents.py). Not part of the signature.
     return {"key": key, "ok": not problems, "title": title,
-            "detail": ok_text if not problems else bad_text % len(problems), "people": problems[:12]}
+            "detail": ok_text if not problems else bad_text % len(problems), "people": problems[:12],
+            "lead_ids": sorted(set(lead_ids or []))}
 
 
 def texts_too_close(db: Session, org_id: str, now: datetime) -> Dict:
@@ -45,7 +48,8 @@ def texts_too_close(db: Session, org_id: str, now: datetime) -> Dict:
     names = sorted(_name(l) for l in db.query(Lead).filter(Lead.id.in_(bad)).all()) if bad else []
     return _check("texts_too_close", "Texts spaced as planned", names,
                   "No one got two unsolicited texts less than 20 hours apart in the last day.",
-                  "%d people got two unsolicited texts less than 20 hours apart in the last day.")
+                  "%d people got two unsolicited texts less than 20 hours apart in the last day.",
+                  lead_ids=list(bad or []))
 
 
 def _sms_held(db: Session, org_id: str) -> set:
@@ -63,7 +67,7 @@ def texts_overdue(db: Session, org_id: str, now: datetime) -> Dict:
     rows = (db.query(CadenceState, Lead).join(Lead, Lead.id == CadenceState.lead_id)
             .filter(Lead.organization_id == org_id, Lead.is_test.isnot(True), CadenceState.status == "active",
                     CadenceState.next_touch_due_at < now - OVERDUE).all())
-    bad = []
+    bad, ids = [], []
     held = _sms_held(db, org_id)
     for s, l in rows:
         if l.id in held:
@@ -71,12 +75,14 @@ def texts_overdue(db: Session, org_id: str, now: datetime) -> Dict:
         c = contact_hours.check(l, now)
         if c["permitted"]:
             bad.append(_name(l))
+            ids.append(l.id)
         elif c["code"] in (contact_hours.ZONE_UNKNOWN, contact_hours.ZONE_UNRESOLVABLE):
             # Not "waiting for the window" - it can NEVER go until fixed.
             bad.append("%s (no time zone for this number)" % _name(l))
+            ids.append(l.id)
     return _check("texts_overdue", "Texts going out on time", bad,
                   "Every text that is due and allowed right now has gone out.",
-                  "%d texts are overdue: due, and either allowed right now or blocked for good.")
+                  "%d texts are overdue: due, and either allowed right now or blocked for good.", lead_ids=ids)
 
 
 def texts_never_started(db: Session, org_id: str, now: datetime) -> Dict:
@@ -97,7 +103,7 @@ def texts_never_started(db: Session, org_id: str, now: datetime) -> Dict:
     ids = [l.id for _s, l in rows]
     tried = {i for (i,) in db.query(Message.lead_id).filter(Message.lead_id.in_(ids or ["-"])).distinct().all()}
     held = _sms_held(db, org_id)
-    bad = []
+    bad, ids = [], []
     for s, l in rows:
         if l.id in tried or l.status in ("dnc", "booked") or l.id in held:
             continue
@@ -105,13 +111,15 @@ def texts_never_started(db: Session, org_id: str, now: datetime) -> Dict:
         due = s.next_touch_due_at.replace(tzinfo=None) if s.next_touch_due_at else None
         if due is not None and due <= now - timedelta(hours=1):
             bad.append("%s (first text due since %s UTC, not attempted)" % (_name(l), due.strftime("%b %d %H:%M")))
+            ids.append(l.id)
         elif start is not None and due is not None and due > start + timedelta(hours=24):
             bad.append("%s (first text moved from %s to %s UTC)" % (
                 _name(l), start.strftime("%b %d %H:%M"), due.strftime("%b %d %H:%M")))
+            ids.append(l.id)
     return _check("texts_never_started", "Every started person's first text on time", bad,
                   "Everyone whose first text is due has had it attempted, and no first text has been moved "
                   "more than a day past its start.",
-                  "%d people's first text is overdue or was moved more than a day past its start.")
+                  "%d people's first text is overdue or was moved more than a day past its start.", lead_ids=ids)
 
 
 def first_messages_late(db: Session, org_id: str, now: datetime) -> Dict:
@@ -144,12 +152,13 @@ def first_messages_late(db: Session, org_id: str, now: datetime) -> Dict:
     def held_on_purpose(l) -> bool:
         can_text = textable(l) and mode.get(l.id) not in ("email_only", "call")
         return not can_text and bool(provider_hold_reason(prog, l.email)) if prog is not None else False
-    bad = [_name(leads[i]) for i in ids if i not in got and i in leads and not leads[i].is_test
-           and leads[i].status not in ("dnc", "booked") and contact_hours.is_permitted(leads[i], now)
-           and not held_on_purpose(leads[i])]
+    late = [i for i in ids if i not in got and i in leads and not leads[i].is_test
+            and leads[i].status not in ("dnc", "booked") and contact_hours.is_permitted(leads[i], now)
+            and not held_on_purpose(leads[i])]
+    bad = [_name(leads[i]) for i in late]
     return _check("first_messages_late", "First messages on schedule", bad,
                   "Everyone scheduled for a first message got one.",
-                  "%d people are past their start time and have not been texted or emailed.")
+                  "%d people are past their start time and have not been texted or emailed.", lead_ids=late)
 
 
 def bounces_unrecorded(db: Session, org_id: str, now: datetime) -> Dict:
@@ -262,7 +271,8 @@ def run(db: Session, org_id: str, now: datetime = None) -> Dict:
             db.rollback()
             log.exception("self-check %s failed", fn.__name__)
             out.append({"key": fn.__name__, "ok": False, "title": fn.__name__.replace("_", " ").title(),
-                        "detail": "This check could not run: %s" % type(exc).__name__, "people": []})
+                        "detail": "This check could not run: %s" % type(exc).__name__, "people": [],
+                        "lead_ids": []})
     acks = _acks(db, org_id)
     for c in out:
         c["signature"] = signature(c)
@@ -350,6 +360,20 @@ def alert_all(db: Session, now: datetime = None) -> int:
             continue
         for c in res["checks"]:
             c.setdefault("signature", signature(c))
+        # RESTLAND (Nov 27): overlapping checks become ONE incident with one
+        # brief text, one full email, its own page and a resolution notice.
+        # Every other program (SCI) keeps the notice below, unchanged.
+        from app.services.programs import incidents as _inc
+        if _inc.enabled_for(db, prog):
+            try:
+                sent += _inc.process(db, prog, res["checks"], now, legacy_alerted=lambda c: (
+                    _alerted.get("%s:%s" % (prog.id, c["key"])) == c["signature"]
+                    or _already_alerted(db, prog, c, now)))
+                db.commit()
+            except Exception:                            # noqa: BLE001 - one program's failure is not everyone's
+                db.rollback()
+                log.exception("incident alerting failed for program %s", prog.id)
+            continue
         new = [c for c in res["checks"] if not c["ok"] and not c.get("acknowledged")
                and _alerted.get("%s:%s" % (prog.id, c["key"])) != c["signature"]
                and not _already_alerted(db, prog, c, now)]

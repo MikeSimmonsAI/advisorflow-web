@@ -143,14 +143,20 @@ def recent_page(db: Session, org_id: str, lead_id: Optional[str], now: datetime)
 def page(db: Session, prog, *, lead_id: Optional[str], key: str, kind: str,
          sms_text: str, subject: str, html: str, response_id: Optional[str] = None,
          management: bool = False, coalesce: bool = True, test: bool = False,
-         now: Optional[datetime] = None, audit_message: Optional[str] = None) -> List:
+         now: Optional[datetime] = None, audit_message: Optional[str] = None,
+         targets: Optional[List[Tuple[str, str, str]]] = None) -> List:
     """Raise ONE logical staff alert: at most one text and one email per
-    recipient for this key, ever. Returns the ProgramAlert rows it wrote."""
+    recipient for this key, ever. Returns the ProgramAlert rows it wrote.
+    `targets` replaces the family-response recipient list - the owner-only
+    system incidents (incidents.py) pass the owner's phone and email."""
     from app.models.program_models import ProgramAlert
     from app.services.programs.reply_rules import staff_alert_gate
     now = now or datetime.utcnow()
     _lock_family(db, lead_id)
-    targets = [] if test else staff_targets(prog, management=management)
+    if test:
+        targets = []
+    elif targets is None:
+        targets = staff_targets(prog, management=management)
     merged_into = None
     if coalesce and targets:
         prev = recent_page(db, prog.organization_id, lead_id, now)

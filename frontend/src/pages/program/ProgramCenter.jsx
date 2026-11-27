@@ -41,6 +41,7 @@ import Leads from './sci/Leads'
 import Appointments from './sci/Appointments'
 import Outbox from './sci/Outbox'
 import Person from './sci/Person'
+import Incident from './sci/Incident'
 import SmsRecoveryQueue from '../../components/smsRecovery/SmsRecoveryQueue'
 import { TopBar } from './command/Dashboard'
 import { MobileNav, NAV, SideNav, TOOLS } from './command/SciNav'
@@ -90,6 +91,8 @@ export default function ProgramCenter() {
   const isManager = data?.viewer_is_manager ?? readAuthority().isWorkspaceManager
   const navigate = useNavigate()
   const personId = params.get('person') || ''
+  // /program?incident=<id> - a system-check incident (the alert text and email link here).
+  const incidentId = personId ? '' : (params.get('incident') || '')
   // A login that only has program workspaces has no "main menu" to go back
   // to - the Family Service Center IS its whole app.
   const [programOnly, setProgramOnly] = useState(false)
@@ -118,11 +121,11 @@ export default function ProgramCenter() {
   const setParam = useCallback((key, value) => setMany({ [key]: value }), [setMany])
   const goTab = useCallback((key, extra = {}) => {
     // Tab changes are real history entries so Back/Forward move between screens.
-    setMany({ tab: key, queue: '', q: '', person: '', ...extra }, { push: true })
+    setMany({ tab: key, queue: '', q: '', person: '', incident: '', ...extra }, { push: true })
     window.scrollTo?.({ top: 0 })
   }, [setMany])
   const openPerson = useCallback(id => {
-    if (id) setMany({ person: id }, { push: true })
+    if (id) setMany({ person: id, incident: '' }, { push: true })
   }, [setMany])
 
   const load = useCallback(() => {
@@ -241,26 +244,28 @@ export default function ProgramCenter() {
     </div>
     <main className="sci-work" id="sci-main" tabIndex={-1}>
           {err && <div className="sci-alert" role="alert">{err}</div>}
+          {incidentId && <Incident incidentId={incidentId} openPerson={openPerson} goTab={goTab}
+            onBack={() => (window.history.state?.idx > 0 ? navigate(-1) : setMany({ incident: '', tab: 'health' }))} />}
           {personId && <Person leadId={personId} isManager={isManager} onBack={() => (window.history.state?.idx > 0 ? navigate(-1) : setMany({ person: '', tab }))} />}
-          {!personId && tab === 'leads' && <Leads locations={data.locations} locationId={locationId} openPerson={openPerson} initialQuery={params.get('q') || ''} />}
-          {!personId && tab === 'appointments' && <Appointments locationId={locationId} openPerson={openPerson} />}
-          {!personId && tab === 'outbox' && <Outbox openPerson={openPerson} />}
-          {!personId && tab === 'dashboard' && <Dashboard data={data} goTab={goTab} setParam={setParam} isManager={isManager} />}
-          {!personId && tab === 'responses' && <Responses locationId={locationId} onChange={load} navigate={navigate} isManager={isManager} />}
-          {!personId && tab === 'review' && <Review locationId={locationId} locations={data.locations} isManager={isManager}
+          {!personId && !incidentId && tab === 'leads' && <Leads locations={data.locations} locationId={locationId} openPerson={openPerson} initialQuery={params.get('q') || ''} />}
+          {!personId && !incidentId && tab === 'appointments' && <Appointments locationId={locationId} openPerson={openPerson} />}
+          {!personId && !incidentId && tab === 'outbox' && <Outbox openPerson={openPerson} />}
+          {!personId && !incidentId && tab === 'dashboard' && <Dashboard data={data} goTab={goTab} setParam={setParam} isManager={isManager} />}
+          {!personId && !incidentId && tab === 'responses' && <Responses locationId={locationId} onChange={load} navigate={navigate} isManager={isManager} />}
+          {!personId && !incidentId && tab === 'review' && <Review locationId={locationId} locations={data.locations} isManager={isManager}
             attention={att} initialQueue={params.get('queue') || firstOpenQueue(att)} initialSearch={params.get('q') || ''}
             onChange={load} goTab={goTab} navigate={navigate} />}
-          {!personId && tab === 'locations' && <Locations isManager={isManager} selected={locationId} onChange={load} setParam={setParam}
+          {!personId && !incidentId && tab === 'locations' && <Locations isManager={isManager} selected={locationId} onChange={load} setParam={setParam}
             performance={data.location_performance} goTab={goTab} />}
-          {!personId && tab === 'campaigns' && <Campaigns isManager={isManager} locationId={locationId} locations={data.locations}
+          {!personId && !incidentId && tab === 'campaigns' && <Campaigns isManager={isManager} locationId={locationId} locations={data.locations}
             performance={data.campaign_performance} goTab={goTab} />}
-          {!personId && tab === 'assets' && <Assets isManager={isManager} locations={data.locations} />}
-          {!personId && tab === 'launch' && <Launch isManager={isManager} onChange={load} goTab={goTab} />}
-          {!personId && tab === 'send' && <Send locations={data.locations} isManager={isManager} locationId={locationId} goTab={goTab} automation={data.automation} openPerson={openPerson} />}
-          {!personId && tab === 'health' && <Health goTab={goTab} />}
-          {!personId && tab === 'cleanup' && <DataReview openPerson={id => setParam('person', id)} />}
-          {!personId && tab === 'sms-recovery' && <SmsRecoveryQueue openPerson={openPerson} />}
-          {!personId && tab === 'settings' && <Settings isManager={isManager} program={prog} readiness={data.readiness}
+          {!personId && !incidentId && tab === 'assets' && <Assets isManager={isManager} locations={data.locations} />}
+          {!personId && !incidentId && tab === 'launch' && <Launch isManager={isManager} onChange={load} goTab={goTab} />}
+          {!personId && !incidentId && tab === 'send' && <Send locations={data.locations} isManager={isManager} locationId={locationId} goTab={goTab} automation={data.automation} openPerson={openPerson} />}
+          {!personId && !incidentId && tab === 'health' && <Health goTab={goTab} />}
+          {!personId && !incidentId && tab === 'cleanup' && <DataReview openPerson={id => setParam('person', id)} />}
+          {!personId && !incidentId && tab === 'sms-recovery' && <SmsRecoveryQueue openPerson={openPerson} />}
+          {!personId && !incidentId && tab === 'settings' && <Settings isManager={isManager} program={prog} readiness={data.readiness}
             locations={realLocations} onChange={load} goTab={goTab} automation={data.automation} />}
     </main>
   </>)

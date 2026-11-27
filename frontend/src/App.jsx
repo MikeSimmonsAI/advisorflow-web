@@ -1079,6 +1079,45 @@ function ProgramEntry() {
   return <ProgramCenter />
 }
 
+/** /program/incident/:id - the link in a system-check alert text and email.
+    Signed out: to sign-in, and back HERE afterwards (?next=). Signed in: the
+    server finds the incident and refuses it unless this login manages ITS
+    workspace; that workspace is then selected and the incident opens inside
+    the program shell. The URL carries only the random incident id. */
+function IncidentEntry() {
+  const { incidentId } = useParams()
+  const { pathname } = useLocation()
+  if (!isAuthenticated()) return <Navigate to={'/login?next=' + encodeURIComponent(pathname)} replace />
+  return <ProtectedRoute bare><IncidentOpen incidentId={incidentId} /></ProtectedRoute>
+}
+
+function IncidentOpen({ incidentId }) {
+  const navigate = useNavigate()
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    let alive = true
+    api.get('/program/incidents/' + encodeURIComponent(incidentId))
+      .then(d => {
+        if (!alive) return
+        if (d && d.organization_id) setWorkspaceContext(d.organization_id)
+        navigate('/program?incident=' + encodeURIComponent(incidentId), { replace: true })
+      })
+      .catch(e => { if (alive) setErr((e && (e.detail || e.message)) || 'This incident could not be opened.') })
+    return () => { alive = false }
+  }, [incidentId, navigate])
+  if (err) {
+    return (
+      <div style={{ padding: 32, maxWidth: 560 }} role="alert">
+        <h2>This incident could not be opened</h2>
+        <p>{err}</p>
+        <p>Incidents open only for a manager of the workspace they belong to.</p>
+        <a href="/workspaces">Choose your business</a>
+      </div>
+    )
+  }
+  return <div style={{ padding: 32 }}>Opening the incident…</div>
+}
+
 /** /program/import - SCI's Import Leads (the Intelligent Lead Importer, SCI
     target). Inside the SCI area: a program-only login is never sent to the
     general platform from here. Its requests carry the SCI workspace like every
@@ -1837,6 +1876,7 @@ export default function App() {
         <Route path="/program/import" element={<Navigate to="/program/import/new" replace />} />
         <Route path="/program/import/new" element={<ProtectedRoute bare><SciImportEntry /></ProtectedRoute>} />
         <Route path="/program/import/:batchId" element={<ProtectedRoute bare><SciImportEntry /></ProtectedRoute>} />
+        <Route path="/program/incident/:incidentId" element={<IncidentEntry />} />
         <Route path="/program/live" element={<ProtectedRoute bare><ProgramLive /></ProtectedRoute>} />
         <Route path="/program/command" element={<Navigate to="/program/live" replace />} />
         <Route path="/program" element={<ProtectedRoute bare><ProgramEntry /></ProtectedRoute>} />

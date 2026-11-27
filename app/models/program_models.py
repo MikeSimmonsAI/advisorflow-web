@@ -361,6 +361,44 @@ class ProgramAlert(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class ProgramIncident(Base):
+    """ONE system-check problem, however many checks see it (Nov 27).
+
+    Nov 27 12:12 AM: two checks (texts_never_started, first_messages_late)
+    flagged the same Restland family and the owner got a generic "check your
+    email" text and a link to the Responses inbox. An incident groups every
+    check that sees the same outreach problem, keeps each check's result in
+    its history, and is the page both the text and the email open.
+
+    Tenant-scoped: every read filters on organization_id and the route checks
+    the caller's membership in THIS workspace. The id is a random UUID; no
+    family detail is ever in a URL. Notifications are ProgramAlert rows (one
+    per channel) with dedupe_key "incident:<id>:<event>" - see
+    services/programs/incidents.py. Additive table: create_all() is the
+    migration."""
+    __tablename__ = "program_incidents"
+    __table_args__ = (Index("ix_program_incidents_org_status", "organization_id", "status"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    organization_id = Column(String, ForeignKey("organizations.id"), nullable=False)
+    incident_number = Column(String, nullable=False, unique=True)   # RES-261127-0012-7f3a
+    category = Column(String, nullable=False)               # first_outreach_delayed | batch_approval_pending ...
+    status = Column(String, nullable=False, default="open")  # open | resolved
+    severity = Column(String, nullable=False, default="warning")   # action_needed | warning | outage
+    title = Column(String, nullable=False)
+    check_keys = Column(Text, nullable=True)                # JSON list of every check that saw it
+    lead_ids = Column(Text, nullable=True)                  # JSON list - every family it has affected
+    affected_count = Column(Integer, nullable=False, default=0)
+    history = Column(Text, nullable=True)                   # JSON list of check results and events
+    started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_seen_at = Column(DateTime, nullable=True)
+    last_update_at = Column(DateTime, nullable=True)        # last "update" email (growth)
+    resolved_at = Column(DateTime, nullable=True)
+    resolution = Column(Text, nullable=True)                # what was verified when it closed
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class CampaignFamily(Base):
     """One campaign definition rendered per location - never copied per location."""
     __tablename__ = "program_campaign_families"
