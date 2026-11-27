@@ -258,7 +258,7 @@ export function Today() {
               <Link to={`${BASE}/leads/${m.lead.id}`} className="evs-row-main">
                 <b>{m.lead.company}</b>
                 <small>{m.lead.contact} · Replied {when(m.at)}</small>
-                <span className="evs-snip">“{m.body}”</span>
+                <span className="evs-snip">“{m.translation || m.body}”</span>
               </Link>
               <Link className={'evs-act ' + (i === 0 ? 'evs-act-primary' : '')} to={`${BASE}/leads/${m.lead.id}`}>{i === 0 ? 'Open reply' : 'Review reply'}<Icon name="arrow" size={14} /></Link>
             </div>
@@ -892,7 +892,7 @@ function ReplyHelp({ lead, reply, saved, onSent }) {
   return (
     <section className="evs-card evs-replyhelp">
       <h3 className="evs-h3i"><Icon name="reply" size={18} />They replied {when(reply.at)}</h3>
-      <blockquote className="evs-quoteblock">{reply.body}{reply.translation && <><br /><small><b>In English:</b> {reply.translation}</small></>}</blockquote>
+      <blockquote className="evs-quoteblock">{reply.translation || reply.body}{reply.translation && <details><summary>Show original</summary>{reply.body}</details>}</blockquote>
       <p className="evs-hint">{isText ? 'Their automatic texts already stopped.' : 'Their emails already stopped.'} {reply.how === 'reply_address' ? 'Matched by their reply address.' : reply.how === 'sender' ? (isText ? 'Matched by their phone number.' : 'Matched by their email address.') : ''}</p>
       {!t && (
         <div className="evs-actions">
@@ -941,8 +941,8 @@ function Message({ m }) {
         {problem && <span className="evs-pill evs-bad">{problem}</span>}
       </div>
       {m.subject && <div className="evs-subject">{m.subject}</div>}
-      <pre className="evs-body">{m.body}</pre>
-      {m.translation && <div className="evs-translation"><small>In English</small><p>{m.translation}</p></div>}
+      <pre className="evs-body">{m.translation || m.body}</pre>
+      {m.translation && <details className="evs-translation"><summary>Show original</summary><pre className="evs-body">{m.body}</pre></details>}
       {m.error && m.status === 'failed' && <small className="evs-err-small">{m.error}</small>}
     </div>
   )
@@ -964,7 +964,7 @@ export function Conversations() {
                 <Link to={`${BASE}/leads/${c.id}`} className="evs-row-main">
                   <b>{c.company}</b>
                   <small>{lm.direction === 'in' ? 'They replied' : (lm.subject || lm.channel)} · {when(lm.at)} · {c.message_count} message{c.message_count === 1 ? '' : 's'}</small>
-                  {lm.direction === 'in' && lm.body && <span className="evs-snip">“{lm.body}”</span>}
+                  {lm.direction === 'in' && lm.body && <span className="evs-snip">“{lm.translation || lm.body}”</span>}
                 </Link>
                 <div className="evs-row-acts">
                   <Status o={c.outreach} />
