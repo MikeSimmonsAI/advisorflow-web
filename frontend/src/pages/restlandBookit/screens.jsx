@@ -101,8 +101,63 @@ export function FuRow({ f, onOpen, showWho, t }) {
   )
 }
 
-// My Day — the owner's preview: a summary banner, four numbers, then today's
-// appointments beside the follow-up queue. Every number is real.
+// ── visit types (owner, Nov 26): one label and color everywhere ─────────────
+export const VISIT = {
+  onsite: ['Onsite Visit', 'onsite'], call: ['Call In', 'call'],
+  offsite: ['Offsite Visit', 'offsite'], unknown: ['Type Unspecified', 'unknown'],
+}
+export function VisitTag({ v }) { const [l, c] = VISIT[v] || VISIT.unknown; return <span className={'bk-kind ' + c}>{l}</span> }
+
+// Follow-up urgency: overdue (oldest first), then due now / needs a person /
+// due today, then upcoming by date, then those waiting with no date.
+function fuRank(f, t) {
+  const d = f.follow_up_on || ''
+  if (d && d < t) return [0, d]
+  if (f.due_now || d === t || (f.why || '').startsWith('Needs a person')) return [1, d || t]
+  if (d) return [2, d]
+  return [3, '']
+}
+export function byUrgency(list, t) {
+  return [...list].sort((x, y) => { const a = fuRank(x, t), b = fuRank(y, t); return a[0] - b[0] || a[1].localeCompare(b[1]) || String(x.family).localeCompare(String(y.family)) })
+}
+function fuStatus(f, t) {
+  if (!f.open) return f.status || 'Done'
+  if (f.follow_up_on && f.follow_up_on < t) return 'Overdue'
+  if (f.due_now) return 'Due now'
+  if ((f.why || '').startsWith('Needs a person')) return 'Needs a person'
+  if (f.follow_up_on === t) return 'Due today'
+  return f.follow_up_on ? 'Follow up ' + fmtDate(f.follow_up_on, { month: 'short', day: 'numeric' }) : 'Waiting'
+}
+
+// Compact appointment table: time (CT), family, visit type, advisor, status, Open.
+export function ApptTable({ rows, onOpen, showWho, showDate = true }) {
+  return (
+    <div className="bk-scroll"><table className="bk-compact"><thead><tr><th>{showDate ? 'Date · time (CT)' : 'Time (CT)'}</th><th>Family</th><th>Visit type</th>
+      {showWho && <th>Advisor</th>}<th>Status</th><th /></tr></thead>
+      <tbody>{rows.map(a => <tr key={a.id}>
+        <td className="time">{showDate ? fmtDate(a.date, { weekday: 'short', month: 'short', day: 'numeric' }) + ' · ' : ''}{fmtTime(a.time)}</td>
+        <td><b>{a.family}</b></td><td><VisitTag v={a.visit} /></td>{showWho && <td>{a.assigned || '—'}</td>}
+        <td><Pill>{a.outcome || a.status}</Pill></td>
+        <td><button className="bk-btn sm" onClick={() => onOpen(a.id)}>Open</button></td></tr>)}</tbody></table></div>
+  )
+}
+
+// Compact follow-up line: family + status, reason, a short reply preview, Review.
+export function FuLine({ f, t, onOpen, showWho }) {
+  const said = (f.said || '').replace(/\s+/g, ' ').trim()
+  return (
+    <div className="bk-qline">
+      <div className="bk-line flat"><strong>{f.family}</strong><Pill>{fuStatus(f, t)}</Pill></div>
+      <p className="muted">{(f.why || 'Follow-up').split('\n')[0]}{showWho && f.assigned ? ' · ' + f.assigned : ''}</p>
+      <div className="bk-line flat"><p className="said">{said ? '“' + (said.length > 80 ? said.slice(0, 80) + '…' : said) + '”' : <span className="muted">No reply yet</span>}</p>
+        <button className="bk-btn sm" onClick={() => onOpen(f.id)}>Review</button></div>
+    </div>
+  )
+}
+
+// My Day — the owner's compact mockup: four numbers, then today's (or the next)
+// appointments beside the most urgent follow-ups, five rows each, with links
+// to the full views. Every number is real.
 export function MyDay() {
   const { me, go } = useBk()
   const [person, setPerson] = useState('')
@@ -117,12 +172,14 @@ export function MyDay() {
   const t = today()
   const k = d.kpis, m = perf?.metrics || {}
   const mine = x => !person || x.assigned === person
-  const appts = w.appointments.filter(a => mine(a) && a.date === t && !String(a.status).startsWith('Cancel'))
+  const live = a => /^(Booked|Confirmed)/.test(a.status) && !a.outcome
+  const todays = w.appointments.filter(a => mine(a) && a.date === t && !String(a.status).startsWith('Cancel'))
     .sort((x, y) => String(x.time).localeCompare(String(y.time)))
+  const upcoming = w.appointments.filter(a => mine(a) && a.date > t && live(a))
+  const showing = todays.length ? todays : upcoming
   const openFu = w.follow_ups.filter(f => mine(f) && f.open)
-  const queue = openFu.filter(f => f.due_now || (f.follow_up_on && f.follow_up_on <= t) || (f.why || '').startsWith('Needs a person'))
-    .sort((x, y) => String(x.follow_up_on || '0').localeCompare(String(y.follow_up_on || '0')))
-  const openToday = appts.filter(a => /^(Booked|Confirmed)/.test(a.status) && !a.outcome).length
+  const queue = byUrgency(openFu, t)
+  const overdue = openFu.filter(f => f.follow_up_on && f.follow_up_on < t).length
   const pick = a => {
     if (a.ref_type === 'appointment') setPanel({ type: 'appt', id: a.ref_id, close: a.kind === 'missing_outcome' })
     else if (a.ref_type === 'follow_up') setPanel({ type: 'fu', id: a.ref_id })
@@ -136,109 +193,111 @@ export function MyDay() {
   return (
     <div>
       {picker}
-      <div className="bk-hero">
-        <h2>{fmtDate(d.date, { weekday: 'long', month: 'long', day: 'numeric' })} · Central time</h2>
-        <p>{num(openToday)} open appointment{openToday === 1 ? '' : 's'} today · {num(queue.length)} follow-up{queue.length === 1 ? '' : 's'} need attention{k.follow_ups_overdue ? ' (' + num(k.follow_ups_overdue) + ' overdue)' : ''}</p>
-      </div>
-      <div className="bk-metrics">
-        <Kpi l="Booked" v={num(k.upcoming_appointments)} s="Upcoming" onClick={() => go('appointments')} />
+      <div className="bk-metrics compact">
+        <Kpi l="Booked" v={num(k.upcoming_appointments)} s="Upcoming" onClick={() => go('calendar')} />
         <Kpi l="Showed" v={perf ? num(m.attended) : '…'} s="This month" onClick={() => go('performance')} />
-        <Kpi l="Follow-ups open" v={num(openFu.length)} onClick={() => go('follow-ups')} />
+        <Kpi l="Follow-ups open" v={num(openFu.length)} s={overdue ? num(overdue) + ' overdue' : 'None overdue'} onClick={() => go('follow-ups')} />
         <Kpi l="Contracts closed" v={perf ? num(m.closed_contracts) : '…'} s="This month" onClick={() => go('sales')} />
       </div>
       <div className="bk-split">
-        <section className="bk-card"><h2>Today’s appointments</h2>
-          {appts.length === 0 ? <p className="bk-line muted">No appointments today.</p>
-            : appts.map(a => <ApptRow key={a.id} a={a} showWho={who} onOpen={id => setPanel({ type: 'appt', id })} />)}</section>
-        <section className="bk-card"><h2>Follow-up queue<small><button className="bk-btn ghost" onClick={() => go('follow-ups')}>See all {num(openFu.length)}</button></small></h2>
-          {queue.length === 0 ? <p className="bk-line muted">No follow-ups need attention.</p>
-            : queue.slice(0, 15).map(f => <FuRow key={f.id} f={f} t={t} showWho={who} onOpen={id => setPanel({ type: 'fu', id })} />)}
-          {queue.length > 15 && <p className="bk-line muted">{queue.length - 15} more in Follow-Ups.</p>}</section>
+        <section className="bk-card"><h2>{todays.length ? 'Today’s appointments' : 'Next appointments'}<small>{todays.length ? num(todays.length) + ' today' : num(upcoming.length) + ' booked ahead'}</small></h2>
+          {showing.length === 0 ? <p className="bk-line muted">Nothing on the schedule.</p>
+            : <ApptTable rows={showing.slice(0, 5)} showWho={who} showDate={!todays.length} onOpen={id => setPanel({ type: 'appt', id })} />}
+          <div className="bk-actions bk-more"><button className="bk-btn" onClick={() => go('calendar')}>Open schedule</button></div></section>
+        <section className="bk-card"><h2>Follow-ups<small>{num(openFu.length)} open{overdue ? ' · ' + num(overdue) + ' overdue' : ''}</small></h2>
+          {queue.length === 0 ? <p className="bk-line muted">No open follow-ups.</p>
+            : queue.slice(0, 5).map(f => <FuLine key={f.id} f={f} t={t} showWho={who} onOpen={id => setPanel({ type: 'fu', id })} />)}
+          <div className="bk-actions bk-more"><button className="bk-btn" onClick={() => go('follow-ups')}>Open full queue{openFu.length > 5 ? ' (' + num(openFu.length) + ')' : ''}</button></div></section>
       </div>
-      {other.length > 0 && <section className="bk-card" style={{ marginTop: 16 }}><h2>Also needs attention<small>{other.length}</small></h2>
-        {other.slice(0, 20).map((a, i) => (
-          <div key={i} className="bk-line">
+      {other.length > 0 && <section className="bk-card" style={{ marginTop: 14 }}><h2>Also needs attention<small>{other.length}</small></h2>
+        {other.slice(0, 5).map((a, i) => (
+          <div key={i} className="bk-qline"><div className="bk-line flat">
             <div style={{ minWidth: 0 }}><strong>{a.name}</strong><p className="muted">{a.reason} · {a.next}</p></div>
-            <div className="bk-actions"><Pill>{a.status}</Pill><button className="bk-btn" onClick={() => pick(a)}>Open</button></div>
-          </div>))}</section>}
+            <div className="bk-actions"><Pill>{a.status}</Pill><button className="bk-btn sm" onClick={() => pick(a)}>Open</button></div></div></div>))}</section>}
       {panel?.type === 'appt' && <AppointmentPanel id={panel.id} startClose={panel.close} onClose={() => setPanel(null)} />}
       {panel?.type === 'fu' && <FollowUpPanel id={panel.id} onClose={() => setPanel(null)} />}
     </div>
   )
 }
 
-// ── Appointments ────────────────────────────────────────────────────────────
+// ── Appointments + Calendar: one schedule, shared state (owner, Nov 26) ─────
 
-function statusBadge(s) {
-  const v = String(s || '')
-  const cls = v.startsWith('Showed') ? 'ok' : v.startsWith('No-Show') || v.startsWith('Cancel') ? 'err' : v.startsWith('Booked') || v.startsWith('Confirmed') ? 'info' : ''
-  return <span className={'badge ' + cls}>{v || '—'}</span>
+const SCHED_KEY = 'bk_schedule'
+const SCHED0 = { view: 'week', week: 0, status: 'active', kind: '', who: '', q: '' }
+function useSchedule() {
+  const [st, setSt] = useState(() => { try { return { ...SCHED0, ...JSON.parse(sessionStorage.getItem(SCHED_KEY) || '{}') } } catch { return SCHED0 } })
+  const set = patch => setSt(cur => { const n = { ...cur, ...patch }; try { sessionStorage.setItem(SCHED_KEY, JSON.stringify(n)) } catch { /* ignore */ } return n })
+  return [st, set]
 }
+function weekDays(offset) {
+  const d = new Date(today() + 'T12:00:00'); d.setDate(d.getDate() - d.getDay() + offset * 7)
+  return Array.from({ length: 7 }).map((_, i) => { const x = new Date(d); x.setDate(d.getDate() + i); return x.toLocaleDateString('en-CA') })
+}
+const STATUS_FILTERS = [['active', 'Booked & done'], ['booked', 'Booked'], ['needs', 'Needs outcome'], ['Showed', 'Showed'],
+  ['No-Show', 'No-show'], ['Cancel', 'Cancelled'], ['all', 'All']]
 
-export function Appointments({ initialView = 'list' }) {
+export function Schedule() {
   const { me } = useBk()
   const [w] = useData(R + '/work')
-  const [view, setView] = useState(initialView)
-  const [when, setWhen] = useState('upcoming')
-  const [status, setStatus] = useState('')
-  const [who, setWho] = useState('')
-  const [q, setQ] = useState('')
+  const [st, set] = useSchedule()
   const [panel, setPanel] = useState(() => openParam())
-  if (!w) return <div className="bk-card"><Skeleton rows={8} /></div>
+  const narrow = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 760px)').matches
+  const view = narrow && st.view === 'week' ? 'agenda' : st.view
+  const days = weekDays(st.week)
   const t = today()
-  let rows = w.appointments.filter(a => {
-    if (when === 'upcoming' && !(a.date >= t && !String(a.status).startsWith('Cancel'))) return false
-    if (when === 'today' && a.date !== t) return false
-    if (when === 'past' && !(a.date < t)) return false
-    if (when === 'needs_outcome' && !(a.date < t && /^(Booked|Confirmed)/.test(a.status) && !a.outcome)) return false
-    if (status && !String(a.outcome || a.status).startsWith(status)) return false
-    if (who && a.assigned !== who) return false
-    if (q && !(a.family || '').toLowerCase().includes(q.toLowerCase())) return false
+  const bar = (
+    <Toolbar>
+      <div className="bk-seg"><button onClick={() => set({ week: st.week - 1 })}>‹ Previous</button>
+        <button className={st.week === 0 ? 'on' : ''} onClick={() => set({ week: 0 })}>This week</button>
+        <button onClick={() => set({ week: st.week + 1 })}>Next ›</button></div>
+      <div className="bk-seg"><button className={view === 'week' ? 'on' : ''} onClick={() => set({ view: 'week' })} disabled={narrow}>Week</button>
+        <button className={view === 'agenda' ? 'on' : ''} onClick={() => set({ view: 'agenda' })}>Agenda</button></div>
+    </Toolbar>)
+  if (!w) return <>{bar}<div className="bk-card"><Skeleton rows={8} /></div></>
+  const rows = w.appointments.filter(a => {
+    if (!days.includes(a.date)) return false
+    const s = String(a.outcome || a.status)
+    if (st.status === 'active' && s.startsWith('Cancel')) return false
+    if (st.status === 'booked' && !(/^(Booked|Confirmed)/.test(a.status) && !a.outcome)) return false
+    if (st.status === 'needs' && !(a.date < t && /^(Booked|Confirmed)/.test(a.status) && !a.outcome)) return false
+    if (!['active', 'booked', 'needs', 'all'].includes(st.status) && !s.startsWith(st.status)) return false
+    if (st.kind && (a.visit || 'unknown') !== st.kind) return false
+    if (st.who && a.assigned !== st.who) return false
+    if (st.q && !(a.family || '').toLowerCase().includes(st.q.toLowerCase())) return false
     return true
-  })
-  if (when === 'past') rows = [...rows].reverse()
+  }).sort((x, y) => (x.date + x.time).localeCompare(y.date + y.time))
   return (
     <div>
-      <Toolbar>
-        <div className="bk-seg">{[['upcoming', 'Upcoming'], ['today', 'Today'], ['needs_outcome', 'Needs outcome'], ['past', 'Past'], ['all', 'All']].map(([k, l]) =>
-          <button key={k} className={when === k ? 'on' : ''} onClick={() => setWhen(k)}>{l}</button>)}</div>
-        <select value={status} onChange={e => setStatus(e.target.value)} aria-label="Status"><option value="">Any status</option>
-          {['Booked', 'Confirmed', 'Showed', 'No-Show', 'Rescheduled', 'Cancelled'].map(s => <option key={s}>{s}</option>)}</select>
-        {me.me.manager && <select value={who} onChange={e => setWho(e.target.value)} aria-label="Advisor"><option value="">Every advisor</option>
+      {bar}
+      <div className="bk-actions bk-filters">
+        <select value={st.status} onChange={e => set({ status: e.target.value })} aria-label="Status">{STATUS_FILTERS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+        <select value={st.kind} onChange={e => set({ kind: e.target.value })} aria-label="Visit type"><option value="">All visit types</option>
+          {Object.entries(VISIT).map(([k, [l]]) => <option key={k} value={k}>{l}</option>)}</select>
+        {me.me.manager && <select value={st.who} onChange={e => set({ who: e.target.value })} aria-label="Advisor"><option value="">Every advisor</option>
           {(me.team || []).map(n => <option key={n}>{n}</option>)}</select>}
-        <input placeholder="Family" value={q} onChange={e => setQ(e.target.value)} aria-label="Find a family" />
-        <div className="bk-seg" style={{ marginLeft: 'auto' }}><button className={view === 'list' ? 'on' : ''} onClick={() => setView('list')}>List</button>
-          <button className={view === 'cal' ? 'on' : ''} onClick={() => setView('cal')}>Calendar</button></div>
-      </Toolbar>
-      {view === 'cal' ? <Week rows={w.appointments} onPick={setPanel} /> : (
-        <section className="bk-card"><h2>Appointment schedule · CT<small>{rows.length}</small></h2>
-          {rows.length === 0 ? <p className="bk-line muted">No appointments match these filters.</p>
-            : rows.map(a => <ApptRow key={a.id} a={a} showWho={me.me.manager} onOpen={setPanel} />)}</section>)}
+        <input placeholder="Family" value={st.q} onChange={e => set({ q: e.target.value })} aria-label="Find a family" />
+        <span className="bk-legend">{Object.keys(VISIT).map(k => <VisitTag key={k} v={k} />)}</span>
+      </div>
+      <h2 className="bk-weekhead">{fmtDate(days[0], { weekday: 'short', month: 'short', day: 'numeric' })} – {fmtDate(days[6], { weekday: 'short', month: 'short', day: 'numeric' })} · CT<small>{num(rows.length)} appointment{rows.length === 1 ? '' : 's'}</small></h2>
+      {view === 'agenda'
+        ? <section className="bk-card">{rows.length === 0 ? <p className="bk-line muted">No appointments match these filters this week.</p>
+            : <ApptTable rows={rows} showWho={me.me.manager} onOpen={setPanel} />}</section>
+        : <div className="bk-week">{days.map(d => {
+            const list = rows.filter(a => a.date === d)
+            return (
+              <section key={d} className={'bk-card bk-day' + (d === t ? ' today' : '')}>
+                <h3>{fmtDate(d, { weekday: 'short', month: 'short', day: 'numeric' })}</h3>
+                {list.length === 0 ? <p className="faint">No appointments</p> : list.map(a => (
+                  <button key={a.id} className={'bk-event ' + (VISIT[a.visit] || VISIT.unknown)[1]} onClick={() => setPanel(a.id)}>
+                    <b>{fmtTime(a.time)}</b><span className="fam">{a.family}</span><VisitTag v={a.visit} />
+                    <small>{a.outcome || a.status}{me.me.manager && a.assigned ? ' · ' + a.assigned : ''}</small></button>))}
+              </section>)
+          })}</div>}
       {panel && <AppointmentPanel id={panel} onClose={() => setPanel(null)} />}
     </div>
   )
 }
-
-function Week({ rows, onPick }) {
-  const [start, setStart] = useState(() => { const d = new Date(today() + 'T12:00:00'); d.setDate(d.getDate() - d.getDay()); return d })
-  const days = Array.from({ length: 7 }).map((_, i) => { const d = new Date(start); d.setDate(d.getDate() + i); return d.toLocaleDateString('en-CA') })
-  const move = n => setStart(s => { const d = new Date(s); d.setDate(d.getDate() + n); return d })
-  return (
-    <div className="bk-card">
-      <div className="bk-bar"><button className="bk-btn" onClick={() => move(-7)}>‹</button><b>{fmtDate(days[0])} – {fmtDate(days[6])}</b>
-        <button className="bk-btn" onClick={() => move(7)}>›</button></div>
-      <div className="bk-grid" style={{ gridTemplateColumns: 'repeat(7, minmax(110px, 1fr))', overflowX: 'auto' }}>
-        {days.map(d => (
-          <div key={d} style={{ minWidth: 110 }}>
-            <div className="faint" style={{ fontWeight: 600, color: d === today() ? '#176B4A' : null }}>{fmtDate(d)}</div>
-            {rows.filter(a => a.date === d && !String(a.status).startsWith('Cancel')).map(a => (
-              <button key={a.id} className="bk-chip btn" style={{ display: 'block', width: '100%', textAlign: 'left', margin: '6px 0', borderRadius: 10 }} onClick={() => onPick(a.id)}>
-                <b>{fmtTime(a.time)}</b><br />{a.family}</button>))}
-          </div>))}
-      </div>
-    </div>
-  )
-}
+export const Appointments = Schedule
 
 export function AppointmentPanel({ id, onClose, startClose }) {
   const { say, refresh, me } = useBk()
@@ -248,22 +307,28 @@ export function AppointmentPanel({ id, onClose, startClose }) {
   const a = d.appointment || {}
   const reload = () => api.get(R + '/appointments/' + encodeURIComponent(id)).then(setD).catch(() => {})
   return (
-    <Panel title={a.family || 'Appointment'} sub={`${fmtDate(a.date)} · ${fmtTime(a.time)} · ${a.how || ''}`} onClose={onClose}
+    <Panel title={a.family || 'Appointment'} sub={`${fmtDate(a.date)} · ${fmtTime(a.time)} CT · ${(VISIT[a.visit] || VISIT.unknown)[0]}`} onClose={onClose}
       foot={mode === 'view' && <>
         {a.phone && <a className="bk-btn" href={'tel:' + a.phone}><Icon name="phone" />Call</a>}
         {a.phone && <a className="bk-btn" href={'sms:' + a.phone}><Icon name="text" />Text</a>}
         {a.email && <a className="bk-btn" href={'mailto:' + a.email}><Icon name="mail" />Email</a>}
+        {/^(Booked|Confirmed)/.test(a.status || '') && !a.outcome && <>
+          <button className="bk-btn" onClick={() => setMode('move')}>Reschedule</button>
+          <button className="bk-btn" onClick={() => setMode('cancel')}>Cancel</button></>}
         <button className="bk-btn" onClick={() => setMode('sale')}><Icon name="dollar" />Record sale</button>
         <button className="bk-btn pri" onClick={() => setMode('close')}><Icon name="check" />{d.disposition?.closed_at ? 'View ticket' : 'Close ticket'}</button></>}>
+      {mode === 'move' && <MoveAppointment id={id} a={a} onDone={() => { reload(); refresh(); setMode('view') }} onCancel={() => setMode('view')} />}
+      {mode === 'cancel' && <CancelAppointment id={id} a={a} onDone={() => { reload(); refresh(); setMode('view') }} onCancel={() => setMode('view')} />}
       {mode === 'close' && <CloseTicket d={d} onDone={() => { reload(); refresh(); setMode('view') }} onSale={() => setMode('sale')} />}
       {mode === 'sale' && <SaleEditor appointmentId={id} onDone={() => { reload(); refresh(); setMode('view') }} onCancel={() => setMode('view')} />}
       {mode === 'view' && <>
         <div className="bk-card" style={{ marginBottom: 12 }}>
           <dl className="bk-kv">
+            <dt>Visit type</dt><dd><VisitTag v={a.visit} />{a.visit_detail ? ' ' + a.visit_detail : ''}{a.visit === 'unknown' && a.how ? ' (recorded as “' + a.how + '”)' : ''}</dd>
             <dt>Status</dt><dd>{statusBadge(a.outcome || a.status)}</dd>
             <dt>Assigned to</dt><dd>{d.assigned || '—'}</dd>
             <dt>Phone</dt><dd>{a.phone || '—'}</dd><dt>Email</dt><dd>{a.email || '—'}</dd>
-            {a.home_address && <><dt>Home address</dt><dd>{a.home_address}</dd></>}
+            {a.home_address && <><dt>{a.visit === 'offsite' ? 'Visit address' : 'Home address'}</dt><dd>{a.home_address}</dd></>}
             {a.link && <><dt>Call link</dt><dd>{a.link}</dd></>}
             <dt>Came from</dt><dd>{label(d.attribution?.acquisition_source)}{d.attribution?.booking_source ? ' · booked by ' + label(d.attribution.booking_source) : ''}</dd>
             <dt>Paperwork</dt><dd>Permission to Access: {label(d.paperwork?.pta_status)} · Planning Guide: {label(d.paperwork?.ppg_status)}</dd>
@@ -277,6 +342,51 @@ export function AppointmentPanel({ id, onClose, startClose }) {
         </div>
       </>}
     </Panel>
+  )
+}
+
+// Reschedule / cancel - the same server path as the command center (open-time
+// check, calendar move, the family's confirmation). Success is shown only after
+// the server confirms it.
+function MoveAppointment({ id, a, onDone, onCancel }) {
+  const { say } = useBk()
+  const [slot, setSlot] = useState((a.date || today()) + 'T' + (a.time || '10:00'))
+  const [busy, setBusy] = useState(false)
+  const go = async () => {
+    setBusy(true)
+    const r = await send(() => api.post(R + '/appointments/' + encodeURIComponent(id) + '/reschedule', { data: { slot } }), say)
+    setBusy(false)
+    if (r && r.ok) { say('Moved to ' + fmtDate(slot.slice(0, 10)) + ' at ' + fmtTime(slot.slice(11, 16)) + ' CT. The family gets the confirmation.'); onDone() }
+  }
+  return (
+    <div className="bk-card"><h2>Reschedule</h2>
+      <div className="bk-field"><label>New date and time (Central)</label>
+        <input type="datetime-local" step="900" value={slot} onChange={e => setSlot(e.target.value)} /></div>
+      <p className="faint">The time has to be open on the calendar. The family gets the usual "your appointment moved" text or email.</p>
+      <div className="bk-actions"><button className="bk-btn" onClick={onCancel}>Back</button>
+        <button className="bk-btn pri" onClick={go} disabled={busy || !slot}>{busy ? 'Moving…' : 'Move appointment'}</button></div>
+    </div>
+  )
+}
+
+function CancelAppointment({ id, a, onDone, onCancel }) {
+  const { say } = useBk()
+  const [notify, setNotify] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const go = async () => {
+    setBusy(true)
+    const r = await send(() => api.post(R + '/appointments/' + encodeURIComponent(id) + '/cancel', { data: { notify } }), say)
+    setBusy(false)
+    if (r && r.ok) { say('Cancelled.' + (notify ? ' The family gets the cancellation note.' : '')); onDone() }
+  }
+  return (
+    <div className="bk-card"><h2>Cancel this appointment?</h2>
+      <p>{a.family} · {fmtDate(a.date)} · {fmtTime(a.time)} CT</p>
+      <label className="bk-line flat"><span><input type="checkbox" checked={notify} onChange={e => setNotify(e.target.checked)} /> Let the family know (text/email)</span></label>
+      <p className="faint">The family goes back to a person to find a new time.</p>
+      <div className="bk-actions"><button className="bk-btn" onClick={onCancel}>Keep it</button>
+        <button className="bk-btn pri" onClick={go} disabled={busy}>{busy ? 'Cancelling…' : 'Cancel appointment'}</button></div>
+    </div>
   )
 }
 
@@ -458,7 +568,7 @@ export function FollowUps() {
         </Toolbar>
       <section className="bk-card"><h2>Family follow-ups<small>{rows.length}</small></h2>
         {rows.length === 0 ? <p className="bk-line muted">No follow-ups match these filters.</p>
-          : rows.map(f => <FuRow key={f.id} f={f} t={t} showWho={me.me.manager} onOpen={setPanel} />)}</section>
+          : rows.map(f => <FuLine key={f.id} f={f} t={t} showWho={me.me.manager} onOpen={setPanel} />)}</section>
       {panel && <FollowUpPanel id={panel} onClose={() => setPanel(null)} />}
     </div>
   )
@@ -725,23 +835,54 @@ function AddCasePanel({ c, onClose, onSaved }) {
 
 // ── Families ────────────────────────────────────────────────────────────────
 
+// My Families (owner's compact mockup): a searchable table, 25 a page, with a
+// result count. Search and page are kept when you come back. Rows come from
+// the caller's own work only (the server scopes /work); contact, advisor and
+// follow-up columns show what this login is allowed to see.
+const FAM_KEY = 'bk_families'
+const FAM_PAGE = 25
 export function Families() {
   const { me } = useBk()
   const [w] = useData(R + '/work')
-  const [q, setQ] = useState('')
+  const [st, setSt] = useState(() => { try { return { q: '', page: 0, ...JSON.parse(sessionStorage.getItem(FAM_KEY) || '{}') } } catch { return { q: '', page: 0 } } })
+  const set = patch => setSt(cur => { const n = { ...cur, ...patch }; try { sessionStorage.setItem(FAM_KEY, JSON.stringify(n)) } catch { /* ignore */ } return n })
   const [open, setOpen] = useState(() => openParam())
-  if (!w) return <div className="bk-card"><Skeleton rows={6} /></div>
+  const bar = <Toolbar><input className="bk-famsearch" placeholder="Search families" value={st.q} onChange={e => set({ q: e.target.value, page: 0 })} aria-label="Search families" /></Toolbar>
+  if (!w) return <>{bar}<div className="bk-card"><Skeleton rows={6} /></div></>
+  const t = today()
   const fam = new Map()
-  for (const a of [...w.appointments, ...w.follow_ups]) if (a.lead_id && !fam.has(a.lead_id)) fam.set(a.lead_id, a)
-  const list = [...fam.values()].filter(f => !q || (f.family || '').toLowerCase().includes(q.toLowerCase()))
+  for (const a of [...w.appointments, ...w.follow_ups]) {
+    if (!a.lead_id) continue
+    const f = fam.get(a.lead_id) || { lead_id: a.lead_id, family: a.family, phone: a.phone, email: a.email, assigned: a.assigned, open_fu: 0, next: null }
+    if (a.open) f.open_fu += 1
+    if (a.date && a.date >= t && /^(Booked|Confirmed)/.test(a.status || '') && (!f.next || a.date + a.time < f.next.date + f.next.time)) f.next = a
+    if (!f.phone && a.phone) f.phone = a.phone
+    if (!f.email && a.email) f.email = a.email
+    fam.set(a.lead_id, f)
+  }
+  const q = st.q.trim().toLowerCase()
+  const list = [...fam.values()].filter(f => !q || [f.family, f.phone, f.email].some(x => (x || '').toLowerCase().includes(q)))
+    .sort((x, y) => String(x.family).localeCompare(String(y.family)))
+  const pages = Math.max(1, Math.ceil(list.length / FAM_PAGE))
+  const page = Math.min(st.page, pages - 1)
+  const shown = list.slice(page * FAM_PAGE, page * FAM_PAGE + FAM_PAGE)
   return (
     <div>
-      <Toolbar><input placeholder="Find a family" value={q} onChange={e => setQ(e.target.value)} aria-label="Find a family" /></Toolbar>
-      <section className="bk-card"><h2>Family directory<small>{list.length} families</small></h2>
-        {list.length === 0 ? <p className="bk-line muted">No matching families.</p> : list.slice(0, 200).map(f => (
-          <div key={f.lead_id} className="bk-line">
-            <div style={{ minWidth: 0 }}><strong>{f.family}</strong><p className="muted">{[f.phone, f.email, me.me.manager ? f.assigned : null].filter(Boolean).join(' · ')}</p></div>
-            <button className="bk-btn" onClick={() => setOpen(f.lead_id)}>Open family</button></div>))}</section>
+      {bar}
+      <section className="bk-card"><h2>Family directory<small>{num(list.length)} {list.length === 1 ? 'family' : 'families'}{q ? ' match' : ''}</small></h2>
+        {list.length === 0 ? <p className="bk-line muted">No matching families.</p> : <>
+          <div className="bk-scroll"><table className="bk-compact"><thead><tr><th>Family</th><th>Phone</th><th>Email</th>
+            {me.me.manager && <th>Advisor</th>}<th>Open follow-ups</th><th>Next appointment</th><th /></tr></thead>
+            <tbody>{shown.map(f => <tr key={f.lead_id}>
+              <td><b>{f.family}</b></td><td>{f.phone || '—'}</td><td className="wrap">{f.email || '—'}</td>
+              {me.me.manager && <td>{f.assigned || '—'}</td>}
+              <td>{f.open_fu || '—'}</td>
+              <td>{f.next ? <>{fmtDate(f.next.date, { month: 'short', day: 'numeric' })} · {fmtTime(f.next.time)} <VisitTag v={f.next.visit} /></> : '—'}</td>
+              <td><button className="bk-btn sm" onClick={() => setOpen(f.lead_id)}>Open family</button></td></tr>)}</tbody></table></div>
+          <div className="bk-pager"><span className="muted">{num(page * FAM_PAGE + 1)}–{num(page * FAM_PAGE + shown.length)} of {num(list.length)}</span>
+            <div className="bk-actions">{page > 0 && <button className="bk-btn" onClick={() => set({ page: page - 1 })}>Previous</button>}
+              {page < pages - 1 && <button className="bk-btn" onClick={() => set({ page: page + 1 })}>Next</button>}</div></div></>}
+      </section>
       {open && <FamilyPanel id={open} onClose={() => setOpen(null)} />}
     </div>
   )
@@ -989,7 +1130,13 @@ export function Advisors() {
     appts: w.appointments.filter(a => a.assigned === name && a.date >= t && /^(Booked|Confirmed)/.test(a.status)),
     fus: w.follow_ups.filter(f => f.assigned === name && f.open),
   })
-  const inRot = m => /rotation/i.test(m.status || '') && !/not/i.test(m.status || '')
+  const inRot = m => !m.held && /^In the rotation/i.test(m.status || '')
+  const rotate = async (m) => {
+    const out = inRot(m)
+    if (out && !window.confirm('Take ' + m.name + ' out of the rotation? They keep everything already assigned; new families go to the others.')) return
+    if (await send(() => api.patch(R + '/team/' + m.id + '/rotation', { data: { in_rotation: !out } }), say,
+      out ? m.name + ' is out of the rotation.' : m.name + ' is back in the rotation.')) refresh()
+  }
   const toggle = async (m) => { if (await send(() => api.patch(R + '/team/' + m.id, { data: { access_suspended: !m.access_suspended } }), say, 'Updated.')) refresh() }
   const panels = <>{panel?.type === 'appt' && <AppointmentPanel id={panel.id} onClose={() => setPanel(null)} />}
     {panel?.type === 'fu' && <FollowUpPanel id={panel.id} onClose={() => setPanel(null)} />}</>
@@ -1002,9 +1149,9 @@ export function Advisors() {
         <div className="bk-metrics"><Kpi l="Booked" v={num(x.appts.length)} s="Upcoming" /><Kpi l="Open follow-ups" v={num(x.fus.length)} /></div>
         <div className="bk-split">
           <section className="bk-card"><h2>Assigned appointments</h2>{x.appts.length === 0 ? <p className="bk-line muted">None upcoming.</p>
-            : x.appts.map(a => <ApptRow key={a.id} a={a} onOpen={id => setPanel({ type: 'appt', id })} />)}</section>
+            : <ApptTable rows={x.appts} onOpen={id => setPanel({ type: 'appt', id })} />}</section>
           <section className="bk-card"><h2>Assigned follow-ups</h2>{x.fus.length === 0 ? <p className="bk-line muted">No open follow-ups.</p>
-            : x.fus.map(f => <FuRow key={f.id} f={f} t={t} onOpen={id => setPanel({ type: 'fu', id })} />)}</section>
+            : byUrgency(x.fus, t).map(f => <FuLine key={f.id} f={f} t={t} onOpen={id => setPanel({ type: 'fu', id })} />)}</section>
         </div>
         {panels}
       </div>
@@ -1021,10 +1168,11 @@ export function Advisors() {
             <div className="bk-line flat"><h2 style={{ margin: 0 }}>{m.name}</h2><Pill>{inRot(m) ? 'In rotation' : 'Not in rotation'}</Pill></div>
             <p className="bk-line"><span><strong>{num(x.appts.length)}</strong> booked · <strong>{num(x.fus.length)}</strong> open follow-ups</span></p>
             <div className="bk-actions"><button className="bk-btn pri" onClick={() => setPick(m.id)}>View advisor</button>
+              <button className="bk-btn" onClick={() => rotate(m)}>{inRot(m) ? 'Take out of rotation' : 'Put in rotation'}</button>
               <button className="bk-btn" onClick={() => toggle(m)}>{m.access_suspended ? 'Restore access' : 'Pause access'}</button></div>
           </section>)
       })}</div>
-      <p className="faint" style={{ marginTop: 12 }}>Who is in the rotation comes from the sheet's Team tab. Pausing access keeps all of a person's history.</p>
+      <p className="faint" style={{ marginTop: 12 }}>The rotation follows the sheet's Team tab (Active?) and these buttons; changes apply on the board's next pass, within about two minutes. Pausing access keeps all of a person's history.</p>
     </div>
   )
 }

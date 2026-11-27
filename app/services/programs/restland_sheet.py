@@ -1933,6 +1933,10 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
         if not p["active"]:
             status_lines[name] = "Not in the rotation (Active? is unchecked)"
             continue
+        if name in (cfg.get("held") or []):
+            # Owner, Nov 26: management can take someone out of the rotation in BookIT.
+            status_lines[name] = "Out of the rotation (set in BookIT by management)"
+            continue
         mine = [r for r in known.values() if (r.assigned_to or "") == name]
         has_open = any(r.row_id in open_ids for r in mine)
         last = max([r.staff_changed_at or r.assigned_at for r in mine if (r.staff_changed_at or r.assigned_at)]

@@ -142,8 +142,8 @@ export default function BookitApp() {
             {!me ? <div className="bk-card"><div className="bk-skel" /><div className="bk-skel" style={{ width: '70%' }} /></div> : (
               <Routes>
                 <Route index element={<S.MyDay />} />
-                <Route path="appointments" element={<S.Appointments />} />
-                <Route path="calendar" element={<S.Appointments initialView="cal" />} />
+                <Route path="appointments" element={<S.Schedule />} />
+                <Route path="calendar" element={<S.Schedule />} />
                 <Route path="follow-ups" element={<S.FollowUps />} />
                 <Route path="evo6" element={<S.Evo6 kind="evo6" />} />
                 <Route path="add-leads" element={<S.AddLeads />} />

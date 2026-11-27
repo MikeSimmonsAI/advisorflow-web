@@ -517,3 +517,39 @@ def test_my_quick_view_counts_only_your_own_booked_next_7_days_by_visit_type(set
     boss = core.who(db, prog, _U("owner"), manager=True)
     assert "total" not in insights.quick_view(db, prog, boss, today=day)
     assert TB.visit_kind("remote") == "call" and TB.visit_kind("weird") == "unknown"
+
+
+def test_bookit_cancel_and_reschedule_reach_only_your_own_and_never_message_in_tests(setter, sample_advisor, monkeypatch):
+    """Owner, Nov 26: booking changes from BookIT, tested on test data only."""
+    from app.services.programs import appointment_notifications as AN
+    from app.services.programs import appointment_ops as OPS
+    sent = []
+    monkeypatch.setattr(AN, "on_cancelled", lambda db, b, **k: sent.append(("cancel", b.id)) or {})
+    monkeypatch.setattr(AN, "on_booked", lambda db, b, **k: sent.append(("moved", b.id)) or {})
+    monkeypatch.setattr(AN, "run", lambda *a, **k: None)
+    db, org, prog, sheet, appts, mine, other = _team(setter, sample_advisor)
+    _live(db, prog)
+    ann = core.who(db, prog, _U("u-ann"), manager=False)
+    with pytest.raises(core.BookitError):
+        workflow.appointment(db, prog, ann, other.id)           # not hers: refused before anything moves
+    b, _ = workflow.appointment(db, prog, ann, mine.id)
+    OPS.cancel(db, prog, b, _U("u-ann"), acknowledge=True)
+    assert b.status == "cancelled" and sent == [("cancel", mine.id)]
+    with pytest.raises(OPS.OpError):
+        OPS.cancel(db, prog, b, _U("u-ann"))                      # only once
+    with pytest.raises(OPS.OpError):
+        OPS.reschedule(db, prog, b, datetime(2026, 12, 3, 10, 0), _U("u-ann"))
+
+
+def test_management_can_hold_someone_out_of_the_rotation(setter, sample_advisor):
+    db, org, prog, sheet, appts, mine, other = _team(setter, sample_advisor)
+    cfg = RS._cfg(prog)
+    cfg["held"] = ["Ann"]
+    RS._save_cfg(prog, cfg)
+    db.commit()
+    l3, b3 = _booking(db, org, sample_advisor, "L003", "Vera", day=datetime(2026, 12, 2, 10, 0))
+    _run_team(db, prog, sheet, appts + [_appt(b3.id, _serial(NOW) + 7)], [], NOW)
+    from app.models.program_models import HandoffSheetRow as R
+    row = db.query(R).filter_by(organization_id=org.id, row_id=b3.id).one()
+    assert row.assigned_to == "Bob"                               # Ann is held out; her own work stays hers
+    assert db.query(R).filter_by(organization_id=org.id, row_id=mine.id).one().assigned_to == "Ann"
