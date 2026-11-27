@@ -11,6 +11,7 @@ import './restland-access.css'
 export function useRestlandBrand(title) {
   useEffect(() => {
     const prevTitle = document.title
+    document.documentElement.setAttribute('data-brand-lock', 'restland')   // theme.js leaves the name alone
     document.title = title
     const links = [...document.querySelectorAll("link[rel~='icon']")]
     const prev = links.map(l => l.href)
@@ -18,7 +19,10 @@ export function useRestlandBrand(title) {
     if (!links.length) {
       const l = document.createElement('link'); l.rel = 'icon'; l.href = '/restland/favicon.svg'; document.head.appendChild(l)
     }
-    return () => { document.title = prevTitle; links.forEach((l, i) => { l.href = prev[i] }) }
+    return () => {
+      document.documentElement.removeAttribute('data-brand-lock')
+      document.title = prevTitle; links.forEach((l, i) => { l.href = prev[i] })
+    }
   }, [title])
 }
 

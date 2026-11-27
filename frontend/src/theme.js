@@ -147,6 +147,9 @@ export function applyTheme(theme) {
 
   document.documentElement.setAttribute('data-theme', theme)
 
+  // A Restland BookIT staff page names itself (owner, Nov 27): never the platform.
+  if (document.documentElement.getAttribute('data-brand-lock') === 'restland') return
+
   // VOLT Marketing's own domain names itself on every page (sign-in, reset,
   // activation included); index.html already set its title and red V mark.
   if (isVoltHost()) { document.title = 'VOLT Marketing'; return }
@@ -290,6 +293,7 @@ export function applyBrandPayload(brand) {
   if (!brand || typeof document === 'undefined') return
 
   if (brand.theme) document.documentElement.setAttribute('data-theme', brand.theme)
+  if (document.documentElement.getAttribute('data-brand-lock') === 'restland') return
   if (brand.documentTitle) document.title = brand.documentTitle
 
   if (brand.faviconUrl) {

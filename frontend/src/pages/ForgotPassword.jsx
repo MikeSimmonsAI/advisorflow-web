@@ -13,6 +13,7 @@ export default function ForgotPassword() {
   const restland = params.get('brand') === 'restland'
   useEffect(() => {
     if (!restland) return
+    document.documentElement.setAttribute('data-brand-lock', 'restland')
     document.title = 'Reset your password | Restland BookIT'
     document.querySelectorAll("link[rel~='icon']").forEach(l => { l.href = '/restland/favicon.svg' })
   }, [restland])
