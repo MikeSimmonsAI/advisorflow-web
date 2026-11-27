@@ -514,3 +514,13 @@
 .ta-appt-actions { display: flex; gap: 10px; align-items: stretch; }
 .ta-appt-actions > .ta-btn { flex: 1 1 0; margin: 0; }
 .ta-more-h { margin: 18px 0 8px; } .ta-more-links { margin-bottom: 14px; }
+.ta-set { padding: 10px 8px; }
+.ta-set-t { width: 100%; border-collapse: collapse; font-size: 14px; table-layout: fixed; }
+.ta-set-t th, .ta-set-t td { padding: 7px 2px; text-align: center; border-bottom: 1px solid #e3e9f2; }
+.ta-set-t thead th { font-size: 12px; color: var(--ta-muted); font-weight: 800; }
+.ta-set-t tbody th { text-align: left; font-size: 13px; font-weight: 700; width: 30%; }
+.ta-set-t tr.r-set td, .ta-set-t tr.r-set th { font-weight: 800; font-size: 16px; color: #087F68; }
+.ta-set-t tr.r-no_show td, .ta-set-t tr.r-cancelled td { color: #C62839; }
+.ta-set-t tr:last-child th, .ta-set-t tr:last-child td { border-bottom: 0; }
+.ta-set-t tbody th { width: 34%; white-space: nowrap; font-size: 12.5px; }
+.ta-set-t thead th:first-child::after { content: 'Days'; }

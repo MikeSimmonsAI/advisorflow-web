@@ -40,3 +40,22 @@ def test_appointments_set_spans_count_by_booking_day():
         S.rows = orig
     assert [t[k]["set"] for k in ("Today", "7 days", "30 days", "45 days", "60 days", "All time")] == [1, 3, 4, 5, 6, 7]
     assert t["All time"]["kept"] == 6 and t["All time"]["cancelled"] == 1 and t["All time"]["showed"] == 2
+
+
+def test_bookit_appointments_set_route_managers_only(monkeypatch):
+    import pytest
+    from fastapi import HTTPException, Response
+    from app.routers import restland_bookit_router as BR
+
+    class _W:
+        def __init__(self, m): self.manager = m
+    prog = type("P", (), {"organization_id": "org1"})()
+    monkeypatch.setattr(S, "ledger", lambda db, org: _L([], []))
+    monkeypatch.setattr(S, "rows", lambda L_, m, w_, f=None: [])
+    monkeypatch.setattr(BR, "_ctx", lambda db, user: (prog, _W(True)))
+    out = BR.appointments_set(Response(), db=None, user=None)
+    assert [r["label"] for r in out["spans"]] == ["Today", "7 days", "30 days", "45 days", "60 days", "All time"]
+    monkeypatch.setattr(BR, "_ctx", lambda db, user: (prog, _W(False)))
+    with pytest.raises(HTTPException) as e:
+        BR.appointments_set(Response(), db=None, user=None)
+    assert e.value.status_code == 403

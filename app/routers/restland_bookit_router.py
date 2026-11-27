@@ -104,6 +104,19 @@ def work(response: Response, person: Optional[str] = None, db: Session = Depends
     return TB.work(db, prog, person=person if w.manager else w.name)
 
 
+@router.get("/appointments-set")
+def appointments_set(response: Response, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Appointments set - today, 7, 30, 45, 60 days and all time, cancelled ones
+    included - with what became of them (owner, Nov 27). The same numbers as
+    Performance; the whole team's, so managers only."""
+    from app.services.programs import sci_analytics as SA
+    _nostore(response)
+    prog, w = _ctx(db, user)
+    if not w.manager:
+        raise HTTPException(status_code=403, detail="Team totals are for managers.")
+    return {"spans": SA.appointments_set(SA.ledger(db, prog.organization_id), {})}
+
+
 def _board_who(w):
     return {"manager": w.manager, "name": w.name}
 

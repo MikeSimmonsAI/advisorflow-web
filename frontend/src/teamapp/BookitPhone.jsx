@@ -34,7 +34,7 @@ export function bookitWhen(date, time, today = todayCentral()) {
   const days = Math.round((d - t) / 86400000)
   const day = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : days === -1 ? 'Yesterday'
     : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) + ' ·'
-  return (day + ' ' + (time || '')).trim()
+  return (day + ' ' + clock12(time)).trim()
 }
 
 /** "1:00 PM" -> "13:00" so times sort in clock order. */
@@ -45,6 +45,18 @@ export function clock24(t) {
   if (m[3].toUpperCase() === 'PM') h += 12
   return String(h).padStart(2, '0') + ':' + m[2]
 }
+
+/** "13:00" -> "1:00 PM"; "10:00 AM" stays. */
+export function clock12(t) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(t || '').trim())
+  if (!m) return String(t || '')
+  const h = Number(m[1])
+  return ((h % 12) || 12) + ':' + m[2] + (h < 12 ? ' AM' : ' PM')
+}
+
+// The website's visit names (owner, Nov 26).
+const VISIT = { onsite: 'Onsite Visit', call: 'Call In', offsite: 'Offsite Visit', unknown: 'Type Unspecified' }
+export function visitLabel(a) { return VISIT[a && a.visit] || (a && a.how) || '' }
 
 /** Upcoming (today on, not cancelled) appointments first by date; open follow-ups due now. */
 export function bookitLists(work, today = todayCentral()) {
@@ -59,6 +71,7 @@ export function bookitLists(work, today = todayCentral()) {
 export function BookitDashboard({ item }) {
   const day = useProgramGet(item, '/restland-bookit/my-day')
   const work = useProgramGet(item, '/restland-bookit/work')
+  const sets = useProgramGet(item, '/restland-bookit/appointments-set')
   const [open, setOpen] = useState(null)   // { kind: 'appt'|'fu', row }
   const [book, setBook] = useState(null)   // { row, appointment? }
   const today = todayCentral()
@@ -76,6 +89,8 @@ export function BookitDashboard({ item }) {
         <Kpi n={k.upcoming_appointments ?? appts.length} label="Upcoming" />
       </div>
 
+      {sets.data && sets.data.spans && <SetTable spans={sets.data.spans} />}
+
       <Section title="Today" empty="No appointments today.">
         {todayAppts.map(a => <ApptRow key={a.id} a={a} onOpen={() => setOpen({ kind: 'appt', row: a })} />)}
       </Section>
@@ -87,12 +102,32 @@ export function BookitDashboard({ item }) {
       </Section>
 
       {open && <FamilySheet open={open} onClose={() => setOpen(null)}
-                            onMove={(row, mode) => { setOpen(null); setBook({ row, mode, appointment: { id: row.id, whenText: bookitWhen(row.date, row.time, today), label: row.visit_detail || row.how, staff: row.assigned, status: row.status } }) }}
+                            onMove={(row, mode) => { setOpen(null); setBook({ row, mode, appointment: { id: row.id, whenText: bookitWhen(row.date, row.time, today), label: visitLabel(row), staff: row.assigned, status: row.status } }) }}
                             onBook={row => { setOpen(null); setBook({ row }) }} />}
       {book && <AppointmentSheet item={item} leadId={book.row.lead_id} name={book.row.family || 'The family'}
                                  bookings={[]} appointment={book.appointment || null} routes={BOOKIT_ROUTES} startMode={book.mode}
-                                 onClose={() => setBook(null)} onDone={() => { work.reload(); day.reload() }} />}
+                                 onClose={() => setBook(null)} onDone={() => { work.reload(); day.reload(); sets.reload() }} />}
     </div>
+  )
+}
+
+// Appointments set (owner, Nov 27): 1, 7, 30, 45, 60 days and all time, cancelled included.
+const SET_ROWS = [['set', 'Set'], ['upcoming', 'Coming up'], ['showed', 'Showed'], ['no_show', 'No-show'],
+  ['no_result', 'No result'], ['cancelled', 'Cancelled']]
+const SHORT = { 'Today': '1', '7 days': '7', '30 days': '30', '45 days': '45', '60 days': '60', 'All time': 'All' }
+function SetTable({ spans }) {
+  return (
+    <section className="ta-section">
+      <h2 className="ta-h2">Appointments set</h2>
+      <div className="ta-card ta-set">
+        <table className="ta-set-t">
+          <thead><tr><th />{spans.map(r => <th key={r.label}>{SHORT[r.label] || r.label}</th>)}</tr></thead>
+          <tbody>{SET_ROWS.map(([k, l]) => (
+            <tr key={k} className={'r-' + k}><th>{l}</th>{spans.map(r => <td key={r.label}>{r[k] ?? '–'}</td>)}</tr>))}</tbody>
+        </table>
+        <p className="ta-muted ta-small">Days back from today, by the day the family booked. Set includes cancelled.</p>
+      </div>
+    </section>
   )
 }
 
@@ -122,7 +157,7 @@ function ApptRow({ a, onOpen }) {
         <span className="ta-prow-main">
           <span className="ta-acard-title">{a.family || 'Family'}</span>
           <span className="ta-acard-time">{bookitWhen(a.date, a.time)}</span>
-          <span className="ta-arow-sub">{[a.visit_detail || a.how, a.assigned, a.status].filter(Boolean).join(' · ')}</span>
+          <span className="ta-arow-sub">{[visitLabel(a), a.assigned, a.status].filter(Boolean).join(' · ')}</span>
         </span>
         <Icon name="chev" size={20} />
       </button>
@@ -160,7 +195,7 @@ function FamilySheet({ open, onClose, onMove, onBook }) {
         {appt
           ? <div className="ta-card ta-appt-now"><Icon name="calendar" size={24} /><div>
               <div className="ta-appt-when">{bookitWhen(r.date, r.time)}</div>
-              <div className="ta-row-sub">{[r.visit_detail || r.how, r.home_address, r.assigned, r.status].filter(Boolean).join(' · ')}</div></div></div>
+              <div className="ta-row-sub">{[visitLabel(r), r.home_address, r.assigned, r.status].filter(Boolean).join(' · ')}</div></div></div>
           : <div className="ta-card"><div className="ta-row-name">{(r.why || 'Follow up').split('\n')[0]}</div>
               <div className="ta-row-sub">{r.follow_up_on ? 'Due ' + bookitWhen(r.follow_up_on, '') : 'Due now'}{r.assigned ? ' · ' + r.assigned : ''}</div>
               {r.notes && <p className="ta-small">{r.notes}</p>}</div>}
