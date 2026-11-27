@@ -119,6 +119,7 @@ const SET_PARTS = [['upcoming', 'Coming up'], ['showed', 'Showed'], ['no_show', 
   ['no_result', 'No result yet'], ['cancelled', 'Cancelled', true]]
 function SetTable({ spans }) {
   const [pick, setPick] = useState('30 days')
+  const [more, setMore] = useState(false)
   const r = spans.find(x => x.label === pick) || spans[0]
   return (
     <section className="ta-section">
@@ -129,12 +130,13 @@ function SetTable({ spans }) {
                   className={'ta-chip' + (pick === key ? ' is-on' : '')} onClick={() => setPick(key)}>{label}</button>))}
       </div>
       <div className="ta-card ta-set">
-        <div className="ta-set-big"><strong>{r.set ?? 0}</strong><span>set {pick === 'Today' ? 'today' : pick === 'All time' ? 'all time' : 'in the last ' + pick}</span></div>
-        <ul className="ta-set-parts">
+        <div className="ta-set-big"><strong>{r.set ?? 0}</strong><span>appointments set {pick === 'Today' ? 'today' : pick === 'All time' ? 'all time' : 'in the last ' + pick}</span></div>
+        <button type="button" className="ta-linkbtn ta-set-more" aria-expanded={more} onClick={() => setMore(v => !v)}>
+          {more ? 'Hide details' : 'What happened to them'}</button>
+        {more && <ul className="ta-set-parts">
           {SET_PARTS.map(([k, l, bad]) => (
             <li key={k} className={bad && r[k] ? 'is-bad' : ''}><strong>{r[k] ?? 0}</strong><span>{l}</span></li>))}
-        </ul>
-        <p className="ta-muted ta-small">Counted by the day the family booked. Set includes cancelled.</p>
+        </ul>}
       </div>
     </section>
   )
