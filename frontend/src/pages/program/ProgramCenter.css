@@ -692,3 +692,11 @@ button.sci-tile[aria-expanded="true"] { border-color: var(--gold); box-shadow: 0
 .sci-dnc-big:hover { background: #a91f1f; }
 .sci-dnc-big.on { cursor: default; background: #fff; color: #c62828; border-color: #c62828; box-shadow: none; }
 @media (max-width: 640px) { .sci-dnc-big { width: 100%; text-align: center; margin-top: 10px; } }
+
+/* System-check incident page (Nov 27) */
+.sci-dl { display: grid; grid-template-columns: minmax(160px, 220px) 1fr; gap: 6px 14px; margin: 0 0 12px; }
+.sci-dl dt { font-weight: 700; }
+.sci-dl dd { margin: 0; }
+.sci-dl dd ul { margin: 0; padding-left: 18px; }
+.sci-alert.ok { background: #e8f5ec; border-color: #9fd3b0; color: #1f4d2e; }
+@media (max-width: 640px) { .sci-dl { grid-template-columns: 1fr; } .sci-dl dd { margin-bottom: 6px; } }

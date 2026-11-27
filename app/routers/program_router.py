@@ -4220,6 +4220,56 @@ def self_check_ack(body: AckIn, db: Session = Depends(get_db), user: User = Depe
     return _sc.run(db, prog.organization_id)
 
 
+# ── SYSTEM-CHECK INCIDENTS (Nov 27): the page the alert text and email open ──
+
+def _incident_for(db: Session, user: User, incident_id: str):
+    """The incident and its program - for a MANAGER of THAT workspace only.
+
+    Looked up by id first, so the link works whichever workspace the browser
+    last had selected; then refused unless the caller holds a manager seat in
+    the incident's own workspace. Someone without a seat there gets "not
+    found" (the id's existence is not confirmed). A BookIT-only login never
+    sees it (owner, Nov 26: BookIT logins see BookIT and nothing else)."""
+    from app.models.program_models import ProgramIncident
+    from app.services import workspace_access as _wa
+    inc = db.query(ProgramIncident).filter(ProgramIncident.id == (incident_id or "")[:64]).first()
+    if inc is None:
+        raise HTTPException(status_code=404, detail="Incident not found.")
+    if not _wa.is_god(user):
+        role = _wa.workspace_role(user, db, inc.organization_id)
+        if role is None and user.organization_id == inc.organization_id:
+            role = user.role                             # legacy single-workspace login
+        if role is None or inc.organization_id in _wa.bookit_only_orgs(db, user):
+            raise HTTPException(status_code=404, detail="Incident not found.")
+        if role not in lead_scope.MANAGER_ROLES:
+            raise HTTPException(status_code=403, detail="Admin access required.")
+    prog = identity.program_for_org(db, inc.organization_id)
+    if prog is None:
+        raise HTTPException(status_code=404, detail="Incident not found.")
+    return prog, inc
+
+
+@router.get("/incidents/{incident_id}")
+def incident_detail(incident_id: str, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    from app.services.programs import incidents as _inc
+    prog, inc = _incident_for(db, user, incident_id)
+    return _inc.view(db, prog, inc)
+
+
+@router.get("/incidents")
+def incident_list(db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """This workspace's incidents, open first. Managers only."""
+    from app.models.program_models import ProgramIncident
+    from app.services.programs import incidents as _inc
+    prog = _program(db, user)
+    _require_manager(db, user)
+    rows = (db.query(ProgramIncident).filter(ProgramIncident.organization_id == prog.organization_id)
+            .order_by((ProgramIncident.status == "open").desc(), ProgramIncident.started_at.desc()).limit(50).all())
+    return {"items": [{"id": i.id, "number": i.incident_number, "title": i.title, "status": i.status,
+                       "severity": i.severity, "affected": i.affected_count, "started": _inc.ct(i.started_at),
+                       "resolved": _inc.ct(i.resolved_at) if i.resolved_at else None} for i in rows]}
+
+
 # ── ENGAGEMENT: of the people reached, how many did something back ────────
 
 @router.get("/engagement")
