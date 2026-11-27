@@ -332,3 +332,7 @@
   .bk-compact .sec { display: none !important; }
   .bk-sticky { top: 0; }
 }
+
+/* Reschedule / Cancel right on each appointment (owner, Nov 27) */
+.bk-appt-btns { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.bk-btn.warn { color: #a3242f; border-color: #e7b9be; }

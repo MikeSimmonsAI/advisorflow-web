@@ -21,11 +21,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink, useNavigate, useParams } from 'react-router-dom'
 import { api, clearWorkspaceContext, fetchMyContexts, setBrandContext } from '../api/client'
 import { formatPhone } from '../utils/phone'
+import AppointmentSheet from './AppointmentSheet'
+import { BookitDashboard } from './BookitPhone'
 import { programInventory } from '../pages/program/programAccessModel'
 import { openProgramItem } from '../pages/program/programDestinations'
 import { MOBILE_PROGRAMS, setLauncherOrigin } from '../pages/program/launcherOrigin'
 import { ErrorNote, Icon, Loading, useTeam } from './TeamApp'
-import { ago, contactLinks, countLabel, draftKey, findProgram, hasLeads, looksLikeEmail, mobileKind, mobileProgramPath, programRequest,
+import { ago, contactLinks, countLabel, draftKey, findProgram, hasLeads, looksLikeEmail, mobileKind, upcomingBooking, mobileProgramPath, programRequest,
          programTabs, whenLabel } from './programMobile'
 import { programStyle } from './teamHelpers'
 
@@ -293,11 +295,15 @@ export function ProgramDashboard() {
   const item = entry.item
   const origin = item ? mobileProgramPath(item) : MOBILE_PROGRAMS
   const kind = mobileKind(item)
+  const { me } = useTeam()
+  const work = !!(me && me.previews && me.previews.phone_work)
   return (
     <Frame entry={entry} tab="dashboard">
       {kind === 'program' && <ProgramDashboardBody item={item} />}
       {kind === 'sales' && <SalesDashboardBody item={item} origin={origin} />}
-      {kind === 'other' && <OtherDashboardBody item={item} origin={origin} />}
+      {kind === 'other' && (item && item.type === 'restland_bookit' && work
+        ? <BookitDashboard item={item} />
+        : <OtherDashboardBody item={item} origin={origin} />)}
     </Frame>
   )
 }
@@ -384,8 +390,11 @@ export function ProgramThread() {
   const target = (d && d.reply_to) || {}
   const { me } = useTeam()
   const links = contactLinks(d || {})
-  const leadPage = d && item && me && me.previews && me.previews.phone_work && hasLeads(item)
+  const work = !!(me && me.previews && me.previews.phone_work)
+  const leadPage = d && item && work && hasLeads(item)
     ? mobileProgramPath(item, 'leads') + '/' + encodeURIComponent(leadId) : null
+  const [apptOpen, setApptOpen] = useState(false)
+  const nextAppt = d ? upcomingBooking(d.bookings) : null
   const opted = !!(d && d.handling && d.handling.opted_out)
   const blocked = opted ? 'This family asked not to be contacted.'
     : (target.channel === 'email' && target.threadable === false) ? target.why_not
@@ -429,9 +438,13 @@ export function ProgramThread() {
           <ActionLink href={links.call} icon="phone" label="Call" />
           <ActionLink href={links.text} icon="sms" label="Text" />
           <ActionLink href={links.email} icon="mail" label="Email" />
+          {work && <button type="button" className={'ta-cact' + (nextAppt ? ' has-appt' : '')} onClick={() => setApptOpen(true)}>
+            <Icon name="calendar" size={20} /><span>{nextAppt ? 'Appt' : 'Book'}</span></button>}
           {leadPage && <button type="button" className="ta-cact" onClick={() => navigate(leadPage)}><Icon name="note" size={20} /><span>Details</span></button>}
         </nav>
       )}
+      {apptOpen && d && <AppointmentSheet item={item} leadId={leadId} name={d.name || 'The family'} bookings={d.bookings}
+                                          onClose={() => setApptOpen(false)} onDone={() => f.reload()} />}
       <div className="ta-msgs" aria-live="polite">
         {entry.phase === 'missing' && <div className="ta-state">This program is not available on your account.</div>}
         {entry.phase === 'error' && <ErrorNote error={entry.error} onRetry={entry.retry} />}
