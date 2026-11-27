@@ -198,3 +198,38 @@ test('phone cards use desktop V2 identity: photo, short line, category', () => {
   assert.equal(programStyle(sales).icon, 'briefcase')
   assert.equal(programStyle({ type: 'project_checklist', key: 'projects' }).icon, 'check')
 })
+
+import { contactLinks, dialable, dueLabel, followUpChoices, hasLeads, leadName, newLeadProblem, programTabs } from '../src/teamapp/programMobile.js'
+
+test('phone leads: who gets a Leads tab (only when the owner preview is on)', () => {
+  const sci = { type: 'workspace', organization_id: 'o1', is_program: true, program: 'sci' }
+  const client = { type: 'workspace', organization_id: 'o2' }
+  assert.equal(hasLeads(sci), true); assert.equal(hasLeads(client), true)
+  for (const x of [{ type: 'back_office' }, { type: 'deal_builder', key: 'x' }, { type: 'preview', organization_id: 'o' }, { type: 'project_checklist' }, { type: 'workspace' }])
+    assert.equal(hasLeads(x), false, JSON.stringify(x))
+  assert.deepEqual(programTabs(sci).map(t => t.key), ['', 'replies', 'more'], 'off by default')
+  assert.deepEqual(programTabs(sci, { work: true }).map(t => t.key), ['', 'leads', 'replies', 'more'])
+  assert.deepEqual(programTabs(client, { work: true }).map(t => t.key), ['', 'leads', 'more'])
+})
+
+test('phone leads: one-tap contact links, names, new-lead rules', () => {
+  assert.deepEqual(contactLinks({ phone: '+1 (214) 555-0100', email: 'a@b.co' }), { call: 'tel:+12145550100', text: 'sms:+12145550100', email: 'mailto:a@b.co' })
+  assert.deepEqual(contactLinks({ phone: '12', email: 'nope' }), { call: null, text: null, email: null })
+  assert.equal(dialable(''), '')
+  assert.equal(leadName({ first_name: 'Ann', last_name: 'Lee' }), 'Ann Lee')
+  assert.equal(leadName({ phone: '214' }), '214')
+  assert.equal(leadName({}), 'Unnamed lead')
+  assert.match(newLeadProblem({ first_name: 'A' }), /First and last/)
+  assert.match(newLeadProblem({ first_name: 'A', last_name: 'B' }), /phone number or an email/)
+  assert.equal(newLeadProblem({ first_name: 'A', last_name: 'B', phone: '214-555-0100' }), null)
+})
+
+test('phone leads: follow-up picks and due labels (server times without a zone are UTC)', () => {
+  const morning = new Date(2026, 10, 27, 8, 0)
+  assert.deepEqual(followUpChoices(morning).map(c => c.key), ['today', 'tomorrow', '3d', 'week'])
+  assert.deepEqual(followUpChoices(new Date(2026, 10, 27, 18, 0)).map(c => c.key), ['tomorrow', '3d', 'week'], 'no "today 5 PM" after 5')
+  assert.equal(followUpChoices(morning)[1].when.getHours(), 9)
+  const past = new Date(morning.getTime() - 3600e3).toISOString().replace('Z', '')
+  assert.match(dueLabel(past, morning), /^Overdue/)
+  assert.equal(dueLabel(null), 'No date')
+})

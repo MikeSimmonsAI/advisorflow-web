@@ -66,10 +66,20 @@ export function mobileKind(item) {
   return 'other'
 }
 
-/** Tabs that have a real purpose for this entry. */
-export function programTabs(item) {
+/**
+ * Entries whose work is the shared lead record (a client / program workspace
+ * with its own organization): they get Leads on the phone. Back Office, Deal
+ * Builders, demos and checklists keep their own screens.
+ */
+export function hasLeads(item) {
+  return !!(item && (item.type || 'workspace') === 'workspace' && item.organization_id && !opensDirect(item))
+}
+
+/** Tabs that have a real purpose for this entry. `work` = the phone work screens are on for this login. */
+export function programTabs(item, { work = false } = {}) {
   const k = mobileKind(item)
   const tabs = [{ key: '', label: 'Dashboard' }]
+  if (work && hasLeads(item)) tabs.push({ key: 'leads', label: 'Leads' })
   if (k === 'program') tabs.push({ key: 'replies', label: 'Replies' })
   tabs.push({ key: 'more', label: 'More' })
   return tabs
@@ -114,4 +124,75 @@ export function ago(iso, now = Date.now()) {
 /** A send attempt's idempotency key, fixed for one draft so a retry never double-sends. */
 export function draftKey() {
   return 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10)
+}
+
+// ── Leads on the phone (pure rules) ─────────────────────────────────────────
+
+/** "Jane Doe" / phone / email / "Unnamed lead". */
+export function leadName(l) {
+  if (!l) return ''
+  const n = [l.first_name, l.last_name].filter(Boolean).join(' ').trim()
+  return n || l.phone || l.email || 'Unnamed lead'
+}
+
+/** Digits a phone dialer can use ("+1 (214) 555-0100" -> "+12145550100"); '' when none. */
+export function dialable(phone) {
+  const raw = String(phone || '').trim()
+  if (!raw) return ''
+  const plus = raw.startsWith('+')
+  const digits = raw.replace(/\D/g, '')
+  if (digits.length < 7) return ''
+  return (plus ? '+' : '') + digits
+}
+
+/** One-tap contact links for a lead: tel:, sms:, mailto: (null when missing). */
+export function contactLinks(l) {
+  const d = dialable(l && l.phone)
+  const email = String((l && l.email) || '').trim()
+  return {
+    call: d ? 'tel:' + d : null,
+    text: d ? 'sms:' + d : null,
+    email: /.+@.+\..+/.test(email) ? 'mailto:' + email : null,
+  }
+}
+
+/** Server timestamps without a zone are UTC (same rule as the /m app). */
+export function parseTs(iso) {
+  if (!iso || typeof iso !== 'string') return NaN
+  const s = iso.trim()
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)) return Date.parse(s + 'Z')
+  return Date.parse(s)
+}
+
+/** The follow-up quick picks: later today (5 PM), tomorrow 9 AM, in 3 days 9 AM, next week 9 AM - local time. */
+export function followUpChoices(now = new Date()) {
+  const at = (days, h) => { const d = new Date(now); d.setDate(d.getDate() + days); d.setHours(h, 0, 0, 0); return d }
+  const out = []
+  const today5 = at(0, 17)
+  if (today5 > now) out.push({ key: 'today', label: 'Today 5 PM', when: today5 })
+  out.push({ key: 'tomorrow', label: 'Tomorrow 9 AM', when: at(1, 9) })
+  out.push({ key: '3d', label: 'In 3 days', when: at(3, 9) })
+  out.push({ key: 'week', label: 'Next week', when: at(7, 9) })
+  return out
+}
+
+/** "Overdue · Mon 9:00 AM" / "Today 5:00 PM" / "Tue, Dec 2 9:00 AM" for a follow-up. */
+export function dueLabel(iso, now = new Date()) {
+  const t = parseTs(iso)
+  if (Number.isNaN(t)) return 'No date'
+  const d = new Date(t)
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  const same = (a, b) => a.toDateString() === b.toDateString()
+  const tomorrow = new Date(now.getTime() + 86400000)
+  const day = same(d, now) ? 'Today' : same(d, tomorrow) ? 'Tomorrow'
+    : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+  return (t < now.getTime() ? 'Overdue · ' : '') + day + ' ' + time
+}
+
+/** A new lead from the phone: names required (the server requires both), phone or email required. */
+export function newLeadProblem(f) {
+  const first = String(f.first_name || '').trim(), last = String(f.last_name || '').trim()
+  if (!first || !last) return 'First and last name are both needed.'
+  if (!dialable(f.phone) && !/.+@.+\..+/.test(String(f.email || '').trim())) return 'Add a phone number or an email.'
+  return null
 }

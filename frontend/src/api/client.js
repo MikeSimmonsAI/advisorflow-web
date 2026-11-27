@@ -424,7 +424,11 @@ export const api = {
     ...(opts.asCustomer ? { asCustomer: opts.asCustomer } : {}),
     ...(opts.workspaceId ? { workspaceId: opts.workspaceId } : {}) }, 0, opts.skipRedirect || false),
   put: (path, body) => request(path, { method: 'PUT', body: body instanceof FormData ? body : JSON.stringify(body) }),
-  patch: (path, body) => request(path, { method: 'PATCH', body: body instanceof FormData ? body : JSON.stringify(body) }),
+  // Same optional workspace pinning as post (the phone app writes to one program's workspace).
+  patch: (path, body, opts = {}) => request(path, { method: 'PATCH', body: body instanceof FormData ? body : JSON.stringify(body),
+    ...(opts.headers ? { headers: opts.headers } : {}),
+    ...(opts.asCustomer ? { asCustomer: opts.asCustomer } : {}),
+    ...(opts.workspaceId ? { workspaceId: opts.workspaceId } : {}) }, 0, opts.skipRedirect || false),
   delete: (path) => request(path, { method: 'DELETE' }),
   // A large phone photo is shrunk before it leaves the browser (api/shrinkImages.js);
   // documents, lists and zips are sent exactly as chosen.
