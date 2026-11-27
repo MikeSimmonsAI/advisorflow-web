@@ -1,6 +1,7 @@
 /* EVOSENSE — PROVIDERS & CONTROLS (redesign, Oct 2026).
  *
- * One clear summary, one obvious next action, then eight tabs:
+ * One clear summary, one obvious next action, then the tabs:
+ *   Data providers       ATTOM, PropStream, Tracerfy readiness (OVERDRIVE Phase B, #439)
  *   Source Registry      capability cards (coverage as "n/9 counties", never
  *                        nine paragraphs) + a compact source list; a card or
  *                        row opens a drawer with the county matrix and evidence
@@ -18,7 +19,8 @@
  * /providers, /sources, /capabilities, /command-center; PATCH /controls,
  * PATCH /providers, POST /sources/verify, the TAD upload. Admin gates are the
  * server's; this screen disables what the person cannot do. A paid provider is
- * never switched on without an explicit in-page approval, and never test-called.
+ * never switched on without an explicit in-page approval; the only test call is
+ * Data providers' Test Connection, which states its cost.
  * No credential is stored, sent or shown here.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -35,6 +37,7 @@ import EvoLists from './EvoLists'
 import TypeCoverage from './TypeCoverage'
 import SkipTraceCostPanel from '../ops/SkipTraceCostPanel'
 import RollFixPanel from './RollFixPanel'
+import ProviderNetwork from './network/ProviderNetwork'
 import * as M from './controls/model'
 import {
   CapabilityCard, CapabilityDrawer, FilterBar, KindTag, Latest, Pill, ProviderDrawer, Stat,
@@ -50,7 +53,7 @@ const SWITCHES = [
   ['paused_ai_replies', 'AI reply reading', 'Replies are read by rules only when paused. Opt-outs are always honoured.'],
 ]
 
-const TABS = ['sources', 'types', 'providers', 'evaluation', 'skipcost', 'lists', 'capabilities', 'controls', 'usage']
+const TABS = ['network', 'sources', 'types', 'providers', 'evaluation', 'skipcost', 'lists', 'capabilities', 'controls', 'usage']
 const FILTER_KEYS = ['q', 'county', 'cap', 'status']
 
 const CAP_TONE = { OPERATIONAL: 'good', UNVERIFIED: 'info', DEGRADED: 'danger', BLOCKED: 'danger',
@@ -60,9 +63,9 @@ const CAP_STATUS_OPTIONS = [['live', 'Live'], ['attention', 'Needs attention'], 
                             ['manual', 'Manual / import'], ['disabled', 'Switched off'], ['sandbox', 'Sandbox only'], ['none', 'Not available']]
 
 function readUrl() {
-  if (typeof window === 'undefined') return { tab: 'sources', filters: {}, open: null }
+  if (typeof window === 'undefined') return { tab: 'network', filters: {}, open: null }
   const h = window.location.hash.replace('#', '')
-  const tab = h === 'budget' ? 'usage' : (TABS.includes(h) ? h : 'sources')
+  const tab = h === 'budget' ? 'usage' : (TABS.includes(h) ? h : 'network')
   const sp = new URLSearchParams(window.location.search)
   const filters = Object.fromEntries(FILTER_KEYS.map((k) => [k, sp.get(k) || '']).filter(([, v]) => v))
   return { tab, filters, open: sp.get('open') }
@@ -433,6 +436,7 @@ export default function EvoControls() {
 
       <TabBar label="Providers and controls" value={tab} onChange={setTab}
               items={[
+                { key: 'network', label: 'Data providers' },
                 { key: 'sources', label: 'Source Registry' },
                 { key: 'types', label: 'Coverage by property type' },
                 { key: 'providers', label: 'Service Providers', count: merged.length },
@@ -443,6 +447,11 @@ export default function EvoControls() {
                 { key: 'controls', label: 'Controls & Compliance', count: pausedCount ? `${pausedCount} paused` : null },
                 { key: 'usage', label: 'Usage & Costs' },
               ]} />
+
+      {/* ── DATA PROVIDERS: ATTOM · PropStream · Tracerfy (OVERDRIVE Phase B) ─ */}
+      <div className="evo-stack" role="tabpanel" id="panel-network" aria-labelledby="tab-network" hidden={tab !== 'network'}>
+        {tab === 'network' ? <ProviderNetwork isAdmin={isAdmin} /> : null}
+      </div>
 
       {/* ── SOURCE REGISTRY ─────────────────────────────────────────────── */}
       <div className="evo-stack" role="tabpanel" id="panel-sources" aria-labelledby="tab-sources" hidden={tab !== 'sources'}>
@@ -501,7 +510,7 @@ export default function EvoControls() {
         <ProviderTable rows={providerRows} onOpen={(k) => setOpen('p:' + k)} caption="Service providers"
                        empty={<>No provider matches these filters. {clearLink}</>} />
         <p className="pc-sub">Sandbox providers are off for every organization until an admin turns them on, and they never serve a real property.
-          Paid providers need an explicit approval to switch on and are never test-called from this screen. A failed paid lookup is refunded.</p>
+          Paid providers need an explicit approval to switch on. The only test call is Test Connection on Data providers, which says what it costs. A failed paid lookup is refunded.</p>
       </div>
 
       <div className="evo-stack" role="tabpanel" id="panel-evaluation" aria-labelledby="tab-evaluation" hidden={tab !== 'evaluation'}>

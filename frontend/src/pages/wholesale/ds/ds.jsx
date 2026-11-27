@@ -257,9 +257,11 @@ export function scoreState(kind, value) {
   return m.states[m.states.length - 1][1]
 }
 
-/** One score. `onExplain` makes it a button that opens the factor drilldown. */
-export function Score({ kind, value, size, onExplain, expanded }) {
-  const m = SCORE_META[kind]
+/** One score. `onExplain` makes it a button that opens the factor drilldown.
+ *  `name` renames the caption on one screen only (Acquisition Command calls the
+ *  opportunity score "Distress Score", owner decision #439); same number. */
+export function Score({ kind, value, size, onExplain, expanded, name }) {
+  const m = { ...SCORE_META[kind], ...(name ? { name } : {}) }
   const empty = value === null || value === undefined
   const body = (
     <>

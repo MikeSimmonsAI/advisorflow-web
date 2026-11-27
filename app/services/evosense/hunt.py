@@ -779,6 +779,8 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
               "sale_dates": 0, "sale_dates_declared": 0}
     rejected: List[Dict[str, Any]] = []
     created_ids: List[str] = []
+    touched: Dict[str, Any] = {}          # property id -> property, to count the conflicts this import raised
+    started_at = C.now().isoformat() + "Z"
     for i, row in enumerate(reader, start=2):
         if counts["rows"] >= max_rows:
             break
@@ -876,6 +878,8 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
         counts[outcome] = counts.get(outcome, 0) + 1
         if outcome == "created" and prop is not None:
             created_ids.append(prop.id)
+        if prop is not None:
+            touched[prop.id] = prop
         if prop is not None and any(row.get(c) for c in TYPE_COLUMNS):
             from app.services.evosense import type_details as TD
             vals = {}
@@ -894,12 +898,18 @@ def import_csv(db, org_id: str, content: str, *, user, strategy=None, filename: 
             if strategy is not None and not prop.best_strategy_id:
                 prop.best_strategy_id = strategy.id
             EV.rescore(db, prop, strategy)
+    # CONFLICTS this import raised: a value that differs from what an equal or
+    # stronger source already said is kept beside it, never written over it.
+    counts["conflicts"] = sum(
+        1 for pr in touched.values() for c in (C.jload(pr.conflicts, []) or [])
+        if str(c.get("at") or "") >= started_at and (c.get("incoming") or {}).get("source") == provider.key)
     ev = C.log_event(db, org_id, "import.csv", user=user, actor_type=C.ACTOR_USER,
-                     summary="Imported %s rows from %s%s: %s new, %s merged, %s for review, %s rejected"
+                     summary="Imported %s rows from %s%s: %s new, %s merged, %s for review, %s rejected, %s conflicts"
                      % (counts["rows"], filename, (" as %s" % kind["label"]) if kind else "",
-                        counts["created"], counts["merged"], counts["review"], counts["rejected"]),
+                        counts["created"], counts["merged"], counts["review"], counts["rejected"],
+                        counts["conflicts"]),
                      details=dict(counts, list_kind=list_kind, list_source=list_source, filename=filename,
-                                  created_ids=created_ids))
+                                  created_ids=created_ids, format=(fmt or {}).get("format")))
     db.flush()
     return {"counts": counts, "rejected": rejected[:50], "list_kind": list_kind, "format": fmt,
             "import_id": getattr(ev, "id", None)}

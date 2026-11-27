@@ -45,6 +45,7 @@ import { CallOutcomePanel, FirstContactPlan } from './Acquire'
 import { ReadinessPanel } from './Readiness'
 import EvoPermission from './EvoPermission'
 import EvoFollowUp from './EvoFollowUp'
+import { ContactIntelligence, PropertyIntelligence } from './network/PropertyIntelligence'
 import { MatchResults } from '../wsBuyerIntelligence'
 import PropertyPhoto from './PropertyPhoto'
 import DealCalculator from '../calc/DealCalculator'
@@ -64,7 +65,7 @@ function PlaceLinks({ links }) {
   if (!items.length) return null
   return (
     <p className="evo-small" style={{ margin: '8px 0 0', display: 'flex', flexWrap: 'wrap', gap: '4px 14px' }}>
-      {items.map(([u, l]) => <a key={u} className="evo-link" href={u} target="_blank" rel="noreferrer">{l} ↗</a>)}
+      {items.map(([u, l]) => <a key={l + u} className="evo-link" href={u} target="_blank" rel="noreferrer">{l} ↗</a>)}
     </p>
   )
 }
@@ -517,6 +518,7 @@ export default function EvoProperty() {
         {tab === 'ownership' ? (
           <div className="evo-stack">
             <OwnershipVerification d={d} countyUrl={d.links && d.links.county_record_url} />
+            <PropertyIntelligence propertyId={propertyId} canBuy={canRunHunts()} onChanged={load} refreshKey={notice} />
             <Panel title="Owner of record" id="owner-record">
                 {!d.owners.length ? <p className="evo-muted" style={{ margin: 0 }}>No owner of record.</p> : d.owners.map((o) => (
                   <div key={o.id} style={{ marginBottom: 14 }}>
@@ -671,6 +673,7 @@ export default function EvoProperty() {
 
         {tab === 'contacts' ? (
           <div className="evo-stack">
+            <ContactIntelligence propertyId={propertyId} refreshKey={notice} />
             <Panel title="Contacts" id="owner">
               <EnrichmentStatus propertyId={propertyId} refreshKey={busy} />
               {!d.contacts.length ? <p className="evo-muted evo-small" style={{ margin: 0 }}>No contact found. Nothing is invented.</p> : d.contacts.map((c) => (
