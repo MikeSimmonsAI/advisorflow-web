@@ -155,6 +155,9 @@ def reschedule(db: Session, prog, booking, slot: datetime, actor, *, busy_reader
         raise OpError("This program has no appointment rules.")
     if (booking.status or "") not in AN.LIVE:
         raise OpError("Only a booked appointment can be moved.")
+    from app.services.programs import appointments as _A
+    if _A.same_day_off(prog) and slot.date() <= _A._today_central().date():
+        raise OpError("Same-day appointments are turned off. Pick tomorrow or later.")
     owner = db.query(User).filter(User.id == booking.user_id).first()
     try:
         db.query(User).filter(User.id == booking.user_id).with_for_update().first()

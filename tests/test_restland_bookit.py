@@ -781,3 +781,14 @@ def test_restland_offers_no_same_day_times(setter, monkeypatch):
     assert A.same_day_off(prog)
     assert A.slots_on_day(setter["db"], prog, A._today_central().date())[0] == []
     assert BP.RESTLAND_ORG_ID in {"01fed629-9a95-412b-895a-c8b09f37a98c"}
+
+
+def test_no_same_day_booking_or_move_by_anyone(setter, sample_advisor, monkeypatch):
+    from app.services.programs import appointments as A
+    from app.services.programs import booking_policy as BP
+    db, org, prog, sheet, appts, mine, other = _team(setter, sample_advisor)
+    monkeypatch.setattr(BP, "NO_SAME_DAY_ORGS", {org.id})
+    from app.models.models import Lead
+    lead = db.query(Lead).filter(Lead.id == mine.lead_id).one()
+    today = A._today_central().replace(hour=16, minute=0, second=0, microsecond=0, tzinfo=None)
+    assert A.book(db, prog, lead, today, A.VISIT)["status"] == "same_day"

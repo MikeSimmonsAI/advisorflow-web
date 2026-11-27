@@ -249,6 +249,9 @@ def book(db: Session, prog, lead, slot: datetime, kind: str, *, family_text: boo
     advisor = program_advisor(db, prog)
     if advisor is None:
         return {"ok": False, "status": "no_calendar", "reason": "no booking calendar is set"}
+    if same_day_off(prog) and slot.date() <= _today_central().date():
+        # No same-day appointments here at all - by the AI, the booking page or staff (owner, Nov 27).
+        return {"ok": False, "status": "same_day", "reason": "same-day appointments are turned off"}
     if _opted_out(db, lead):
         # A family who said STOP (or is suppressed) is never booked - by the
         # setter or by staff - however the request reached here.
