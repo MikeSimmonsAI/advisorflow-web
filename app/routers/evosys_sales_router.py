@@ -192,8 +192,9 @@ def overview(c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
     try:                       # Spanish texts get English before they're shown (owner doesn't read Spanish)
         from app.services.evosys_sales import ai as _AI
         _AI.fill_translations(db, replies + [m for m, _ in groups["handled"][:30]], c.bso, c.user.id, background=True)
+        db.commit()
     except Exception:                                                # noqa: BLE001
-        pass
+        db.rollback()
     by_id = {o.id: o for o in leads}
     working = [o for o in leads if o.stage in O.WORKING_STAGES]
     to_call = [o for o in working if not O._has_email(o) and o.id not in booked
