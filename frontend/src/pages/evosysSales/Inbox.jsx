@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api, getCurrentUser } from '../../api/client'
 import CallPanel from './CallPanel'
+import { ReplyTranslation, useReplyTranslation } from './ReplyTranslation'
 
 const API = '/sales/evosys'
 const BASE = '/program/evosys-sales'
@@ -77,33 +78,31 @@ function Draft({ lead, lastIn, saved, onSent, onDone }) {
     try { const r = await api.post(`${API}/messages/${lastIn.id}/assist${again ? '?again=true' : ''}`, {}); setT(r); setBody(r.output?.draft || '') }
     catch (e) { setErr(errText(e)) } finally { setBusy(false) }
   }
+  const out = t?.output || {}
+  const reply = useReplyTranslation({ leadId: lead.id, message: lastIn, body, spanishDraft: out.draft_english ? out.draft : undefined, englishDraft: out.draft_english })
   const send = async () => {
     setBusy(true); setErr(null)
-    try { await api.post(`${API}/leads/${lead.id}/send-reply`, { body, ai_task_id: t?.id, channel: 'text' }); onSent(`Sent to ${lead.company}`) }
+    try { const outgoing = await reply.prepare(); if (outgoing === null) return; await api.post(`${API}/leads/${lead.id}/send-reply`, { body: outgoing, ai_task_id: t?.id, channel: 'text' }); onSent(`Sent to ${lead.company}`) }
     catch (e) { setErr(errText(e)) } finally { setBusy(false) }
   }
-  const out = t?.output || {}
   const lang = out.draft_english ? 'Spanish' : null
   return (
     <div className="v2-draft">
       <div className="v2-draft-head"><b>{t ? 'AI draft' : 'Your reply'}</b>{lang && <span className="v2-tag">{lang}</span>}</div>
       {!t && lastIn && !body && <button className="v2-btn" disabled={busy} onClick={() => ask(false)}>{busy ? 'Drafting…' : 'Draft a reply'}</button>}
-      {(t || body || !lastIn) && (
-        <>
-          {editing || !t || !out.draft
-            ? <textarea className="v2-input" rows={3} value={body} onChange={e => setBody(e.target.value)} placeholder="Write a text…" aria-label="Your reply" />
-            : <div className="v2-draft-text">{body}</div>}
-          {out.draft_english && body === out.draft && <div className="v2-english">English · {out.draft_english}</div>}
-          <div className="v2-row">
-            <button className="v2-btn v2-primary" disabled={busy || !body.trim()} onClick={send}>{busy ? 'Sending…' : 'Send'}</button>
-            {t && out.draft && <button className="v2-btn" onClick={() => setEditing(!editing)}>{editing ? 'Done editing' : 'Edit'}</button>}
-            {lastIn && <button className="v2-btn" disabled={busy} onClick={() => ask(true)}>Rewrite</button>}
-            {lastIn && <button className="v2-btn" disabled={busy} onClick={onDone}>Mark done</button>}
-          </div>
-          {(out.needs_person || []).length > 0 && <div className="v2-why">AI paused for Mike · {out.needs_person[0]}</div>}
-          <div className="v2-hint">{body.length} characters · sends from the EvoSys BookIt number</div>
-        </>
-      )}
+      {editing || !t || !out.draft
+        ? <textarea className="v2-input" rows={3} disabled={busy} value={body} onChange={e => setBody(e.target.value)} placeholder="Write a text…" aria-label="Your reply" />
+        : <div className="v2-draft-text">{body}</div>}
+      {out.draft_english && body === out.draft && <div className="v2-english">English · {out.draft_english}</div>}
+      <ReplyTranslation reply={reply} disabled={busy} />
+      <div className="v2-row">
+        <button className="v2-btn v2-primary" disabled={busy || !body.trim()} onClick={send}>{busy ? 'Working…' : reply.needsPreview ? 'Preview Spanish' : reply.language === 'Spanish' ? 'Send Spanish text' : 'Send'}</button>
+        {t && out.draft && <button className="v2-btn" onClick={() => setEditing(!editing)}>{editing ? 'Done editing' : 'Edit'}</button>}
+        {lastIn && <button className="v2-btn" disabled={busy} onClick={() => ask(true)}>Rewrite</button>}
+        {lastIn && <button className="v2-btn" disabled={busy} onClick={onDone}>Mark done</button>}
+      </div>
+      {(out.needs_person || []).length > 0 && <div className="v2-why">AI paused for Mike · {out.needs_person[0]}</div>}
+      <div className="v2-hint">{body.length} characters · sends from the EvoSys BookIt number</div>
       {err && <p className="v2-err" role="alert">{err}</p>}
     </div>
   )
