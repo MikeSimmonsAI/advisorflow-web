@@ -115,6 +115,23 @@ function ApptSplit({ a }) {
   </span>
 }
 
+// Owner, Nov 27: appointments set over fixed spans (1, 7, 30, 45, 60 days, all
+// time), cancelled ones included, and what became of them. Same campaign and
+// location as the page; not tied to the date buttons above.
+const SET_ROWS = [['set', 'Appointments set', 'every appointment made, cancelled ones included'],
+  ['upcoming', 'Coming up'], ['showed', 'Showed'], ['no_show', 'No-show'],
+  ['no_result', 'No result yet', 'date passed, nothing recorded'], ['cancelled', 'Cancelled']]
+function AppointmentsSet({ rows }) {
+  return <section className="cmd-card pf-card pf-set">
+    <h3>Appointments set <small>by when they were booked · Central Time</small></h3>
+    <div className="pf-set-scroll"><table className="pf-set-t">
+      <thead><tr><th />{rows.map(r => <th key={r.label}>{r.label}</th>)}</tr></thead>
+      <tbody>{SET_ROWS.map(([k, l, help]) => <tr key={k} className={'r-' + k}>
+        <th title={help || ''}>{l}</th>{rows.map(r => <td key={r.label}>{n(r[k])}</td>)}</tr>)}</tbody>
+    </table></div>
+  </section>
+}
+
 export function PerformanceHome({ range, setRange, loc, setLoc, openMetric, campaign = 'all', setCampaign }) {
   const [d, setD] = useState(null)
   const [err, setErr] = useState('')
@@ -160,6 +177,7 @@ export function PerformanceHome({ range, setRange, loc, setLoc, openMetric, camp
           <small>{d.rates.avg_touches_per_family_all_time ?? '—'} all time</small></button>
       </div>
 
+      {d.appointments_set && <AppointmentsSet rows={d.appointments_set} />}
       <PercentageScoreboard rates={d.rates || {}} m={m} period={d.window.label} />
       <div className="pf-grid">
         <section className="cmd-card pf-card">

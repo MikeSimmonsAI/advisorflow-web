@@ -758,6 +758,25 @@ def appointment_breakdown(L: Ledger, w: Dict, f: Optional[Dict] = None,
     return out
 
 
+SET_SPANS = ((1, "Today"), (7, "7 days"), (30, "30 days"), (45, "45 days"), (60, "60 days"), (None, "All time"))
+
+
+def appointments_set(L: Ledger, f: Optional[Dict] = None, now: Optional[datetime] = None) -> List[Dict]:
+    """Appointments set - cancelled ones included - over fixed spans, each split
+    into what became of them (owner, Nov 27: "1, 7, 30, 45, 60, all time")."""
+    today = ct_day(now or datetime.utcnow())
+    out = []
+    for days, label in SET_SPANS:
+        if days is None:
+            w = window("all", now=now)
+        else:
+            w = window("custom", (today - timedelta(days=days - 1)).isoformat(), today.isoformat(), now=now)
+        b = appointment_breakdown(L, w, f)
+        out.append({"days": days, "label": label, "start_date": w.get("start_date"), "end_date": w.get("end_date"),
+                    "set": sum(b.values()), "kept": sum(b.values()) - b["cancelled"], **b})
+    return out
+
+
 def summary(L: Ledger, w: Dict, location_id: Optional[str] = None, daily_batch: Optional[Dict] = None,
             campaign: Optional[str] = None) -> Dict:
     f = {"location_id": location_id} if location_id else {}
@@ -836,6 +855,7 @@ def summary(L: Ledger, w: Dict, location_id: Optional[str] = None, daily_batch: 
 
     return {
         "appointment_breakdown": appointment_breakdown(L, w, f),
+        "appointments_set": appointments_set(L, f),
         "window": {k: w[k] for k in ("preset", "label", "start_date", "end_date")},
         "location_id": location_id,
         "metrics": {k: {"label": METRICS[k][0], "help": METRICS[k][2], "value": counts[k],
