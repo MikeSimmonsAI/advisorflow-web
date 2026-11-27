@@ -359,6 +359,14 @@ def looks_spanish(text) -> bool:
     return es > en
 
 
+def needs_english_translation(text: Optional[str]) -> bool:
+    return looks_spanish(text) or any(
+        looks_spanish(sentence)
+        for sentence in re.split(r"[.!?\n]+", text or "")
+        if len(sentence.split()) >= 3
+    )
+
+
 def first_names(raw) -> Optional[str]:
     """'Luz; Karla' -> 'Luz and Karla'; 'Imani McKinney' -> 'Imani'."""
     parts = [p.strip() for p in re.split(r"[;,/&]|\band\b", raw or "") if p.strip()]
@@ -391,7 +399,7 @@ def approved_examples(db: Session, bso_id: str, lang: str, limit: int = 8) -> li
 
 
 TRANSLATE_SYSTEM = ("Translate each string in facts.texts from Spanish into plain, natural American English, keeping "
-                    "the meaning and tone exactly (do not add or soften anything; keep links as they are). Return JSON "
+                    "the meaning and tone exactly (do not add or soften anything; keep links as they are). Preserve unique English content. If the input repeats the same message in Spanish and English, return the message only once. Return JSON "
                     "{\"translations\": [one English string per input, same order]}.")
 
 
@@ -412,7 +420,7 @@ def translate(texts: list, bso_id: str, actor: str, background: bool = False) ->
 
 def fill_translations(db: Session, msgs: list, bso_id: str, actor: str, background: bool = False) -> None:
     """Translate the Spanish messages in `msgs` that have no English yet."""
-    todo = [m for m in msgs if m.channel == "text" and not m.translation and looks_spanish(m.body)]
+    todo = [m for m in msgs if m.channel == "text" and not m.translation and needs_english_translation(m.body)]
     if not todo:
         return
     for m, t in zip(todo, translate([m.body or "" for m in todo], bso_id, actor, background)):
