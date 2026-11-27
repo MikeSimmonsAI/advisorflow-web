@@ -523,6 +523,14 @@ def quick_view(response: Response, db: Session = Depends(get_db), user: User = D
     return insights.quick_view(db, prog, w)
 
 
+@router.post("/families/new")
+def family_new(body: Body, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Management: put a family into the system by hand (matched, never duplicated)."""
+    prog, w = _ctx(db, user)
+    _mgr(w)
+    return _run(db, workflow.add_family, db, prog, w, body.data)
+
+
 @router.post("/appointments/new")
 def appointment_new(body: Body, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
     """Book a new appointment for a family the caller may work (same booking path

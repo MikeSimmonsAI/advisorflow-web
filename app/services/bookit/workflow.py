@@ -372,3 +372,42 @@ def new_appointment(db: Session, prog, w: Who, body: Dict[str, Any], now: Option
     return {"booked": True, "booking_id": res.get("booking_id"), "slot": slot.isoformat(),
             "simulated": bool(res.get("simulated")), "already": bool(res.get("already")),
             "family_notified": bool(body.get("notify", True)) and not res.get("simulated")}
+
+
+def add_family(db: Session, prog, w: Who, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Put a family into the system by hand (owner, Nov 27: a family who emailed
+    in). Matched to an existing record by phone or email - never a second one.
+    No campaign, no cadence: nothing automated goes to them from this."""
+    from app.models.models import Lead
+    from app.services.programs import restland_sheet as RS
+    if w.view_only:
+        raise BookitError("This is a read-only preview.", 403)
+    org = prog.organization_id
+    first, last = (body.get("first_name") or "").strip(), (body.get("last_name") or "").strip()
+    if not (first or last):
+        raise BookitError("Add the family member's name.")
+    digits = "".join(ch for ch in str(body.get("phone") or "") if ch.isdigit())
+    if digits and len(digits) == 11 and digits[0] == "1":
+        digits = digits[1:]
+    if digits and len(digits) != 10:
+        raise BookitError("That phone number needs 10 digits.")
+    phone = ("+1" + digits) if digits else None
+    email = (body.get("email") or "").strip().lower() or None
+    if not (phone or email):
+        raise BookitError("Add a phone or an email.")
+    have = RS._existing(db, org, phone, email)
+    if have is not None:
+        return {"lead_id": have.id, "existing": True, "name": ("%s %s" % (have.first_name or "", have.last_name or "")).strip()}
+    lead = Lead(organization_id=org, first_name=first[:100] or None, last_name=last[:100] or None, phone=phone,
+                phone_raw=body.get("phone") or None, email=email, status=RS.REFERRAL_STATUS, source="bookit_manual",
+                source_detail=("Added in BookIT by %s" % (w.name or w.user_name or "the team"))[:250],
+                contact_channel="sms" if phone else "email_only")
+    db.add(lead)
+    db.flush()
+    note = (body.get("notes") or "").strip()
+    RS._note(db, org, lead.id, "Restland BookIT: added by %s%s" % (w.name or w.user_name or "the team",
+                                                                    "; notes: %s" % note[:3000] if note else ""))
+    audit(db, org, w, "family", lead.id, "create", "source", None, "bookit_manual")
+    db.flush()
+    return {"lead_id": lead.id, "existing": False, "name": ("%s %s" % (first, last)).strip()}
+

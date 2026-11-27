@@ -888,3 +888,23 @@ def test_restland_never_sends_a_guide_link_it_offers_times(setter, sample_adviso
     assert last.action == "offer_times"
     assert "http" not in (last.text or "").split("Or pick another time here")[0]
     assert "send you" not in (last.text or "").lower() and "guide" in (last.text or "").lower()
+
+
+def test_a_manager_adds_a_family_by_hand_once_and_nothing_is_sent(setter, sample_advisor):
+    """Owner, Nov 27: a family who emailed in goes into the system by hand -
+    no campaign, no cadence, and the same phone/email is never added twice."""
+    from app.models.models import Lead, Message
+    from app.services.bookit import core, workflow
+    db, org, prog = setter["db"], setter["org"], setter["prog"]
+    mgr = core.Who(_U("u-owner"), True, None, None)
+    out = workflow.add_family(db, prog, mgr, {"first_name": "Noa", "last_name": "Sample", "phone": "(469) 555-0199",
+                                               "email": "Noa@Example.com", "notes": "headstone question"})
+    assert out["existing"] is False
+    lead = db.query(Lead).filter_by(id=out["lead_id"]).one()
+    assert lead.phone == "+14695550199" and lead.email == "noa@example.com" and lead.source == "bookit_manual"
+    again = workflow.add_family(db, prog, mgr, {"first_name": "Noa", "phone": "4695550199"})
+    assert again["existing"] is True and again["lead_id"] == lead.id
+    assert db.query(Message).filter_by(lead_id=lead.id).count() == 0
+    import pytest as _pt
+    with _pt.raises(core.BookitError):
+        workflow.add_family(db, prog, mgr, {"first_name": "X", "phone": "123"})
