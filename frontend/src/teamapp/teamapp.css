@@ -524,3 +524,15 @@
 .ta-set-t tr:last-child th, .ta-set-t tr:last-child td { border-bottom: 0; }
 .ta-set-t tbody th { width: 34%; white-space: nowrap; font-size: 12.5px; }
 .ta-set-t thead th:first-child::after { content: 'Days'; }
+.ta-set-chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 8px; -webkit-overflow-scrolling: touch; }
+.ta-set-chips .ta-chip { flex: 0 0 auto; white-space: nowrap; }
+.ta-set-big { display: flex; align-items: baseline; gap: 10px; padding: 4px 6px 10px; }
+.ta-set-big strong { font-size: 40px; font-weight: 800; color: #087F68; line-height: 1; }
+.ta-set-big span { font-size: 15px; font-weight: 700; color: var(--ta-muted); }
+.ta-set-parts { list-style: none; margin: 0 0 8px; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.ta-set-parts li { background: #f4f7fb; border-radius: 12px; padding: 8px; display: flex; flex-direction: column; }
+.ta-set-parts strong { font-size: 20px; font-weight: 800; }
+.ta-set-parts span { font-size: 12.5px; color: var(--ta-muted); font-weight: 700; }
+.ta-set-parts li.is-bad strong { color: #C62839; }
+.ta-set-chips { display: grid; grid-template-columns: repeat(3, 1fr); overflow: visible; padding-bottom: 0; }
+.ta-set-chips .ta-chip { justify-content: center; padding: 0 6px; }
