@@ -234,6 +234,9 @@ def _facts(db, prog, lead, conv) -> Dict:
         "mail_task_open": bool(memory_of(conv).get("mail_request")),
         "followups_sent": conv.followups_sent or 0,
         "personal_delivery_available": personal_delivery_available(db, lead),
+        # Owner, Nov 27 (Restland): the Personal Planning Guide is handed over AT
+        # the visit - never sent, emailed, mailed or linked. Get them in the seat.
+        "planning_guide_only_at_visit": guide_only_at_visit(lead),
         # #385: what this family's campaign lets us say about why we contacted them.
         "campaign": _campaign_notes(db, lead),
         # #378: the ONLY ways this location meets families - name no other.
@@ -261,6 +264,16 @@ def _appointment_ways(db, lead) -> List[str]:
         return [names[w] for w in identity.appointment_ways(prof)]
     except Exception:                                    # noqa: BLE001
         return ["a visit at the location"]
+
+
+GUIDE_AT_VISIT_ORGS = {"01fed629-9a95-412b-895a-c8b09f37a98c"}   # Restland (owner, Nov 27)
+_OFFERS_GUIDE = re.compile(r"\b((send|email|e-mail|mail|text|forward|share) (you |over )?(a |the |our |your )?"
+                           r"(copy of (the |our |your )?)?(personal )?(planning )?guide|guide (is |will be )?on (its|it's) way|"
+                           r"here'?s (the|your) (personal )?(planning )?guide)", re.I)
+
+
+def guide_only_at_visit(lead) -> bool:
+    return getattr(lead, "organization_id", None) in GUIDE_AT_VISIT_ORGS
 
 
 def personal_delivery_available(db, lead) -> bool:
@@ -415,6 +428,7 @@ HONOUR THEIR TIMING:
 - COMING IN ON A LATER DAY. They say they'll come by / stop in / visit TOMORROW or on another day, without a clock time ("I can come by tomorrow if that is ok"): that is a yes to a visit - lock in the time. Action "offer_times": glad they're coming, then {{TIMES}} as your one question ("Wonderful, I'd be glad to see you tomorrow. Would {{TIMES}} work?"). Put the day in best_times. If they also gave a clock time, use requested_time. NEVER just agree to "see you tomorrow" without a time - nobody would be ready for them.
 - A person must step in ("handoff") when: they ask for a real person or ask for me by name, are upset or complaining, recently lost someone and are grieving, mention legal issues or disputes, want to change or cancel an existing appointment, or you are genuinely unsure what they need. Reply briefly that I'll reach out to them personally. Do NOT hand off ordinary questions.
 - Skeptical ("is this a scam?", "how did you get my number?", "are you a robot?"): be honest and calm - it's the family services team at {location} following up on planning information; if asked whether this is a real person, a robot, AI or automated, ANSWER THAT QUESTION HONESTLY in the first sentence - never dodge it: say an automated assistant helps me keep up with messages and scheduling, that I see every reply, and that I'm glad to talk by phone. Offer to stop if they prefer.
+- If facts_known_for_certain.planning_guide_only_at_visit is true: NEVER use "send_guide" or "mail_guide", never offer to send, email, mail or link the guide or anything else. The Personal Planning Guide is given to them at the visit: say you'll go over it with them in person and offer {{TIMES}} (action "offer_times"). This rule wins over the planning guide rules below.
 - Planning guide request -> "send_guide": say you'll get the guide to them AND invite them to sit down with you so you can go over it together and answer what applies to them, with {{TIMES}} as your one question (e.g. "...and I'd be glad to go over it with you in person - would {{TIMES}} work for a short visit?"). The system adds the guide or, by text, arranges it.
 - PRINTED / PAPER / MAILED copy (they say printed, paper, hard copy, mail it, to my house/address - NOT a plain "send me the guide", which is "send_guide" by text): a printed-guide request is an opening for a personal meeting - recognise it. If PERSONAL DELIVERY is available (facts_known_for_certain.personal_delivery_available), offer to bring it personally and sit down together: "Absolutely, Lester. I'd be happy to bring that planning guide to you personally so we can sit down and go over the important information together. What's a good day and time for me to stop by?" (action "mail_guide"; no {{TIMES}}; put any day/time they give in best_times). If personal delivery is NOT available: "mail_guide" - honour it (a printed guide will be arranged; confirm the address only if it is missing or incomplete - never claim it has been mailed) and in the same message invite them in so we can go over it together, with {{TIMES}}. If times were already offered and they asked for the mail copy instead, do NOT offer times again - honour the mail request and add ONE soft, personal sentence that you'd be glad to sit down and go over it with them once they've had a look (no {{TIMES}}, no question needed). If they have ALREADY said they only want it mailed and nothing else, just honour that.
 - THEY GOT THE INFORMATION we asked about ("I did get it, thank you", "yes I received the guide"): that is a clear, friendly answer - not a goodbye. Thank them and invite them to go over it together: action "offer_times" with {{TIMES}} ("Glad it reached you, Kevin. I'd be glad to go over it with you so you know what applies to your family - would {{TIMES}} work?"). Information starts the conversation; the appointment is the goal.
@@ -1712,6 +1726,15 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             else:
                 text = "Wonderful, I'd be glad to sit down with you. Would {TIMES} work for you?"
                 merge_memory(conv, {"readiness": "ready"})
+    if guide_only_at_visit(lead) and (action in ("send_guide", "mail_guide")
+                                      or _OFFERS_GUIDE.search(text or "")):
+        # Never send, mail or link the guide here - it's given at the visit.
+        # Whatever the model wrote, the family gets real times instead.
+        out["corrected"] = "planning guide is given at the visit - offered times instead"
+        action = "offer_times"
+        out["action"] = action
+        text = ("I'll go over your Personal Planning Guide with you in person when you come in - "
+                "it only takes about 45 minutes. Would {TIMES} work for you?")
     if action in ("offer_times", "answer") and conv.booked_time is None:
         _ch = A.offered(conv)
         _named = [i for i, c in enumerate(_ch) if clock_named(body, c) and choice_evidence(body, c, i)]
