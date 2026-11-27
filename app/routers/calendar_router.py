@@ -1687,6 +1687,14 @@ def get_available_slots(
             _be.record(db, booking, _be.DAY_VIEWED, date)
         except Exception:                                # noqa: BLE001
             pass
+    if _program_visit and target_date == today and _blead is not None:
+        # No same-day appointments for this family's program (owner, Nov 27 - Restland).
+        try:
+            from app.services.programs import booking_policy as _bpn
+            if _blead.organization_id in _bpn.NO_SAME_DAY_ORGS:
+                return {"date": date, "slots": [], "reason": "Same-day visits aren't available. Please pick another day."}
+        except Exception:                                # noqa: BLE001
+            pass
     return compute_day_slots(db, advisor, target_date, program_visit=_program_visit, today=today)
 
 

@@ -753,3 +753,31 @@ def test_restland_setup_email_never_names_the_platform():
     assert "https://app.example/restland" in html and "brand=restland" in html
     assert logins.sender().from_name == "Restland BookIT"
     assert logins.sender().from_email == "support@evosyspro.live"           # never the server's default sender
+
+
+# ── setter fixes (owner, Nov 27: Leon Folks) ───────────────────────────────
+
+def test_opener_times_are_read_from_the_opening_text():
+    from app.services.programs.ai_setter import opener_times
+    sent = datetime(2026, 11, 27, 9, 6)
+    t = "What time tomorrow works best for you, 10:00 AM or 2:30 PM? - Mike"
+    assert opener_times(t, sent) == [datetime(2026, 11, 28, 10, 0), datetime(2026, 11, 28, 14, 30)]
+    assert opener_times("Would 10:00 AM work?", sent) == []                    # no day named: nothing
+
+
+def test_a_see_you_line_without_a_booking_is_blocked():
+    from app.services.programs.ai_setter import _CLAIM_BOOKED
+    assert _CLAIM_BOOKED.search("Great, Leon. I'll see you tomorrow at 2:30 PM.")
+    assert _CLAIM_BOOKED.search("Looking forward to seeing you on Saturday.")
+    assert not _CLAIM_BOOKED.search("Would Friday or Saturday work for you?")
+
+
+def test_restland_offers_no_same_day_times(setter, monkeypatch):
+    from app.services.programs import appointments as A
+    from app.services.programs import booking_policy as BP
+    prog = _prog(setter)
+    assert not A.same_day_off(prog)
+    monkeypatch.setattr(BP, "NO_SAME_DAY_ORGS", {prog.organization_id})
+    assert A.same_day_off(prog)
+    assert A.slots_on_day(setter["db"], prog, A._today_central().date())[0] == []
+    assert BP.RESTLAND_ORG_ID in {"01fed629-9a95-412b-895a-c8b09f37a98c"}

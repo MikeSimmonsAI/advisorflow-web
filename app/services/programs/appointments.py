@@ -50,6 +50,16 @@ def _bookable_day(prog, d) -> bool:
     return d.weekday() < 5 if pol is None else str(d.weekday()) in pol["days"]
 
 
+def same_day_off(prog) -> bool:
+    """No same-day appointments offered or booked by the system (owner, Nov 27 -
+    Restland). A program's own rules can say otherwise ("same_day": true)."""
+    from app.services.programs import booking_policy as _bp
+    pol = _policy(prog) or {}
+    if "same_day" in pol:
+        return not bool(pol.get("same_day"))
+    return getattr(prog, "organization_id", None) in _bp.NO_SAME_DAY_ORGS
+
+
 def visit_minutes(prog, kind) -> int:
     pol = _policy(prog)
     return pol["duration"] if pol is not None else minutes_for(kind)
@@ -91,6 +101,8 @@ def available_slots(db: Session, prog, *, want: int = 2, days: int = 14,
     spare: List[datetime] = []
     for i in range(days + 1):
         d = today + timedelta(days=i)
+        if i == 0 and same_day_off(prog):
+            continue                              # no same-day offers here
         if not _bookable_day(prog, d):
             continue
         if weekdays is not None and d.weekday() not in weekdays:
@@ -143,6 +155,8 @@ def slots_on_day(db: Session, prog, day, want: int = 2, kind: str = VISIT) -> Tu
     advisor = program_advisor(db, prog)
     if advisor is None or not _bookable_day(prog, day):
         return [], "no times that day"
+    if same_day_off(prog) and day <= _today_central().date():
+        return [], "no same-day appointments"
     res = compute_day_slots(db, advisor, day, program_visit=True, today=_today_central().date(),
                             minutes=minutes_for(kind))
     if res.get("calendar_error"):

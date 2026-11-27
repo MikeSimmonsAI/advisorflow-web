@@ -94,6 +94,8 @@ VIDEO_OPTION = {"key": VIDEO, "label": "Video call", "appt_label": "Family File 
 CALLS = (PHONE, VIDEO, REMOTE)
 
 RESTLAND_ORG_ID = "01fed629-9a95-412b-895a-c8b09f37a98c"
+# Owner, Nov 27: no same-day appointments offered or booked by the system here.
+NO_SAME_DAY_ORGS = {RESTLAND_ORG_ID}
 RESTLAND_ADDRESS = "13005 Greenville Ave, Dallas, TX 75243"
 # Owner, Nov 24 6:36 PM: Restland's first and last appointment times.
 # Mon-Fri 10 AM to 6 PM, Sat and Sun 10 AM to 3 PM (the last start time).
