@@ -54,9 +54,28 @@ def _batch(db, prog, w: Who, batch_id: str) -> BookitReferralBatch:
         raise BookitError("Not found.", 404)
     owners = [b.submitting_advisor] + [a for (a,) in db.query(BookitReferralContact.assigned_advisor)
                                        .filter(BookitReferralContact.batch_id == b.id)]
+    if not _on_team(db, prog.organization_id, b.submitting_advisor):
+        # filed under someone who isn't an advisor (e.g. started from the owner's
+        # account): it belongs to the advisor who did the review. An advisor's own
+        # network stays theirs even if the family is reassigned (owner, Nov 26).
+        owners.append(_review_owner(db, prog.organization_id, b.source_appointment_id))
     if not w.sees(*owners):
         raise BookitError("Not found.", 404)
     return b
+
+
+def _on_team(db, org: str, name: Optional[str]) -> bool:
+    from app.models.program_models import ProgramTeamMember as M
+    return bool(name) and db.query(M.id).filter(M.organization_id == org, M.name == name).first() is not None
+
+
+def _review_owner(db, org: str, appointment_id: Optional[str]) -> Optional[str]:
+    """The advisor the file review (appointment) is assigned to."""
+    if not appointment_id:
+        return None
+    from app.models.program_models import HandoffSheetRow as R
+    rec = db.query(R).filter(R.organization_id == org, R.row_id == appointment_id).first()
+    return rec.assigned_to if rec is not None else None
 
 
 def create_batch(db: Session, prog, w: Who, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -86,7 +105,15 @@ def create_batch(db: Session, prog, w: Who, body: Dict[str, Any]) -> Dict[str, A
             BookitReferralBatch.source_appointment_id == body["source_appointment_id"]).first()
         if same is not None:
             return batch_dict(db, w, same)
+    if kind == "evo6" and body.get("source_appointment_id"):
+        # the review must be one this caller may work (advisors: their own)
+        from app.services.bookit.workflow import appointment as _appt
+        _appt(db, prog, w, body["source_appointment_id"])
+    # The network belongs to the advisor who did the review - also when a
+    # manager starts it (Nov 26: one started from the owner's account was
+    # filed under the owner and hidden from the advisor).
     advisor = (body.get("submitting_advisor") if w.manager and body.get("submitting_advisor") else None) \
+        or (_review_owner(db, org, body.get("source_appointment_id")) if w.manager else None) \
         or w.name or w.user_name
     att = attribution(db, prog, origin, body.get("source_appointment_id")) if origin else {}
     b = BookitReferralBatch(organization_id=org, idempotency_key=key[:120], kind=kind, origin_lead_id=origin,
@@ -272,7 +299,9 @@ def batches(db: Session, prog, w: Who, kind: Optional[str] = None) -> List[Dict[
     out = []
     for b in q.order_by(BookitReferralBatch.created_at.desc()).limit(500):
         d = batch_dict(db, w, b)
-        if w.manager or b.submitting_advisor == w.name or d["contacts"]:
+        if (w.manager or b.submitting_advisor == w.name or d["contacts"]
+                or (w.name and not _on_team(db, prog.organization_id, b.submitting_advisor)
+                    and _review_owner(db, prog.organization_id, b.source_appointment_id) == w.name)):
             out.append(d)
     return out
 
@@ -454,3 +483,43 @@ def cases(db: Session, prog, w: Who) -> List[Dict[str, Any]]:
     if not w.manager:
         q = q.filter(BookitAddCase.assigned_advisor == (w.name or "-"))
     return [case_dict(c) for c in q.order_by(BookitAddCase.reported_at.desc()).limit(500)]
+
+
+# ── completed file reviews -> View network / Start 6 Block (owner, Nov 26 SS6) ──
+
+def reviews(db: Session, prog, w: Who) -> Dict[str, Any]:
+    """Completed file reviews (appointments marked Showed) this caller may see,
+    each with its existing network or none. Reading this never creates
+    anything: a network is only made by an explicit Start from a login that
+    may write (never the read-only preview)."""
+    from app.models.bookit_models import BookitPaperwork
+    from app.services.programs import team_board as TB
+    org = prog.organization_id
+    appts = TB.work(db, prog, person=None if w.manager else w.name)["appointments"]
+    done = [a for a in appts if a.get("lead_id") and (a.get("outcome") or a.get("status")) == "Showed"]
+    done.sort(key=lambda a: ((a.get("date") or ""), a.get("time") or ""), reverse=True)
+    nets = db.query(BookitReferralBatch).filter(BookitReferralBatch.organization_id == org,
+                                                BookitReferralBatch.kind == "evo6").all()
+    by_appt = {b.source_appointment_id: b for b in nets if b.source_appointment_id}
+    by_lead = {b.origin_lead_id: b for b in nets if b.origin_lead_id and not b.source_appointment_id}
+    pta = {p.lead_id: p.pta_status for p in db.query(BookitPaperwork).filter(
+        BookitPaperwork.organization_id == org, BookitPaperwork.lead_id.in_([a["lead_id"] for a in done] or ["-"]))}
+    rows, totals = [], {"reviews": len(done), "networks": 0, "collected": 0, "eligible": 0, "booked": 0}
+    for a in done:
+        b = by_appt.get(a["id"]) or by_lead.get(a["lead_id"])
+        net = None
+        if b is not None:
+            d = batch_dict(db, w, b)
+            p = d["progress"]
+            net = {"id": b.id, "status": b.collection_status, "collected": p["collected"],
+                   "eligible": p["eligible"], "booked": p["appointments_booked"]}
+            totals["networks"] += 1
+            totals["collected"] += p["collected"]
+            totals["eligible"] += p["eligible"]
+            totals["booked"] += p["appointments_booked"]
+        rows.append({"appointment_id": a["id"], "lead_id": a["lead_id"], "family": a["family"],
+                     "date": a["date"], "time": a["time"], "assigned": a["assigned"],
+                     "pta": pta.get(a["lead_id"]) or "not_recorded", "network": net,
+                     "can_start": net is None and not w.view_only and (w.manager or a["assigned"] == w.name)})
+    return {"reviews": rows, "totals": totals, "view_only": bool(w.view_only)}
+

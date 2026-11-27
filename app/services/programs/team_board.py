@@ -28,6 +28,7 @@ Who sees what
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -35,6 +36,8 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.services.programs import restland_sheet as RS
+
+log = logging.getLogger(__name__)
 
 OUTCOMES = ("Showed", "No-Show", "Rescheduled", "Cancelled")
 APPT_EDIT = ("outcome", "sold", "sold_what", "notes", "link")
@@ -183,6 +186,47 @@ def visit_kind(meeting_type: Optional[str]) -> str:
     return "unknown"
 
 
+ACTIVITY_KINDS = {"family_at": "Customer replied", "human_at": "Advisor replied", "note_at": "Note saved",
+                  "status_at": "Status changed"}
+
+
+def _activity(db: Session, fus: List[Dict[str, Any]], recs) -> None:
+    """Each follow-up's real last activity (owner, Nov 26 SS1/SS4): the newest
+    of the family's own message, a reply a person sent, a note a person saved
+    and a status change made by the team - with its Central time and kind.
+    Never the time this page was loaded or the board's sync time. Also
+    `new_reply`: the family's newest message came after any reply a person sent."""
+    from app.models.program_models import ProgramConversation
+    ids = [f["id"][3:] for f in fus if str(f["id"]).startswith("FU-")]
+    convs = db.query(ProgramConversation).filter(ProgramConversation.id.in_(ids or ["-"])).all() if ids else []
+    try:
+        ev = RS.followup_events(db, convs)
+    except Exception:                                    # noqa: BLE001 - rows still show, without activity
+        log.exception("follow-up activity lookup failed")
+        ev = {}
+    for f in fus:
+        e = dict(ev.get(str(f["id"])[3:]) or {})
+        rec = recs.get(f["id"])
+        e["status_at"] = rec.staff_changed_at if rec is not None else None
+        best = None
+        for k in ("family_at", "human_at", "note_at", "status_at"):
+            at = e.get(k)
+            if at is not None and (best is None or at > best[1]):
+                best = (k, at)
+        if best is None:
+            f["activity"] = None
+        else:
+            kind = ACTIVITY_KINDS[best[0]]
+            if best[0] == "human_at" and e.get("human_channel"):
+                kind += " by " + e["human_channel"]
+            f["activity"] = {"at": _ct(best[1]), "kind": kind}
+        fam, human = e.get("family_at"), e.get("human_at")
+        f["new_reply"] = bool(f["open"] and fam is not None and (human is None or fam > human))
+        f["replied_at"] = _ct(human) if human else None
+        f["replied_by"] = e.get("human_channel")
+        f["family_at"] = _ct(fam) if fam else None
+
+
 def work(db: Session, prog, person: Optional[str] = None, today: Optional[date] = None) -> Dict[str, Any]:
     """Appointments and follow-ups, with the team's fields. `person` limits
     it to one person's work (always set for a team member)."""
@@ -257,6 +301,7 @@ def work(db: Session, prog, person: Optional[str] = None, today: Optional[date] 
             "saving": waiting, "open": is_open,
             "due_now": is_open and (due is None or due <= today.isoformat()),
         })
+    _activity(db, fus, recs)
     # due now first, then the newest update
     fus.sort(key=lambda f: (not f["due_now"], not f["open"], f["follow_up_on"] or "",
                             "" if f["last_update"] is None else f["last_update"]), reverse=False)
