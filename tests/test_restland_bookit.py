@@ -752,3 +752,4 @@ def test_restland_setup_email_never_names_the_platform():
     assert "EvoSys" not in html and "evosys" not in html.lower()
     assert "https://app.example/restland" in html and "brand=restland" in html
     assert logins.sender().from_name == "Restland BookIT"
+    assert logins.sender().from_email == "support@evosyspro.live"           # never the server's default sender
