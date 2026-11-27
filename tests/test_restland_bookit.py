@@ -868,3 +868,23 @@ def test_a_reply_answers_everything_the_family_sent_before_it(setter, sample_adv
     assert R.answered_by_person(db, lead, sample_advisor, now=t0 + timedelta(minutes=31)) == 1
     db.refresh(later)
     assert later.handling_status == "responded"
+
+
+def test_restland_never_sends_a_guide_link_it_offers_times(setter, sample_advisor, monkeypatch):
+    """Owner, Nov 27 (Hsienchang Chiu): the AI drafted 'I'll send you the planning
+    guide ... https://links.evosyspro.live/planning-guide'. Restland gives the
+    guide at the visit - the AI offers times instead, never a guide link."""
+    from app.services.programs import ai_setter
+    from tests.test_sci_appointment_setter import _Fake, _d, _run
+    db, org = setter["db"], setter["org"]
+    monkeypatch.setattr(ai_setter, "GUIDE_AT_VISIT_ORGS", {org.id})
+    lead = _lead_for(db, org, sample_advisor, "L003", phone="2145550103", first="Hsien")
+    resp, conv = _run(db, lead, "Just send me the guide please",
+                      _Fake([_d("send_guide", "I'll send you the planning guide so you can review it.")]))
+    turns = [t for t in ai_setter.ProgramConversationTurn.__table__.c] and \
+        db.query(ai_setter.ProgramConversationTurn).filter_by(conversation_id=conv.id, role="ai").all()
+    assert turns, "the family got an answer"
+    last = turns[-1]
+    assert last.action == "offer_times"
+    assert "http" not in (last.text or "").split("Or pick another time here")[0]
+    assert "send you" not in (last.text or "").lower() and "guide" in (last.text or "").lower()
