@@ -196,3 +196,19 @@ export function newLeadProblem(f) {
   if (!dialable(f.phone) && !/.+@.+\..+/.test(String(f.email || '').trim())) return 'Add a phone number or an email.'
   return null
 }
+
+/**
+ * A reply that reads like an email (greeting + sign-off, or long): warn before
+ * it goes out as a text. (Nov 26: an email-style reply to a family who wrote
+ * by email went out as a text.)
+ */
+export function looksLikeEmail(text) {
+  const t = String(text || '').trim()
+  if (!t) return false
+  if (t.length > 480) return true
+  const lines = t.split(/\n/).map(x => x.trim()).filter(Boolean)
+  const signs = /^(best|thanks|thank you|regards|kind regards|sincerely|warmly)[,!.]?$/i
+  const greeting = /^(hello|hi|dear|good (morning|afternoon|evening))\b.*,$/i
+  // A sign-off LINE (not a quick "Thanks!") or a greeting line, in a message of several lines.
+  return lines.length >= 3 && (lines.some(l => signs.test(l)) || greeting.test(lines[0]))
+}

@@ -104,6 +104,14 @@ def signature(db: Session, lead) -> str:
     return ""
 
 
+def _norm_sig(s: str) -> str:
+    """Compare sign-off lines the way a person reads them: "&" = "and",
+    spacing and case ignored ("Restland Cemetery & Funeral Home" is the
+    location "Restland Cemetery and Funeral Home")."""
+    s = (s or "").strip().lower().replace("&", " and ")
+    return re.sub(r"\s+", " ", s).strip()
+
+
 def strip_signature(db: Session, lead, text: str) -> str:
     """Drop a sign-off the writer (or a suggested draft) already put at the end
     - "Kerry Allan", "Kerry Allan, <Location>", "- Kerry Allan", the location
@@ -112,17 +120,18 @@ def strip_signature(db: Session, lead, text: str) -> str:
     sig = signature(db, lead)
     if not sig or not text:
         return (text or "").strip()
-    parts = [p.strip().lower() for p in re.split(r",|\|", sig) if p.strip()]
+    parts = [_norm_sig(p) for p in re.split(r",|\|", sig) if p.strip()]
     person = parts[0] if parts else ""
     first = person.split()[0] if person else ""
+    sig_n = _norm_sig(sig)
     def is_sig(line: str) -> bool:
-        l = re.sub(r"^[-–—\s]+", "", line.strip().lower()).rstrip(".,!")
+        l = re.sub(r"^[-–—\s]+", "", _norm_sig(line)).rstrip(".,!-–— ")
         if not l:
             return True
         l = re.sub(r"^(thanks|thank you|best|regards|sincerely|warmly|kind regards)[,!]?\s*", "", l)
         if not l:
             return True
-        return l in parts or l == sig.lower() or l == first or (person and l.startswith(person)) \
+        return l in parts or l == sig_n or l == first or (person and l.startswith(person)) \
             or all(bit.strip() in parts for bit in re.split(r",|\|", l) if bit.strip())
     lines = (text or "").rstrip().split("\n")
     cut = len(lines)
