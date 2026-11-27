@@ -233,3 +233,14 @@ test('phone leads: follow-up picks and due labels (server times without a zone a
   assert.match(dueLabel(past, morning), /^Overdue/)
   assert.equal(dueLabel(null), 'No date')
 })
+
+import { looksLikeEmail } from '../src/teamapp/programMobile.js'
+
+test('reply screen warns when an email-style message is about to go out as a text', () => {
+  assert.equal(looksLikeEmail('Hello,\n\nThanks for letting me know you are in France.\n\nBest,\nMike Simmons'), true)
+  assert.equal(looksLikeEmail('Does Friday at 10 work?'), false)
+  assert.equal(looksLikeEmail('Thanks!'), false, 'a quick thanks is a normal text')
+  assert.equal(looksLikeEmail('See you Friday.\nThanks,\nMike'), true)
+  assert.equal(looksLikeEmail('x'.repeat(500)), true)
+  assert.equal(looksLikeEmail(''), false)
+})

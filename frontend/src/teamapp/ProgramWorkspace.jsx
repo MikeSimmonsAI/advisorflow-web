@@ -20,11 +20,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink, useNavigate, useParams } from 'react-router-dom'
 import { api, clearWorkspaceContext, fetchMyContexts, setBrandContext } from '../api/client'
+import { formatPhone } from '../utils/phone'
 import { programInventory } from '../pages/program/programAccessModel'
 import { openProgramItem } from '../pages/program/programDestinations'
 import { MOBILE_PROGRAMS, setLauncherOrigin } from '../pages/program/launcherOrigin'
 import { ErrorNote, Icon, Loading, useTeam } from './TeamApp'
-import { ago, countLabel, draftKey, findProgram, mobileKind, mobileProgramPath, programRequest,
+import { ago, contactLinks, countLabel, draftKey, findProgram, hasLeads, looksLikeEmail, mobileKind, mobileProgramPath, programRequest,
          programTabs, whenLabel } from './programMobile'
 import { programStyle } from './teamHelpers'
 
@@ -360,6 +361,11 @@ function Bubble({ t, tz }) {
   )
 }
 
+function ActionLink({ href, icon, label }) {
+  if (!href) return <span className="ta-cact is-off" aria-disabled="true"><Icon name={icon} size={20} /><span>{label}</span></span>
+  return <a className="ta-cact" href={href}><Icon name={icon} size={20} /><span>{label}</span></a>
+}
+
 export function ProgramThread() {
   const entry = useEntry()
   const navigate = useNavigate()
@@ -376,6 +382,10 @@ export function ProgramThread() {
   const endRef = useRef(null)
   const d = f.data
   const target = (d && d.reply_to) || {}
+  const { me } = useTeam()
+  const links = contactLinks(d || {})
+  const leadPage = d && item && me && me.previews && me.previews.phone_work && hasLeads(item)
+    ? mobileProgramPath(item, 'leads') + '/' + encodeURIComponent(leadId) : null
   const opted = !!(d && d.handling && d.handling.opted_out)
   const blocked = opted ? 'This family asked not to be contacted.'
     : (target.channel === 'email' && target.threadable === false) ? target.why_not
@@ -409,8 +419,19 @@ export function ProgramThread() {
     <div className="ta-convo ta-prog-convo">
       <header className="ta-convo-top">
         <button type="button" className="ta-icon-btn ta-icon-btn--light" onClick={back} aria-label="Back to Replies"><Icon name="back" /></button>
-        <h1>{(d && d.name) || 'Conversation'}</h1>
+        <div className="ta-convo-title">
+          <h1>{(d && d.name) || 'Conversation'}</h1>
+          {d && <span className="ta-convo-sub">{[d.location, d.handling && d.handling.owner === 'human' ? 'With a person' : 'AI assistant on'].filter(Boolean).join(' · ')}</span>}
+        </div>
       </header>
+      {d && (
+        <nav className="ta-convo-actions" aria-label="Contact and details">
+          <ActionLink href={links.call} icon="phone" label="Call" />
+          <ActionLink href={links.text} icon="sms" label="Text" />
+          <ActionLink href={links.email} icon="mail" label="Email" />
+          {leadPage && <button type="button" className="ta-cact" onClick={() => navigate(leadPage)}><Icon name="note" size={20} /><span>Details</span></button>}
+        </nav>
+      )}
       <div className="ta-msgs" aria-live="polite">
         {entry.phase === 'missing' && <div className="ta-state">This program is not available on your account.</div>}
         {entry.phase === 'error' && <ErrorNote error={entry.error} onRetry={entry.retry} />}
@@ -418,9 +439,7 @@ export function ProgramThread() {
         {f.error && <ErrorNote error={f.error} onRetry={f.reload} />}
         {d && (
           <>
-            <p className="ta-muted ta-small ta-prog-meta">
-              {[d.location, d.handling && d.handling.owner === 'human' ? 'With a person' : 'AI assistant on',
-                d.booking && d.booking.when_text ? 'Booked ' + d.booking.when_text : null].filter(Boolean).join(' · ')}</p>
+            {d.booking && d.booking.when_text && <p className="ta-muted ta-small ta-prog-meta">Booked {d.booking.when_text}</p>}
             {d.human_handoff && d.handoff_reason && <div className="ta-note">Handed to a person: {d.handoff_reason}</div>}
             {d.thread.map((t, k) => <Bubble key={k} t={t} tz="America/Chicago" />)}
             <div ref={endRef} />
@@ -431,8 +450,18 @@ export function ProgramThread() {
         <form className="ta-composer" onSubmit={send}>
           {blocked && <div className="ta-note" role="status">{blocked}</div>}
           {!blocked && d.suggested_reply && !text && (
-            <button type="button" className="ta-btn ta-btn--ghost ta-btn--sm ta-suggest" onClick={() => setText(d.suggested_reply)}>
+            <button type="button" className="ta-suggest-btn" onClick={() => setText(d.suggested_reply)}>
               Use suggested reply</button>
+          )}
+          {!blocked && (
+            <p className={'ta-sendas' + (target.channel === 'sms' ? ' is-text' : '')} data-channel={target.channel}>
+              {target.channel === 'email'
+                ? <>Goes out as an <strong>email</strong> to {target.to_name || target.to}{target.subject ? ' · ' + target.subject : ''}</>
+                : <>Goes out as a <strong>text message</strong> to {formatPhone(d.phone) || 'their phone'}. Your sign-off and “Reply STOP to opt out.” are added.</>}
+            </p>
+          )}
+          {!blocked && target.channel === 'sms' && looksLikeEmail(text) && (
+            <div className="ta-note ta-note--warn" role="alert">This reads like an email, but it will be sent as a text message.{links.email ? ' To email them, tap Email at the top.' : ''}</div>
           )}
           {err && <div className="ta-note ta-note--err" role="alert">{err}</div>}
           {sent && !err && <div className="ta-note" role="status">{sent}</div>}
@@ -446,8 +475,7 @@ export function ProgramThread() {
                   <Icon name="send" /></button>
               </div>
               <label className="ta-keep"><input type="checkbox" checked={keepMine} onChange={e => setKeepMine(e.target.checked)} disabled={busy} />
-                Keep this conversation with me (the AI won't answer the next reply)</label>
-              {target.channel === 'email' && target.to && <p className="ta-muted ta-small">To {target.to_name || target.to}{target.subject ? ' · ' + target.subject : ''}</p>}
+                <span>Keep this conversation with me (the AI won’t answer the next reply)</span></label>
             </>
           )}
         </form>

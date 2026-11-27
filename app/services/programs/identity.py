@@ -458,12 +458,16 @@ def with_signoff(prog: OutreachProgram, prof, body: str) -> str:
     """The sign-off rule, shared by sending and the campaign preview."""
     signoff = sms_signoff(prog, prof)
     text = (body or "").rstrip()
-    if signoff in text:
+    # Compared the way a person reads it: "&" = "and", spacing and case ignored.
+    from app.services.programs.email_reply import _norm_sig
+    text_n = _norm_sig(text)
+    if _norm_sig(signoff).lstrip("-–— ") in text_n:
         return body
     # The message already introduces the person AND the location ("this is
-    # Kerry Allan with <Location>"): a trailing sign-off would only repeat it.
+    # Kerry Allan with <Location>", or a typed "Mike Simmons / Restland
+    # Cemetery & Funeral Home"): a trailing sign-off would only repeat it.
     person = (prog.primary_contact_name or "").strip()
-    if prof is not None and prof.official_name in text and (not person or person in text):
+    if prof is not None and _norm_sig(prof.official_name) in text_n and (not person or _norm_sig(person) in text_n):
         return body
     # The sign-off goes BEFORE the opt-out line, which stays last.
     from app.services.sms_content_policy import REQUIRED_OPT_OUT

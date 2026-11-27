@@ -459,3 +459,22 @@
 .ta-furow-main .ta-row-name { font-weight: 800; }
 .ta-prog-tabs a { padding: 0 6px; white-space: nowrap; }
 @media (max-width: 400px) { .ta-prog-tabs a { font-size: 15px; } }
+
+/* ── Family thread on the phone: act from here (Nov 27) ─────────────────── */
+.ta-convo-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ta-convo-title h1 { flex: none; }
+.ta-convo-sub { font-size: 13px; color: rgba(255, 255, 255, .75); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ta-convo-actions { display: flex; gap: 8px; padding: 8px 10px; background: #fff; border-bottom: 1px solid var(--ta-line); overflow-x: auto; flex: none; }
+.ta-cact { flex: 1 0 auto; display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 42px; padding: 0 12px; border-radius: 21px;
+  background: #eaf0fd; color: var(--ta-blue); font: inherit; font-weight: 800; font-size: 14.5px; text-decoration: none; border: 0; cursor: pointer; white-space: nowrap; }
+.ta-cact.is-off { background: #f0f2f6; color: #a3adbd; }
+.ta-suggest-btn { display: block; width: 100%; min-height: 40px; margin: 0 0 6px; border: 1px dashed #b9c6dc; border-radius: 10px; background: #f6f8fd;
+  color: var(--ta-blue); font: inherit; font-weight: 700; cursor: pointer; }
+.ta-sendas { margin: 0 2px 6px; font-size: 13px; color: var(--ta-muted); line-height: 1.3; }
+.ta-sendas.is-text strong { color: #b45309; }
+.ta-note--warn { background: #fff7e6; border-color: #f2c46d; color: #7a4a00; margin-bottom: 6px; }
+.ta-keep { align-items: flex-start; line-height: 1.3; }
+.ta-keep span { flex: 1; min-width: 0; }
+.ta-keep input { flex: none; margin-top: 1px; }
+.ta-convo-actions { overflow: visible; }
+.ta-cact { flex: 1 1 0; min-width: 0; flex-direction: column; gap: 2px; min-height: 52px; padding: 4px 2px; border-radius: 12px; font-size: 13px; }
