@@ -111,21 +111,30 @@ export function BookitDashboard({ item }) {
   )
 }
 
-// Appointments set (owner, Nov 27): 1, 7, 30, 45, 60 days and all time, cancelled included.
-const SET_ROWS = [['set', 'Set'], ['upcoming', 'Coming up'], ['showed', 'Showed'], ['no_show', 'No-show'],
-  ['no_result', 'No result'], ['cancelled', 'Cancelled']]
-const SHORT = { 'Today': '1', '7 days': '7', '30 days': '30', '45 days': '45', '60 days': '60', 'All time': 'All' }
+// Appointments set (owner, Nov 27): pick 1, 7, 30, 45, 60 days or all time and
+// see that one period - not every period at once.
+const SPANS = [['Today', 'Today'], ['7 days', '7 days'], ['30 days', '30 days'], ['45 days', '45 days'],
+  ['60 days', '60 days'], ['All time', 'All time']]
+const SET_PARTS = [['upcoming', 'Coming up'], ['showed', 'Showed'], ['no_show', 'No-show', true],
+  ['no_result', 'No result yet'], ['cancelled', 'Cancelled', true]]
 function SetTable({ spans }) {
+  const [pick, setPick] = useState('30 days')
+  const r = spans.find(x => x.label === pick) || spans[0]
   return (
     <section className="ta-section">
       <h2 className="ta-h2">Appointments set</h2>
+      <div className="ta-chips ta-set-chips" role="tablist" aria-label="Period">
+        {SPANS.map(([key, label]) => (
+          <button key={key} type="button" role="tab" aria-selected={pick === key}
+                  className={'ta-chip' + (pick === key ? ' is-on' : '')} onClick={() => setPick(key)}>{label}</button>))}
+      </div>
       <div className="ta-card ta-set">
-        <table className="ta-set-t">
-          <thead><tr><th />{spans.map(r => <th key={r.label}>{SHORT[r.label] || r.label}</th>)}</tr></thead>
-          <tbody>{SET_ROWS.map(([k, l]) => (
-            <tr key={k} className={'r-' + k}><th>{l}</th>{spans.map(r => <td key={r.label}>{r[k] ?? '–'}</td>)}</tr>))}</tbody>
-        </table>
-        <p className="ta-muted ta-small">Days back from today, by the day the family booked. Set includes cancelled.</p>
+        <div className="ta-set-big"><strong>{r.set ?? 0}</strong><span>set {pick === 'Today' ? 'today' : pick === 'All time' ? 'all time' : 'in the last ' + pick}</span></div>
+        <ul className="ta-set-parts">
+          {SET_PARTS.map(([k, l, bad]) => (
+            <li key={k} className={bad && r[k] ? 'is-bad' : ''}><strong>{r[k] ?? 0}</strong><span>{l}</span></li>))}
+        </ul>
+        <p className="ta-muted ta-small">Counted by the day the family booked. Set includes cancelled.</p>
       </div>
     </section>
   )
