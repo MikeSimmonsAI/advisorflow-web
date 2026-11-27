@@ -102,7 +102,7 @@ def handle(db: Session, *, from_number: str, to_number: str, body: str, message_
     english = None
     try:
         from app.services.evosys_sales import ai as _AI
-        if _AI.looks_spanish(text):
+        if _AI.needs_english_translation(text):
             new = (db.query(EvoSysOutreachMessage).filter(EvoSysOutreachMessage.opportunity_id == opp.id,
                                                           EvoSysOutreachMessage.provider_message_id == message_sid).first())
             if new is not None:
@@ -119,7 +119,7 @@ def handle(db: Session, *, from_number: str, to_number: str, body: str, message_
         except Exception:                                   # noqa: BLE001 - the reply is safe on the lead
             db.rollback()
             log.exception("[evosys-sales sms] AI answer failed for lead %s", opp.id)
-        _alert_owner(db, s, opp, text + (" [English: %s]" % english if english else ""), answered)
+        _alert_owner(db, s, opp, text, answered, english=english)
     return True
 
 
@@ -241,19 +241,23 @@ def notify_owner(s, line: str, subject: str, html_body: str) -> None:
             log.exception("[evosys-sales] owner alert email failed")
 
 
-def _alert_owner(db: Session, s, opp: Opportunity, text: str, answered: Optional[str] = None) -> None:
+def _alert_owner(db: Session, s, opp: Opportunity, text: str, answered: Optional[str] = None, *,
+                 english: Optional[str] = None) -> None:
     """Tell the owner a prospect texted back - by text and email, the same way
     SCI and Restland replies reach him."""
     import html as _html
     who = opp.company_name or opp.contact_name or "A prospect"
     phone = opp.phone or ""
+    preview = english or text or ""
     if answered:
-        line = "EvoSys BookIt - %s (%s) texted: \"%s\" AI answered: \"%s\"" % (who, phone, (text or "")[:110], answered[:120])
+        line = "EvoSys BookIt - %s (%s) texted: \"%s\" AI answered: \"%s\"" % (who, phone, preview[:110], answered[:120])
     else:
         line = "EvoSys BookIt - NEEDS A PERSON: %s (%s) texted back: \"%s\" (draft ready on the lead)" % (
-            who, phone, (text or "")[:150])
+            who, phone, preview[:150])
     body = ("<p><b>%s</b> (%s) texted back to the EvoSys BookIt number:</p><blockquote>%s</blockquote>"
-            % (_html.escape(who), _html.escape(phone), _html.escape(text or "")))
+            % (_html.escape(who), _html.escape(phone), _html.escape(preview)))
+    if english and english != text:
+        body += "<p><b>Original message</b></p><blockquote>%s</blockquote>" % _html.escape(text or "")
     body += (("<p>AI answered for you:</p><blockquote>%s</blockquote>" % _html.escape(answered)) if answered else
              "<p>The automatic follow-up has stopped. A draft answer is ready on the lead in EvoSys BookIt.</p>")
     subj = ("EvoSys BookIt - %s texted back (AI answered)" if answered
