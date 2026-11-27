@@ -7,6 +7,7 @@ import { api } from '../../api/client'
 import './bookit.css'
 import { Icon, Toast } from './ui'
 import * as S from './screens'
+import { useRestlandBrand } from './RestlandAccess'
 
 export const Bk = createContext(null)
 export const useBk = () => useContext(Bk)
@@ -63,7 +64,7 @@ export default function BookitApp() {
   const toastT = useRef(null)
   const [toolbar, setToolbar] = useState(null)               // where screens put their filters (top right)
 
-  useEffect(() => { document.title = 'Restland BookIT' }, [])
+  useRestlandBrand('Restland BookIT')
   useEffect(() => {
     api.get('/restland-bookit/me').then(setMe).catch(e => setErr(e.message || 'BookIT could not be opened.'))
   }, [])
@@ -128,7 +129,6 @@ export default function BookitApp() {
           })}
           <div className="grow" />
           <button className="bk-nav" onClick={() => nav('/workspaces')}><span>Program Access</span></button>
-          <div className="bk-powered">Powered by EvoSys Pro</div>
         </aside>
         <main className="bk-main">
           <div className="bk-page">

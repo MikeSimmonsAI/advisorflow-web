@@ -481,6 +481,39 @@ def test_a_bookit_login_reaches_bookit_and_nothing_else_of_the_workspace(setter,
         assert _bookit_fence(db, u, _Req(allowed)) is None
     ctx = WA.authorized_contexts(db, u)
     assert not [w for w in ctx["workspace_contexts"] if w.get("organization_id") == org.id]
-    assert ctx["bookit_contexts"] and ctx["default_context"]["type"] == "restland_bookit"
+    assert ctx["bookit_contexts"] and ctx["default_context"]["path"] == "/workspaces" and ctx["restland_staff"]
     # the owner and managers are never fenced
     assert WA.bookit_only_orgs(db, boss_user) == set()
+
+
+def test_my_quick_view_counts_only_your_own_booked_next_7_days_by_visit_type(setter, sample_advisor):
+    from datetime import date as _d
+    from app.services.programs import team_board as TB
+    db, org, prog, sheet, appts, mine, other = _team(setter, sample_advisor)
+    _live(db, prog)
+    ann = core.who(db, prog, _U("u-ann"), manager=False)
+    bob = core.who(db, prog, _U("u-bob"), manager=False)
+    mine_row = [a for a in TB.work(db, prog, person="Ann")["appointments"] if a["id"] == mine.id][0]
+    day = _d.fromisoformat(mine_row["date"])
+    mine.meeting_type = None
+    db.commit()
+    q = insights.quick_view(db, prog, ann, today=day)
+    assert q["total"] == 1 and q["unspecified"] == 1 and q["onsite"] == 0      # missing type is never guessed
+    assert q["next"]["id"] == mine.id
+    for mt, key in (("office", "onsite"), ("video", "call"), ("home", "offsite")):
+        mine.meeting_type = mt
+        db.commit()
+        q = insights.quick_view(db, prog, ann, today=day)
+        assert q[key] == 1 and q["total"] == 1 and q["onsite"] + q["call"] + q["offsite"] + q["unspecified"] == 1
+    # Bob's own appointment never shows in Ann's view, and a week with nothing is a zero
+    assert other.id not in {(q["next"] or {}).get("id")}
+    later = insights.quick_view(db, prog, ann, today=day + __import__("datetime").timedelta(days=30))
+    assert later["total"] == 0 and later["next"] is None
+    # cancelled is excluded
+    mine.status = "cancelled"
+    db.commit()
+    assert insights.quick_view(db, prog, ann, today=day)["total"] == 0
+    # a manager with no seat gets no organization totals
+    boss = core.who(db, prog, _U("owner"), manager=True)
+    assert "total" not in insights.quick_view(db, prog, boss, today=day)
+    assert TB.visit_kind("remote") == "call" and TB.visit_kind("weird") == "unknown"

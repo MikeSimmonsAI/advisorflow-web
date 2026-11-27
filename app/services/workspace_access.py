@@ -861,7 +861,9 @@ def authorized_contexts(db: Session, user: User, host_slug: Optional[str] = None
         contexts = [c for c in contexts if c.get("organization_id") not in only]
         if bookit and (not workspaces or (default or {}).get("organization_id") in only
                        or (default or {}).get("type") in ("workspace", "program", "legacy_tenant", "workspace_selector")):
-            default = bookit[0]
+            # Owner, Nov 26: Restland staff land on the Restland Program Access
+            # page first; "Open BookIT" takes them to My Day.
+            default = {"type": "workspace_selector", "path": "/workspaces"}
 
     return {
         "contexts": contexts + executive,
@@ -896,6 +898,9 @@ def authorized_contexts(db: Session, user: User, host_slug: Optional[str] = None
         # sales program owners and the client_growth grant. Never prospects.
         "client_growth_contexts": _client_growth_contexts(db, user),
         "bookit_contexts": bookit,
+        # The Restland staff experience (Program Access landing in Restland's
+        # look, no EvoSys branding): a login that exists only for BookIT.
+        "restland_staff": bool(only and bookit and not workspaces and not platform and not executive),
         "workspace_count": len(workspaces),
         "default_context": default,
         # WHICH BRAND'S LOOK the launcher wears (e.g. BookaBoost), decided
