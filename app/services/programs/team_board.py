@@ -195,7 +195,7 @@ def _activity(db: Session, fus: List[Dict[str, Any]], recs) -> None:
     of the family's own message, a reply a person sent, a note a person saved
     and a status change made by the team - with its Central time and kind.
     Never the time this page was loaded or the board's sync time. Also
-    `new_reply`: the family's newest message came after any reply a person sent."""
+    `new_reply`: the family's newest message came after the team's last action."""
     from app.models.program_models import ProgramConversation
     ids = [f["id"][3:] for f in fus if str(f["id"]).startswith("FU-")]
     convs = db.query(ProgramConversation).filter(ProgramConversation.id.in_(ids or ["-"])).all() if ids else []
@@ -221,7 +221,9 @@ def _activity(db: Session, fus: List[Dict[str, Any]], recs) -> None:
                 kind += " by " + e["human_channel"]
             f["activity"] = {"at": _ct(best[1]), "kind": kind}
         fam, human = e.get("family_at"), e.get("human_at")
-        f["new_reply"] = bool(f["open"] and fam is not None and (human is None or fam > human))
+        # the family wrote after the team's last action (a reply, a note, a status change)
+        team = [x for x in (human, e.get("note_at"), e.get("status_at")) if x is not None]
+        f["new_reply"] = bool(f["open"] and fam is not None and (not team or fam > max(team)))
         f["replied_at"] = _ct(human) if human else None
         f["replied_by"] = e.get("human_channel")
         f["family_at"] = _ct(fam) if fam else None
