@@ -481,6 +481,28 @@ def program_brand(db: Session, user: User, host_slug: Optional[str] = None) -> O
         return None
 
 
+def bookit_only_orgs(db: Session, user: User) -> set:
+    """Workspaces where this login exists ONLY for Restland BookIT (owner, Nov 26:
+    a team or test login must see BookIT and nothing else of the workspace).
+
+    A login linked to a BookIT team member whose role in that workspace is not a
+    manager role. Owners, super/org admins and managers are never restricted."""
+    if user is None or getattr(user, "role", None) in ("god_admin", "super_admin", "org_admin"):
+        return set()
+    try:
+        from app.models.program_models import ProgramTeamMember as _TM
+        orgs = {o for (o,) in db.query(_TM.organization_id).filter(_TM.user_id == user.id).all()}
+        if not orgs:
+            return set()
+        mgr = {o for (o, r) in db.query(Membership.scope_id, Membership.role).filter(
+            Membership.user_id == user.id, Membership.scope_type == SCOPE_CUSTOMER_ORG,
+            Membership.is_active.is_(True)).all() if r in ("org_admin", "super_admin", "manager")}
+        return orgs - mgr
+    except Exception:                                    # pragma: no cover - never break sign-in
+        _log.warning("bookit_only_orgs failed for %s", getattr(user, "id", None), exc_info=True)
+        return set()
+
+
 def _bookit_contexts(db: Session, user: User, workspaces: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """RESTLAND BOOKIT (owner directive v2.0, Nov 25): a card only for someone
     BookIT itself would let in - the owner's logins until it's opened to the
@@ -830,6 +852,17 @@ def authorized_contexts(db: Session, user: User, host_slug: Optional[str] = None
         _log.warning("could not resolve training for %s",
                      getattr(user, "id", None), exc_info=True)
 
+    # A BookIT-only login (team/test) gets the BookIT card and never the
+    # workspace itself; it lands on BookIT.
+    bookit = _bookit_contexts(db, user, workspaces)
+    only = bookit_only_orgs(db, user)
+    if only:
+        workspaces = [w for w in workspaces if w.get("organization_id") not in only]
+        contexts = [c for c in contexts if c.get("organization_id") not in only]
+        if bookit and (not workspaces or (default or {}).get("organization_id") in only
+                       or (default or {}).get("type") in ("workspace", "program", "legacy_tenant", "workspace_selector")):
+            default = bookit[0]
+
     return {
         "contexts": contexts + executive,
         "platform_contexts": platform,
@@ -862,7 +895,7 @@ def authorized_contexts(db: Session, user: User, host_slug: Optional[str] = None
         # CLIENT GROWTH: discovery questionnaires and proposals - God Mode, the
         # sales program owners and the client_growth grant. Never prospects.
         "client_growth_contexts": _client_growth_contexts(db, user),
-        "bookit_contexts": _bookit_contexts(db, user, workspaces),
+        "bookit_contexts": bookit,
         "workspace_count": len(workspaces),
         "default_context": default,
         # WHICH BRAND'S LOOK the launcher wears (e.g. BookaBoost), decided
