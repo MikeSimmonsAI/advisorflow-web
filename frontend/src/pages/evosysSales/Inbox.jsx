@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api, getCurrentUser } from '../../api/client'
 import CallPanel from './CallPanel'
+import { ReplyTranslation, useReplyTranslation } from './ReplyTranslation'
 
 const API = '/sales/evosys'
 const BASE = '/program/evosys-sales'
@@ -33,7 +34,7 @@ function tagsFor(m, why) {
   const t = []
   const b = (m.body || '').toLowerCase()
   if (/website|sitio web/.test(b)) t.push('Asked for website')
-  if (/spanish|español|espanol/.test(b) || m.translation) t.push('Prefers Spanish')
+  if (/spanish|español|espanol/.test(b)) t.push('Mentions Spanish')
   if (/price|cost|how much|cuánto|precio/.test(b)) t.push('Pricing question')
   if (/availab|schedule|time|horario|disponib/.test(b)) t.push('Scheduling question')
   if (!t.length && why) t.push(why.length > 40 ? why.slice(0, 38) + '…' : why)
@@ -57,7 +58,7 @@ function Bubble({ m }) {
   return (
     <div className={'v2-bubble-wrap ' + (mine ? 'mine' : 'theirs')}>
       <div className={'v2-bubble ' + (mine ? 'mine' : 'theirs')}>
-        {m.translation && !mine ? <>{m.translation}<span className="v2-orig">{m.body}</span></> : m.body}
+        {m.translation && !mine ? <>{m.translation}<details className="v2-orig"><summary>Show original</summary>{m.body}</details></> : m.body}
       </div>
       <div className="v2-bubble-meta">{who ? who + ' · ' : ''}{ctWhen(m.at)}{m.status === 'failed' ? ' · did not send' : ''}</div>
     </div>
@@ -77,33 +78,31 @@ function Draft({ lead, lastIn, saved, onSent, onDone }) {
     try { const r = await api.post(`${API}/messages/${lastIn.id}/assist${again ? '?again=true' : ''}`, {}); setT(r); setBody(r.output?.draft || '') }
     catch (e) { setErr(errText(e)) } finally { setBusy(false) }
   }
+  const out = t?.output || {}
+  const reply = useReplyTranslation({ leadId: lead.id, message: lastIn, body, spanishDraft: out.draft_english ? out.draft : undefined, englishDraft: out.draft_english })
   const send = async () => {
     setBusy(true); setErr(null)
-    try { await api.post(`${API}/leads/${lead.id}/send-reply`, { body, ai_task_id: t?.id, channel: 'text' }); onSent(`Sent to ${lead.company}`) }
+    try { const outgoing = await reply.prepare(); if (outgoing === null) return; await api.post(`${API}/leads/${lead.id}/send-reply`, { body: outgoing, ai_task_id: t?.id, channel: 'text' }); onSent(`Sent to ${lead.company}`) }
     catch (e) { setErr(errText(e)) } finally { setBusy(false) }
   }
-  const out = t?.output || {}
   const lang = out.draft_english ? 'Spanish' : null
   return (
     <div className="v2-draft">
       <div className="v2-draft-head"><b>{t ? 'AI draft' : 'Your reply'}</b>{lang && <span className="v2-tag">{lang}</span>}</div>
       {!t && lastIn && !body && <button className="v2-btn" disabled={busy} onClick={() => ask(false)}>{busy ? 'Drafting…' : 'Draft a reply'}</button>}
-      {(t || body || !lastIn) && (
-        <>
-          {editing || !t || !out.draft
-            ? <textarea className="v2-input" rows={3} value={body} onChange={e => setBody(e.target.value)} placeholder="Write a text…" aria-label="Your reply" />
-            : <div className="v2-draft-text">{body}</div>}
-          {out.draft_english && body === out.draft && <div className="v2-english">English · {out.draft_english}</div>}
-          <div className="v2-row">
-            <button className="v2-btn v2-primary" disabled={busy || !body.trim()} onClick={send}>{busy ? 'Sending…' : 'Send'}</button>
-            {t && out.draft && <button className="v2-btn" onClick={() => setEditing(!editing)}>{editing ? 'Done editing' : 'Edit'}</button>}
-            {lastIn && <button className="v2-btn" disabled={busy} onClick={() => ask(true)}>Rewrite</button>}
-            {lastIn && <button className="v2-btn" disabled={busy} onClick={onDone}>Mark done</button>}
-          </div>
-          {(out.needs_person || []).length > 0 && <div className="v2-why">AI paused for Mike · {out.needs_person[0]}</div>}
-          <div className="v2-hint">{body.length} characters · sends from the EvoSys BookIt number</div>
-        </>
-      )}
+      {editing || !t || !out.draft
+        ? <textarea className="v2-input" rows={3} disabled={busy} value={body} onChange={e => setBody(e.target.value)} placeholder="Write a text…" aria-label="Your reply" />
+        : <div className="v2-draft-text">{body}</div>}
+      {out.draft_english && body === out.draft && <div className="v2-english">English · {out.draft_english}</div>}
+      <ReplyTranslation reply={reply} disabled={busy} />
+      <div className="v2-row">
+        <button className="v2-btn v2-primary" disabled={busy || !body.trim()} onClick={send}>{busy ? 'Working…' : reply.needsPreview ? 'Preview Spanish' : reply.language === 'Spanish' ? 'Send Spanish text' : 'Send'}</button>
+        {t && out.draft && <button className="v2-btn" onClick={() => setEditing(!editing)}>{editing ? 'Done editing' : 'Edit'}</button>}
+        {lastIn && <button className="v2-btn" disabled={busy} onClick={() => ask(true)}>Rewrite</button>}
+        {lastIn && <button className="v2-btn" disabled={busy} onClick={onDone}>Mark done</button>}
+      </div>
+      {(out.needs_person || []).length > 0 && <div className="v2-why">AI paused for Mike · {out.needs_person[0]}</div>}
+      <div className="v2-hint">{body.length} characters · sends from the EvoSys BookIt number</div>
       {err && <p className="v2-err" role="alert">{err}</p>}
     </div>
   )
@@ -135,7 +134,7 @@ export function Thread({ id, onBack, onChanged, toast }) {
         <span className="v2-avatar">{initials(lead.company)}</span>
         <div className="v2-grow">
           <Link to={`${BASE}/leads/${lead.id}`} className="v2-thread-name">{lead.company}</Link>
-          <div className="v2-sub">{[lead.contact, msgs.some(m => m.translation) ? 'Spanish preferred' : null].filter(Boolean).join(' · ') || lead.outreach?.label}</div>
+          <div className="v2-sub">{[lead.contact, msgs.some(m => m.translation) ? 'Translated messages' : null].filter(Boolean).join(' · ') || lead.outreach?.label}</div>
         </div>
         {!stopped && (
           <div className="v2-row v2-thread-acts">

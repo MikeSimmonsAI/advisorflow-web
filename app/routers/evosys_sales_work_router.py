@@ -434,6 +434,23 @@ def label(mid: str, body: LabelIn, c: Ctx = Depends(ctx), db: Session = Depends(
     return {"ok": True, "label": m.label}
 
 
+class TranslateReplyIn(BaseModel):
+    body: str
+
+
+@router.post("/leads/{opp_id}/translate-reply")
+def translate_reply(opp_id: str, body: TranslateReplyIn, c: Ctx = Depends(ctx), db: Session = Depends(get_db)):
+    _opp(db, c, opp_id)
+    text = body.body.strip()
+    if not text or len(text) > 1600:
+        raise HTTPException(422, "Write a text between 1 and 1,600 characters.")
+    try:
+        translated = AI.translate_reply_to_spanish(text, c.bso, c.user.id)
+    except Exception:
+        raise HTTPException(503, "Spanish translation is unavailable. Try again or choose English.")
+    return {"body": translated}
+
+
 class ReplyIn(BaseModel):
     subject: str = ""
     body: str
