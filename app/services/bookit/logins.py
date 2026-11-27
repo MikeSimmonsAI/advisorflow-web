@@ -97,9 +97,13 @@ RESTLAND_SENDER = "Restland BookIT"
 
 
 def sender():
-    """Sent from the support address (owner rule) under Restland's name only."""
+    """Sent from the support address (owner rule: outgoing email only from
+    support@evosyspro.live) under Restland's name. Set explicitly: left empty it
+    fell back to the server's default sender, noreply@bookaboost.live (Nov 27)."""
     from types import SimpleNamespace
-    return SimpleNamespace(resend_api_key=None, from_email=None, from_name=RESTLAND_SENDER)
+    from app.services.brand_config import FROZEN_BRAND_DEFAULTS
+    return SimpleNamespace(resend_api_key=None, from_name=RESTLAND_SENDER,
+                           from_email=FROZEN_BRAND_DEFAULTS["evosyspro"]["support_email"])
 
 
 def setup_email(first: str, url: str, base_url: str) -> str:
