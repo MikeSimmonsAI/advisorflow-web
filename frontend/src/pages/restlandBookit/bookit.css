@@ -274,7 +274,7 @@
 .bk-qline { padding: 9px 0; border-bottom: 1px solid var(--line); }
 .bk-qline p { margin: 2px 0 0; }
 .bk-qline .said { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.bk-more { margin-top: 10px; }
+.bk-panelfoot { margin-top: 10px; }
 .bk-filters { margin: 0 0 10px; }
 .bk-legend { display: inline-flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
 .bk-weekhead { font-size: 18px; margin: 4px 0 10px; display: flex; gap: 10px; align-items: baseline; }

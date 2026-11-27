@@ -203,11 +203,11 @@ export function MyDay() {
         <section className="bk-card"><h2>{todays.length ? 'Today’s appointments' : 'Next appointments'}<small>{todays.length ? num(todays.length) + ' today' : num(upcoming.length) + ' booked ahead'}</small></h2>
           {showing.length === 0 ? <p className="bk-line muted">Nothing on the schedule.</p>
             : <ApptTable rows={showing.slice(0, 5)} showWho={who} showDate={!todays.length} onOpen={id => setPanel({ type: 'appt', id })} />}
-          <div className="bk-actions bk-more"><button className="bk-btn" onClick={() => go('calendar')}>Open schedule</button></div></section>
+          <div className="bk-actions bk-panelfoot"><button className="bk-btn" onClick={() => go('calendar')}>Open schedule</button></div></section>
         <section className="bk-card"><h2>Follow-ups<small>{num(openFu.length)} open{overdue ? ' · ' + num(overdue) + ' overdue' : ''}</small></h2>
           {queue.length === 0 ? <p className="bk-line muted">No open follow-ups.</p>
             : queue.slice(0, 5).map(f => <FuLine key={f.id} f={f} t={t} showWho={who} onOpen={id => setPanel({ type: 'fu', id })} />)}
-          <div className="bk-actions bk-more"><button className="bk-btn" onClick={() => go('follow-ups')}>Open full queue{openFu.length > 5 ? ' (' + num(openFu.length) + ')' : ''}</button></div></section>
+          <div className="bk-actions bk-panelfoot"><button className="bk-btn" onClick={() => go('follow-ups')}>Open full queue{openFu.length > 5 ? ' (' + num(openFu.length) + ')' : ''}</button></div></section>
       </div>
       {other.length > 0 && <section className="bk-card" style={{ marginTop: 14 }}><h2>Also needs attention<small>{other.length}</small></h2>
         {other.slice(0, 5).map((a, i) => (
