@@ -666,3 +666,27 @@ def test_a_network_started_from_the_owner_account_belongs_to_the_reviews_advisor
     assert len(network.batches(db, prog, ann, "evo6")) == 1
     with pytest.raises(core.BookitError):
         network._batch(db, prog, bob, row["network"]["id"])
+
+
+def test_reply_alerts_only_for_follow_ups_on_the_board_and_one_per_burst(setter, sample_advisor):
+    from app.models.program_models import ProgramConversationTurn as T
+    from app.services.bookit import alerts
+    from tests.test_sci_appointment_setter import _Fake, _d, _run
+    db, org, prog, lead, conv = _fu_case(setter, sample_advisor)
+    _live(db, prog)
+    # a family whose conversation isn't on the board alerts nobody (not management either)
+    other = _lead_for(db, org, sample_advisor, "L004", phone="2145550104", first="Dana")
+    _run(db, other, "hello?", _Fake([_d("callback", "Sure.", callback_window="today")]))
+    assert alerts.sweep(db, prog, force=True) == 1
+    assert db.query(BookitNotification).filter_by(organization_id=org.id, kind="family_reply").count() == 1
+    assert db.query(BookitNotification).filter_by(organization_id=org.id, recipient=core.MANAGEMENT).count() == 0
+    # a second message that arrived before that alert is covered by it
+    db.add(T(conversation_id=conv.id, organization_id=org.id, lead_id=lead.id, role="family", text="also, tomorrow?",
+             created_at=datetime.utcnow() - timedelta(seconds=5), response_id="r-2"))
+    db.commit()
+    assert alerts.sweep(db, prog, force=True) == 0
+    # a new one afterwards raises a new alert
+    db.add(T(conversation_id=conv.id, organization_id=org.id, lead_id=lead.id, role="family", text="hello again",
+             created_at=datetime.utcnow() + timedelta(minutes=1), response_id="r-3"))
+    db.commit()
+    assert alerts.sweep(db, prog, force=True, now=datetime.utcnow() + timedelta(minutes=2)) == 1
