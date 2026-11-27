@@ -98,12 +98,22 @@ const HERO = [
   ['delivered', 'Completed touches', 'confirmed delivered by carrier / mail'],
   ['replies', 'Replies', 'genuine family replies'],
   ['offers', 'Times offered', 'two real calendar times'],
-  ['appointments', 'Appointments', 'confirmed on the calendar'],
+  ['appointments', 'Appointments', 'booked on the calendar (not cancelled)'],
 ]
 const SECOND = [
   ['interested', 'Interested'], ['failed', 'Failed'], ['pending', 'Awaiting result'], ['ai_messages', 'AI replies sent'],
   ['staff_messages', 'Staff replies sent'], ['opt_outs', 'Opt-outs'], ['repliers', 'Families who replied'],
 ]
+
+// Owner, Nov 27: what became of the booked appointments, in plain words.
+function ApptSplit({ a }) {
+  const parts = [[a.upcoming, 'coming up'], [a.showed, 'showed'], [a.no_show, 'no-show'],
+                 [a.no_result, 'no result yet']].filter(([v]) => v > 0)
+  return <span className="pf-appt-split">
+    {parts.map(([v, l]) => <span key={l}><b>{n(v)}</b> {l}</span>)}
+    {a.cancelled > 0 && <span className="cx"><b>{n(a.cancelled)}</b> cancelled (not counted)</span>}
+  </span>
+}
 
 export function PerformanceHome({ range, setRange, loc, setLoc, openMetric, campaign = 'all', setCampaign }) {
   const [d, setD] = useState(null)
@@ -138,6 +148,7 @@ export function PerformanceHome({ range, setRange, loc, setLoc, openMetric, camp
             <span className="pf-kpi-l">{l}</span>
             <b>{n(m[k]?.value)}</b>
             <small>{s}</small>
+            {k === 'appointments' && d.appointment_breakdown && <ApptSplit a={d.appointment_breakdown} />}
             <i>{n(m[k]?.all_time)} all time ›</i>
           </button>))}
       </div>
