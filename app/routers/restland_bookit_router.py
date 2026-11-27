@@ -432,8 +432,11 @@ def team(response: Response, db: Session = Depends(get_db), user: User = Depends
     from app.models.models import User as _U
     from app.models.program_models import ProgramTeamMember as _M
     links = {m.id: m.user_id for m in db.query(_M).filter(_M.organization_id == prog.organization_id)}
+    from app.services.programs import restland_sheet as _RS
+    held = set(_RS._cfg(prog).get("held") or [])
     for r in rows:
         r["access_suspended"] = bool(susp.get(r["id"]))
+        r["held"] = r["name"] in held
         u = db.query(_U).filter(_U.id == links.get(r["id"])).first() if links.get(r["id"]) else None
         r["login_email"] = u.email if u else None
         r["signed_in"] = bool(u and u.last_login_at)
@@ -493,6 +496,78 @@ def quick_view(response: Response, db: Session = Depends(get_db), user: User = D
     _nostore(response)
     prog, w = _ctx(db, user)
     return insights.quick_view(db, prog, w)
+
+
+@router.post("/appointments/{row_id}/reschedule")
+def appointment_reschedule(row_id: str, body: Body, db: Session = Depends(get_db),
+                           user: User = Depends(require_tenant_user)):
+    """Move an appointment the caller may open (their own; managers any). The same
+    path as the command center: the time must be open, the calendar event moves
+    and the family gets the usual "moved" confirmation."""
+    from datetime import datetime as _dt
+    from app.services.programs import appointment_ops as OPS
+    prog, w = _ctx(db, user)
+    try:
+        b, _owner = workflow.appointment(db, prog, w, row_id)
+    except core.BookitError as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
+    try:
+        slot = _dt.fromisoformat(str(body.data.get("slot") or "")[:16])
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Pick a date and time.")
+    try:
+        out = OPS.reschedule(db, prog, b, slot, user)
+    except OPS.OpError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(e))
+    core.audit(db, prog.organization_id, w, "appointment", row_id, "reschedule", "booked_time", None, slot.isoformat())
+    db.commit()
+    return out
+
+
+@router.post("/appointments/{row_id}/cancel")
+def appointment_cancel(row_id: str, body: Body, db: Session = Depends(get_db),
+                       user: User = Depends(require_tenant_user)):
+    """Cancel an appointment the caller may open; by default the family gets the
+    usual cancellation note, and the family goes back to a person for a new time."""
+    from app.services.programs import appointment_ops as OPS
+    prog, w = _ctx(db, user)
+    try:
+        b, _owner = workflow.appointment(db, prog, w, row_id)
+    except core.BookitError as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
+    try:
+        out = OPS.cancel(db, prog, b, user, acknowledge=bool(body.data.get("notify", True)))
+    except OPS.OpError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(e))
+    core.audit(db, prog.organization_id, w, "appointment", row_id, "cancel", "status", None, "cancelled")
+    db.commit()
+    return out
+
+
+@router.patch("/team/{member_id}/rotation")
+def set_rotation(member_id: str, body: Body, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Management: take a person out of the appointment/follow-up rotation, or put
+    them back. The next board pass applies it; their existing work stays theirs."""
+    from app.models.program_models import ProgramTeamMember as M
+    from app.services.programs import restland_sheet as RS
+    prog, w = _ctx(db, user)
+    _mgr(w)
+    m = db.query(M).filter(M.organization_id == prog.organization_id, M.id == member_id).first()
+    if m is None:
+        raise HTTPException(status_code=404, detail="Not found.")
+    cfg = RS._cfg(prog)
+    held = [n for n in (cfg.get("held") or []) if n != m.name]
+    if not body.data.get("in_rotation", True):
+        held.append(m.name)
+    before = list(cfg.get("held") or [])
+    cfg["held"] = held
+    RS._save_cfg(prog, cfg)
+    core.audit(db, prog.organization_id, w, "member", m.id, "rotation", "held", before, held)
+    db.commit()
+    return {"name": m.name, "in_rotation": m.name not in held,
+            "note": "The board applies it on its next pass (within about two minutes)."}
 
 
 # ── logins ──────────────────────────────────────────────────────────────────
