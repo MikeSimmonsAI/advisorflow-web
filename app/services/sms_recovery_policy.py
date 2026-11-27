@@ -1,14 +1,15 @@
 """What a Twilio delivery error does to a family's texts (#482).
 
-Each code maps to ONE action. The defaults keep every decision the owner has
-already made and change only the one #482 asks for:
+Each code maps to one action, optionally after a failure threshold. Defaults
+include Twilio's November 3 guidance on repeated 30005 failures:
 
   30006  hold_for_review     was: texts end for good. Now: texts wait for a
                              person; it is not DNC and not proof of a landline.
   21614  hold_for_review     Twilio says "not a mobile number" (same as above).
   30003  continue_schedule   phone off / no signal - the next text goes on its
                              normal day (owner decision, Oct 16).
-  30005  continue_schedule   unknown / inactive right now - same (Oct 16).
+  30005  hold_for_review     after two failures since delivery or review;
+                             one normal scheduled follow-up may proceed.
   30007  investigate         the carrier filtered the CONTENT or sender: an
                              investigation of our message (Twilio ticket
                              #29953372), not a fault in the family's phone.
@@ -33,7 +34,7 @@ RECORD = "record"
 ACTIONS = (HOLD_FOR_REVIEW, TEMPORARY_HOLD, CONTINUE_SCHEDULE, INVESTIGATE, RECORD)
 HOLD_ACTIONS = (HOLD_FOR_REVIEW, TEMPORARY_HOLD)
 
-DEFAULT_VERSION = "default-2026-11-03"
+DEFAULT_VERSION = "default-2026-11-03-30005-repeat"
 DEFAULT_RULES: Dict[str, Dict] = {
     "30006": {"action": HOLD_FOR_REVIEW,
               "label": "Carrier could not deliver to this number (landline or unreachable carrier)",
@@ -44,9 +45,11 @@ DEFAULT_RULES: Dict[str, Dict] = {
     "30003": {"action": CONTINUE_SCHEDULE,
               "label": "Phone off, no signal or out of area",
               "note": "The next text goes on its normal day. The failed text is not resent."},
-    "30005": {"action": CONTINUE_SCHEDULE,
+    "30005": {"action": HOLD_FOR_REVIEW, "hold_after_failures": 2,
               "label": "Number unknown or not active right now",
-              "note": "The next text goes on its normal day. The failed text is not resent."},
+              "note": "After one failure the next text keeps its normal day. After two, pause texts "
+                      "for number verification. Failed texts are not resent.",
+              "evidence": "Twilio ticket #30222553, Marcos, November 3, 2026"},
     "30007": {"action": INVESTIGATE,
               "label": "Carrier filtered the message",
               "note": "A content or sender problem to investigate (Twilio ticket #29953372), "
@@ -68,6 +71,12 @@ def validate(rules) -> Dict[str, Dict]:
             raise ValueError("code %s: action must be one of %s" % (c, ", ".join(ACTIONS)))
         r = {"action": rule["action"], "label": str(rule.get("label") or "")[:200],
              "note": str(rule.get("note") or "")[:500]}
+        if "hold_after_failures" in rule:
+            threshold = rule["hold_after_failures"]
+            if (rule["action"] not in HOLD_ACTIONS or type(threshold) is not int
+                    or not 2 <= threshold <= 10):
+                raise ValueError("code %s: hold_after_failures requires a hold action and an integer from 2 to 10" % c)
+            r["hold_after_failures"] = threshold
         if rule["action"] == TEMPORARY_HOLD:
             hours = rule.get("hours")
             if not isinstance(hours, (int, float)) or not 1 <= hours <= 24 * 30:
@@ -84,8 +93,9 @@ def validate(rules) -> Dict[str, Dict]:
 # FUTURE CARRIER GUIDANCE (#482 Phase 2). When Twilio answers ticket
 # #29953372 a code's rule may carry the guidance it gives as a `retry` block.
 # It is RECORDED and SHOWN, never acted on by itself: no code path here
-# resends a failed text, and a policy change never touches an existing hold
-# or a past failure. Any future retry feature must ALSO pass every send gate
+# resends a failed text. Existing holds and failure audit events are kept;
+# threshold rules may open a new hold from existing message history. Any
+# future retry feature must ALSO pass every send gate
 # (consent, STOP/DNC, suppression, contact hours, campaign switch, spacing,
 # duplicate claim) - these fields can only narrow what is allowed, never
 # widen it.

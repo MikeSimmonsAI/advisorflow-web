@@ -106,6 +106,32 @@ def _close(db: Session, item: SmsRecoveryItem, disposition: str, *, actor=None, 
 
 # ── failures and receipts ───────────────────────────────────────────────────
 
+def _repeat_failure_count(db: Session, msg, code: str) -> int:
+    """Count distinct failed texts since delivery or a closed review.
+
+    An old receipt cannot hold a family whose latest text is pending or
+    delivered. History includes failures from before this policy existed.
+    """
+    from app.models.models import Message
+    latest = latest_sms(db, msg.lead_id)
+    if latest is None or latest.id != msg.id:
+        return 0
+    closed = (db.query(SmsRecoveryItem).filter(SmsRecoveryItem.lead_id == msg.lead_id,
+                                             SmsRecoveryItem.closed_at.isnot(None))
+              .order_by(SmsRecoveryItem.closed_at.desc()).first())
+    history = db.query(Message).filter(Message.lead_id == msg.lead_id)
+    if closed is not None:
+        history = history.filter(Message.sent_at > closed.closed_at)
+    count = 0
+    for prior in history.order_by(Message.sent_at.desc(), Message.id.desc()):
+        status = (prior.delivery_status or "").lower()
+        if status == "delivered":
+            break
+        if status in FAILED_STATUSES and str(prior.error_code or "").strip() == code:
+            count += 1
+    return count
+
+
 def record_failure(db: Session, msg, *, source: str) -> Optional[SmsRecoveryItem]:
     """A failed SMS receipt. Idempotent per message: the same failure seen by
     the callback, the cadence runner and the backfill counts once. Returns
@@ -122,15 +148,24 @@ def record_failure(db: Session, msg, *, source: str) -> Optional[SmsRecoveryItem
                            "source": source, "at": msg.sent_at},
                    dedupe="failure:%s" % msg.id)
     item = open_item(db, lead.id)
-    if first is None:                       # already recorded: nothing new to do
-        return item
     if item is not None:
-        item.failures = (item.failures or 0) + 1
-        first.item_id = item.id
+        if first is not None:
+            item.failures = (item.failures or 0) + 1
+            first.item_id = item.id
         return item
     if rule["action"] not in P.HOLD_ACTIONS or opted_out(db, lead):
         return None                         # a STOP/DNC needs no hold; others keep their schedule
-    return _open_hold(db, lead, msg, code, rule, version, source)
+    threshold = rule.get("hold_after_failures")
+    if threshold:
+        count = _repeat_failure_count(db, msg, code)
+        if count < threshold:
+            return None
+    elif first is None:                     # never reopen a closed hold on the same failure
+        return None
+    item = _open_hold(db, lead, msg, code, rule, version, source)
+    if item is not None and threshold:
+        item.failures = max(item.failures or 0, count)
+    return item
 
 
 def _open_hold(db: Session, lead, msg, code, rule, version, source) -> SmsRecoveryItem:
@@ -188,7 +223,7 @@ def on_receipt(db: Session, msg, status: Optional[str]) -> None:
 def latest_sms(db: Session, lead_id: str):
     from app.models.models import Message
     return (db.query(Message).filter(Message.lead_id == lead_id)
-            .order_by(Message.sent_at.desc()).first())
+            .order_by(Message.sent_at.desc(), Message.id.desc()).first())
 
 
 def ensure_hold_from_history(db: Session, lead) -> Optional[SmsRecoveryItem]:
@@ -232,7 +267,7 @@ def send_refusal(db: Session, lead, send_source: Optional[str] = None) -> Option
     """For send_sms: the reason this family must not be texted, or None.
     A family who has texted US since the hold opened can be answered - their
     own message is the evidence the phone works for that conversation."""
-    item = active_hold(db, lead)
+    item = ensure_hold_from_history(db, lead)
     if item is None:
         return None
     from app.models.models import Reply
