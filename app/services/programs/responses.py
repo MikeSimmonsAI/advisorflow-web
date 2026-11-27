@@ -553,7 +553,16 @@ def on_inbound(db: Session, lead: Lead, body: str, channel: str, *,
         cls, found, first_name=lead.first_name, contact=prog.primary_contact_name,
         location=(prof.official_name if prof else (alias_prof.official_name if alias_prof else None)),
         channel=channel, bereaved="bereavement mentioned" in " ".join(result.get("reasons") or []))
-    if cls in (BAD_DATA, WRONG_PERSON) and rec is not None:
+    from app.services.programs import wrong_contact as _wc
+    wrong_phone = (cls in (BAD_DATA, WRONG_PERSON) and (channel or "") != "email"
+                   and _wc.says_wrong_phone(body) and _wc.email_usable(lead))
+    if wrong_phone:
+        # A wrong NUMBER, not a wrong family (owner, Nov 27): stop texting
+        # that number, keep emailing them. Nothing for Data Review.
+        _wc.mark_wrong_number(db, prog, lead, by="Automatic (their text reply)", now=now)
+        resp.recommended_action = "Wrong number: texts to it stopped; their emails continue. Nothing to do."
+        resp.handling_status = "closed"
+    elif cls in (BAD_DATA, WRONG_PERSON) and rec is not None:
         rec.needs_data_review = True
         flags = json.loads(rec.data_note_flags or "[]")
         flag = "WRONG PERSON (reply)" if cls == WRONG_PERSON else "WRONG NUMBER / ADDRESS (reply)"

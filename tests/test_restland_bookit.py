@@ -792,3 +792,51 @@ def test_no_same_day_booking_or_move_by_anyone(setter, sample_advisor, monkeypat
     lead = db.query(Lead).filter(Lead.id == mine.lead_id).one()
     today = A._today_central().replace(hour=16, minute=0, second=0, microsecond=0, tzinfo=None)
     assert A.book(db, prog, lead, today, A.VISIT)["status"] == "same_day"
+
+
+# ── wrong number: texts stop, emails continue (owner, Nov 27 - Emily Flores) ──
+
+def test_a_wrong_number_text_stops_texts_and_keeps_emailing(setter, sample_advisor):
+    from app.models.program_models import ProgramSourceRecord
+    from app.services.programs import wrong_contact as WC
+    from tests.test_sci_appointment_setter import _Fake, _d, _run
+    db, org = setter["db"], setter["org"]
+    prog = _prog(setter)
+    lead = _lead_for(db, org, sample_advisor, "L005", phone="2145550105", first="Emily")
+    lead.email = "emily@example.com"
+    db.commit()
+    resp, conv = _run(db, lead, "Wrong number", _Fake([_d("answer", "ok")]))
+    db.refresh(lead)
+    assert lead.contact_channel == "email_only" and lead.phone_line_type == "invalid"
+    assert lead.phone.endswith("2145550105")                                   # nothing deleted
+    assert resp.handling_status == "closed"
+    rec = db.query(ProgramSourceRecord).filter_by(lead_id=lead.id).first()
+    if rec is not None:
+        flags = json.loads(rec.data_note_flags or "[]")
+        assert WC.FLAG in flags and "WRONG NUMBER / ADDRESS (reply)" not in flags
+    assert conv.state == "waiting"                                             # no hand-off, nothing sent
+    assert WC.is_wrong_number_only(db, lead)                                   # emails don't treat it as a reply
+    from app.services.programs import send_approval
+    assert not send_approval.textable(lead)
+    # undo: texting allowed again
+    WC.mark_wrong_number(db, prog, lead, by="Owner", undo=True)
+    assert lead.contact_channel == "sms" and lead.phone_line_type is None
+
+
+def test_wrong_number_without_an_email_still_goes_to_a_person(setter, sample_advisor):
+    from tests.test_sci_appointment_setter import _Fake, _d, _run
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L006", phone="2145550106", first="Ned")
+    lead.email = None
+    db.commit()
+    resp, conv = _run(db, lead, "Wrong number", _Fake([_d("answer", "ok")]))
+    db.refresh(lead)
+    assert lead.contact_channel != "email_only"
+    assert conv.state == "human"
+
+
+def test_wrong_email_text_is_not_a_wrong_phone():
+    from app.services.programs import wrong_contact as WC
+    assert WC.says_wrong_phone("Wrong number")
+    assert WC.says_wrong_phone("You have the wrong person, this is not her")
+    assert not WC.says_wrong_phone("you have the wrong email for me")

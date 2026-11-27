@@ -1535,6 +1535,17 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         _turn(db, conv, "system", None, action="stop", reason="opted out - no further messages")
         db.commit()
         return dict(out, action="stop", state=conv.state)
+    if cls in (BAD_DATA, WRONG_PERSON) and (lead.contact_channel or "") == "email_only" \
+            and (lead.phone_line_type or "") == "invalid":
+        # The number was wrong (responses.on_inbound): nothing goes back by
+        # text, no person is needed, and an email reply from the real family
+        # is answered as usual (owner, Nov 27).
+        conv.state = "waiting"
+        conv.next_followup_at = None
+        _turn(db, conv, "system", None, action="wait",
+              reason="wrong number - texts to it stopped, their emails continue")
+        db.commit()
+        return dict(out, action="wait", state=conv.state)
     if cls in (BAD_DATA, WRONG_PERSON):
         _handoff(db, prog, lead, conv, "wrong person / wrong number - check the record", notify=False)
         db.commit()
