@@ -293,3 +293,13 @@
 @media (max-width: 760px) { .bk-week { grid-template-columns: 1fr; } .bk-legend { margin-left: 0; } .bk-compact { font-size: 13px; } }
 .bk-famsearch { width: min(320px, 100%); }
 .bk-compact td.wrap { overflow-wrap: anywhere; max-width: 240px; }
+
+/* Phones: compact tables become stacked rows so nothing is cut off at the side. */
+@media (max-width: 760px) {
+  .bk-compact thead { display: none; }
+  .bk-compact, .bk-compact tbody, .bk-compact tr, .bk-compact td { display: block; width: 100%; }
+  .bk-compact tr { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .bk-compact td { border: 0; padding: 3px 0; display: flex; gap: 10px; align-items: center; max-width: none; white-space: normal; }
+  .bk-compact td[data-l]::before { content: attr(data-l); flex: 0 0 92px; color: var(--muted, #6b7a72); font-size: 12px; font-weight: 600; }
+  .bk-compact td.act { padding-top: 6px; }
+}

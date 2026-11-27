@@ -135,10 +135,10 @@ export function ApptTable({ rows, onOpen, showWho, showDate = true }) {
     <div className="bk-scroll"><table className="bk-compact"><thead><tr><th>{showDate ? 'Date · time (CT)' : 'Time (CT)'}</th><th>Family</th><th>Visit type</th>
       {showWho && <th>Advisor</th>}<th>Status</th><th /></tr></thead>
       <tbody>{rows.map(a => <tr key={a.id}>
-        <td className="time">{showDate ? fmtDate(a.date, { weekday: 'short', month: 'short', day: 'numeric' }) + ' · ' : ''}{fmtTime(a.time)}</td>
-        <td><b>{a.family}</b></td><td><VisitTag v={a.visit} /></td>{showWho && <td>{a.assigned || '—'}</td>}
-        <td><Pill>{a.outcome || a.status}</Pill></td>
-        <td><button className="bk-btn sm" onClick={() => onOpen(a.id)}>Open</button></td></tr>)}</tbody></table></div>
+        <td className="time" data-l="When (CT)">{showDate ? fmtDate(a.date, { weekday: 'short', month: 'short', day: 'numeric' }) + ' · ' : ''}{fmtTime(a.time)}</td>
+        <td data-l="Family"><b>{a.family}</b></td><td data-l="Visit"><VisitTag v={a.visit} /></td>{showWho && <td data-l="Advisor">{a.assigned || '—'}</td>}
+        <td data-l="Status"><Pill>{a.outcome || a.status}</Pill></td>
+        <td className="act"><button className="bk-btn sm" onClick={() => onOpen(a.id)}>Open</button></td></tr>)}</tbody></table></div>
   )
 }
 
@@ -874,11 +874,11 @@ export function Families() {
           <div className="bk-scroll"><table className="bk-compact"><thead><tr><th>Family</th><th>Phone</th><th>Email</th>
             {me.me.manager && <th>Advisor</th>}<th>Open follow-ups</th><th>Next appointment</th><th /></tr></thead>
             <tbody>{shown.map(f => <tr key={f.lead_id}>
-              <td><b>{f.family}</b></td><td>{f.phone || '—'}</td><td className="wrap">{f.email || '—'}</td>
-              {me.me.manager && <td>{f.assigned || '—'}</td>}
-              <td>{f.open_fu || '—'}</td>
-              <td>{f.next ? <>{fmtDate(f.next.date, { month: 'short', day: 'numeric' })} · {fmtTime(f.next.time)} <VisitTag v={f.next.visit} /></> : '—'}</td>
-              <td><button className="bk-btn sm" onClick={() => setOpen(f.lead_id)}>Open family</button></td></tr>)}</tbody></table></div>
+              <td data-l="Family"><b>{f.family}</b></td><td data-l="Phone">{f.phone || '—'}</td><td className="wrap" data-l="Email">{f.email || '—'}</td>
+              {me.me.manager && <td data-l="Advisor">{f.assigned || '—'}</td>}
+              <td data-l="Follow-ups">{f.open_fu || '—'}</td>
+              <td data-l="Next">{f.next ? <>{fmtDate(f.next.date, { month: 'short', day: 'numeric' })} · {fmtTime(f.next.time)} <VisitTag v={f.next.visit} /></> : '—'}</td>
+              <td className="act"><button className="bk-btn sm" onClick={() => setOpen(f.lead_id)}>Open family</button></td></tr>)}</tbody></table></div>
           <div className="bk-pager"><span className="muted">{num(page * FAM_PAGE + 1)}–{num(page * FAM_PAGE + shown.length)} of {num(list.length)}</span>
             <div className="bk-actions">{page > 0 && <button className="bk-btn" onClick={() => set({ page: page - 1 })}>Previous</button>}
               {page < pages - 1 && <button className="bk-btn" onClick={() => set({ page: page + 1 })}>Next</button>}</div></div></>}
