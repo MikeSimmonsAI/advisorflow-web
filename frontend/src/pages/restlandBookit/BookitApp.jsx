@@ -111,7 +111,8 @@ export default function BookitApp() {
             <i />{fresh.ok ? (fresh.at ? 'Updated ' + fresh.at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : 'Loading') : 'Reconnecting…'}
           </span>
           <button className="bk-iconbtn" onClick={() => go('notifications')} aria-label="Notifications"><Icon name="bell" />{unread > 0 && <span className="dot" />}</button>
-          <span className="bk-top-who">{me?.me?.name || ''}{me && !me.live_for_team ? ' · Owner preview' : ''}</span>
+          <span className="bk-top-who">{me?.me?.view_only ? 'Test login · viewing ' + (me.me.name || '')
+            : (me?.me?.name || '') + (me && !me.live_for_team ? ' · Owner preview' : '')}</span>
         </header>
         <aside className="bk-rail" aria-label="BookIT navigation">
           <div className="caption">Advisor workspace</div>
