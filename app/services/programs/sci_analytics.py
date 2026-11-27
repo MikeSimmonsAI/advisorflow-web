@@ -442,7 +442,18 @@ class Ledger:
                                                        _booked_ct(b)
                                                        .strftime("%a %b %-d, %-I:%M %p CT")),
                                   "result": b.status, "touch": touch_before(b.lead_id, at),
-                                  "location_id": self.families[b.lead_id]["location_id"]}))
+                                  "location_id": self.families[b.lead_id]["location_id"],
+                                  "appt_ct": _booked_ct(b)}))
+        # Cancelled appointments (owner, Nov 27): shown beside the booked count,
+        # never inside it. A cancel-and-rebook is a cancel here plus the new booking.
+        self.cancelled = []
+        for b in (db.query(BookingLink).filter(BookingLink.lead_id.in_(ids), BookingLink.status == "cancelled",
+                                               BookingLink.booked_time.isnot(None)).all()):
+            if b.lead_id not in fam_ids:
+                continue
+            at = booked_at.get(b.id) or b.confirmed_at or b.rescheduled_at or b.created_at
+            self.cancelled.append(stamp({"kind": "cancelled", "id": b.id, "lead_id": b.lead_id, "at": at,
+                                         "location_id": self.families[b.lead_id]["location_id"]}))
 
         lap("bookings")
         ever_texted = {i for (i,) in db.query(Message.lead_id).filter(Message.lead_id.in_(ids)).distinct()}
@@ -726,6 +737,27 @@ def _pct(a: int, b: int) -> Optional[float]:
     return round(100.0 * a / b, 1) if b else None
 
 
+def appointment_breakdown(L: Ledger, w: Dict, f: Optional[Dict] = None,
+                          now: Optional[datetime] = None) -> Dict[str, int]:
+    """What became of the appointments booked in this window (owner, Nov 27):
+    showed, no-show, still coming up, or past with nothing recorded - plus the
+    cancelled ones, which are not in the appointment count."""
+    now = now or datetime.now(CT)
+    out = {"upcoming": 0, "showed": 0, "no_show": 0, "no_result": 0, "cancelled": 0}
+    for r in rows(L, "appointments", w, f):
+        res = r.get("result")
+        if res == "completed":
+            out["showed"] += 1
+        elif res == "no_show":
+            out["no_show"] += 1
+        elif r.get("appt_ct") is not None and r["appt_ct"].date() >= now.date():
+            out["upcoming"] += 1
+        else:
+            out["no_result"] += 1
+    out["cancelled"] = sum(1 for c in getattr(L, "cancelled", []) if _in(c.get("at"), w) and _filters_ok(c, f or {}))
+    return out
+
+
 def summary(L: Ledger, w: Dict, location_id: Optional[str] = None, daily_batch: Optional[Dict] = None,
             campaign: Optional[str] = None) -> Dict:
     f = {"location_id": location_id} if location_id else {}
@@ -803,6 +835,7 @@ def summary(L: Ledger, w: Dict, location_id: Optional[str] = None, daily_batch: 
     locs.sort(key=lambda r: (-r["attempts"], -r["loaded"], r["location"] or ""))
 
     return {
+        "appointment_breakdown": appointment_breakdown(L, w, f),
         "window": {k: w[k] for k in ("preset", "label", "start_date", "end_date")},
         "location_id": location_id,
         "metrics": {k: {"label": METRICS[k][0], "help": METRICS[k][2], "value": counts[k],

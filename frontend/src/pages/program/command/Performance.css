@@ -340,3 +340,8 @@
   .pf-filters > .pf-campaign { width: 100%; }
   .pf-campaign select { flex: 1; max-width: none; }
 }
+
+/* Appointments card: what became of them (owner, Nov 27) */
+.pf-appt-split { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; font-size: 13px; font-style: normal; color: #335; }
+.pf-appt-split b { font-weight: 800; }
+.pf-appt-split .cx { color: #a3242f; }
