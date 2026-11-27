@@ -33,7 +33,7 @@ function tagsFor(m, why) {
   const t = []
   const b = (m.body || '').toLowerCase()
   if (/website|sitio web/.test(b)) t.push('Asked for website')
-  if (/spanish|español|espanol/.test(b) || m.translation) t.push('Prefers Spanish')
+  if (/spanish|español|espanol/.test(b)) t.push('Mentions Spanish')
   if (/price|cost|how much|cuánto|precio/.test(b)) t.push('Pricing question')
   if (/availab|schedule|time|horario|disponib/.test(b)) t.push('Scheduling question')
   if (!t.length && why) t.push(why.length > 40 ? why.slice(0, 38) + '…' : why)
@@ -57,7 +57,7 @@ function Bubble({ m }) {
   return (
     <div className={'v2-bubble-wrap ' + (mine ? 'mine' : 'theirs')}>
       <div className={'v2-bubble ' + (mine ? 'mine' : 'theirs')}>
-        {m.translation && !mine ? <>{m.translation}<span className="v2-orig">{m.body}</span></> : m.body}
+        {m.translation && !mine ? <>{m.translation}<details className="v2-orig"><summary>Show original</summary>{m.body}</details></> : m.body}
       </div>
       <div className="v2-bubble-meta">{who ? who + ' · ' : ''}{ctWhen(m.at)}{m.status === 'failed' ? ' · did not send' : ''}</div>
     </div>
@@ -135,7 +135,7 @@ export function Thread({ id, onBack, onChanged, toast }) {
         <span className="v2-avatar">{initials(lead.company)}</span>
         <div className="v2-grow">
           <Link to={`${BASE}/leads/${lead.id}`} className="v2-thread-name">{lead.company}</Link>
-          <div className="v2-sub">{[lead.contact, msgs.some(m => m.translation) ? 'Spanish preferred' : null].filter(Boolean).join(' · ') || lead.outreach?.label}</div>
+          <div className="v2-sub">{[lead.contact, msgs.some(m => m.translation) ? 'Translated messages' : null].filter(Boolean).join(' · ') || lead.outreach?.label}</div>
         </div>
         {!stopped && (
           <div className="v2-row v2-thread-acts">
