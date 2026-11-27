@@ -498,6 +498,17 @@ export function ProgramThread() {
 }
 
 // ── More ────────────────────────────────────────────────────────────────────
+// Restland BookIT's own screens, one tap from the phone (owner, Nov 27: "More and there's no more").
+const BOOKIT_SCREENS = [
+  ['/appointments', 'Appointments', 'Reschedule, cancel, close', 'calendarCheck'],
+  ['/calendar', 'Calendar', 'The week at a glance', 'calendar'],
+  ['/follow-ups', 'Follow-Ups', 'Families to call back', 'phone'],
+  ['/evo6', 'File Review 6 Block', 'Your six-block file review', 'file'],
+  ['/families', 'Families', 'Look up any family', 'team'],
+  ['/sales', 'Sales', 'Record and track sales', 'diamond'],
+  ['/performance', 'Performance', 'Booked, showed, closed', 'target'],
+]
+
 export function ProgramMore() {
   const entry = useEntry()
   const navigate = useNavigate()
@@ -510,6 +521,17 @@ export function ProgramMore() {
           <button type="button" className="ta-btn ta-btn--primary ta-btn--block" onClick={() => openFull(item, navigate, origin)}>
             Open Full Workspace</button>
           <p className="ta-muted ta-small ta-prog-note">Every screen and setting for {item.display}. Its Back link returns here.</p>
+          {item.type === 'restland_bookit' && <>
+            <h2 className="ta-h2 ta-more-h">Go straight to</h2>
+            <ul className="ta-list ta-more-links">
+              {BOOKIT_SCREENS.map(([path, label, sub, icon]) => (
+                <li key={path}><button type="button" className="ta-row"
+                  onClick={() => openFull({ ...item, path: '/program/restland-bookit' + path }, navigate, origin)}>
+                  <span className="ta-row-icon"><Icon name={icon} /></span>
+                  <span className="ta-row-main"><span className="ta-row-name">{label}</span><span className="ta-row-sub">{sub}</span></span>
+                  <Icon name="chev" size={18} /></button></li>))}
+            </ul>
+          </>}
           <ul className="ta-list">
             <li><button type="button" className="ta-row" onClick={() => navigate('/app/programs')}>
               <span className="ta-row-icon"><Icon name="grid" /></span>

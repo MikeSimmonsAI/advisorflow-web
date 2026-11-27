@@ -513,3 +513,4 @@
 .ta-kpi.is-warn strong { color: #C62839; }
 .ta-appt-actions { display: flex; gap: 10px; align-items: stretch; }
 .ta-appt-actions > .ta-btn { flex: 1 1 0; margin: 0; }
+.ta-more-h { margin: 18px 0 8px; } .ta-more-links { margin-bottom: 14px; }
