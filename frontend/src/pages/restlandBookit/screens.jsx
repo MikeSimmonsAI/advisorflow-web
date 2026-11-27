@@ -1384,11 +1384,23 @@ export function Settings() {
   const [d] = useData(R + '/settings')
   if (!d) return <div className="bk-card"><Skeleton /></div>
   return (<div className="bk-grid"><div className="bk-card"><h2>BookIT status</h2>
-    <p>{d.live_for_team ? 'Open to the team — each advisor sees only their own work.' : 'Owner preview — only your logins can open BookIT. Opening it to the team is your call.'}</p></div>
+    <p>{d.live_for_team ? 'Open to the team — each advisor sees only their own work.' : 'Owner preview — only your logins can open BookIT. Opening it to the team is your call.'}</p>
+    <OpenToTeam live={d.live_for_team} /></div>
     <div className="bk-card"><h2>Campaign templates</h2>
       <p>File Review 6 Block: <b>{d.campaigns?.evo6?.approved ? 'approved' : 'not approved yet'}</b> · At-Need 6 Block: <b>{d.campaigns?.add?.approved ? 'approved' : 'not approved yet'}</b></p>
       <p className="faint">No contact is enrolled until the matching template is approved. Nothing has been sent from BookIT.</p></div>
     <PreviewAccess /><TestLogin /><CoachSettings /></div>)
+}
+
+function OpenToTeam({ live }) {
+  const { say, refresh } = useBk()
+  const [pa] = useData(R + '/preview-access')
+  if (!pa) return null                                    // owner logins only
+  const flip = async () => {
+    if (!window.confirm(live ? 'Close BookIT to the team? Only your logins will get in.' : 'Open BookIT to the team? Each advisor with a login can sign in to their own side.')) return
+    if (await send(() => api.put(R + '/open-to-team', { data: { live: !live } }), say, live ? 'Closed to the team.' : 'Open to the team.')) refresh()
+  }
+  return <div className="bk-actions"><button className={'bk-btn' + (live ? '' : ' pri')} onClick={flip}>{live ? 'Close to the team' : 'Open BookIT to the team'}</button></div>
 }
 
 // Who may open BookIT before it is opened to the team (owner, Nov 27: his
