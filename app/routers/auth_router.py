@@ -783,13 +783,25 @@ def forgot_password(request: Request, req: ForgotPasswordRequest, db: Session = 
             v = _volt_mail.reset_link_for(db, user)
             if v and v["origin"]:
                 base, nxt, where = v["origin"], v["next"], v["brand"]
-        link = "%s/activate?token=%s%s" % (base, raw, ("&next=" + quote(nxt)) if nxt else "")
+        # Restland BookIT staff never see the platform's name (owner, Nov 27).
+        sender = None
+        restland = False
+        try:
+            from app.services.workspace_access import bookit_only_orgs as _bk_only
+            restland = bool(_bk_only(db, user))
+        except Exception:                                # noqa: BLE001
+            restland = False
+        if restland:
+            from app.services.bookit.logins import RESTLAND_SENDER, sender as _rl_sender
+            where, sender = RESTLAND_SENDER, _rl_sender()
+        link = "%s/activate?token=%s%s%s" % (base, raw, ("&next=" + quote(nxt)) if nxt else "",
+                                             "&brand=restland" if restland else "")
         html = ("<p>Someone asked to reset the password for your %s account.</p>"
                 "<p><a href=\"%s\">Choose a new password</a> - this link works once, for one hour.</p>"
                 "<p>If you didn't ask for this, ignore this email; your password stays the same.</p>"
                 % (where, link))
         from app.services.email_service import send_email_via_provider
-        send_email_via_provider(user.email, "Reset your %s password" % where, html)
+        send_email_via_provider(user.email, "Reset your %s password" % where, html, org=sender)
         _log.info("forgot-password: reset link emailed to user %s", user.id)
     except Exception:                                    # noqa: BLE001 - same answer either way
         db.rollback()

@@ -9,6 +9,7 @@ import './Login.css'
 import EvosysLogin from './login-evosys/EvosysLogin'
 import BookaBoostLogin from './login-bookaboost/BookaBoostLogin'
 import OLPLogin from './login-olp/OLPLogin'
+import RestlandLogin, { isRestlandLogin } from './restlandBookit/RestlandLogin'
 import { bookaboostProductBrand } from '../brand/productBrand'
 import { isVoltHost } from '../utils/voltDomain'
 
@@ -172,6 +173,15 @@ export default function Login() {
   }
 
   const isAdvisorFlow = theme === THEMES.ADVISORFLOW
+
+  // RESTLAND BOOKIT staff sign in on Restland's own page (/restland, or a
+  // Restland staff member's later sign-ins on this device). Same handleSubmit.
+  if (isRestlandLogin()) {
+    return (
+      <RestlandLogin email={email} setEmail={setEmail} password={password} setPassword={setPassword}
+                     error={error} loading={loading} onSubmit={handleSubmit} expired={expired} nextPath={nextPath} />
+    )
+  }
 
   // EVOSYS PRO wears its own, owner-approved sign-in. Same state, same
   // handleSubmit, same token handling and post-login routing as every brand -

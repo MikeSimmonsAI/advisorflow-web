@@ -86,11 +86,33 @@ def send_setup(db: Session, prog, w: Who, actor, member_id: str, base_url: str, 
     if user is None:
         raise BookitError("Create %s's login first." % m.name)
     _row, raw = staff_activation.issue(db, user, actor, purpose=PURPOSE_SETUP)
-    url = staff_activation.activation_url(base_url, raw)
+    url = staff_activation.activation_url(base_url, raw) + "&brand=restland"
     sent = _email(user, url, base_url) if email_it else False
     audit(db, prog.organization_id, w, "member", m.id, "setup_link", "emailed", None, bool(sent))
     db.flush()
     return {"emailed": sent, "to": user.email, "setup_url": None if sent else url}
+
+
+RESTLAND_SENDER = "Restland BookIT"
+
+
+def sender():
+    """Sent from the support address (owner rule) under Restland's name only."""
+    from types import SimpleNamespace
+    return SimpleNamespace(resend_api_key=None, from_email=None, from_name=RESTLAND_SENDER)
+
+
+def setup_email(first: str, url: str, base_url: str) -> str:
+    """The setup email, also shown to the owner before anything is sent."""
+    signin = base_url.rstrip("/") + "/restland"
+    return ("<p>Hi %s,</p>"
+            "<p>Your Restland BookIT login is ready. BookIT is where you'll see your appointments, "
+            "follow-ups and File Review 6 Block, all in one place.</p>"
+            "<p><b>1.</b> <a href=\"%s\">Set your password</a> - this link works once and expires in 3 days.<br>"
+            "<b>2.</b> Sign in at <a href=\"%s\">%s</a> with this email address and your new password.<br>"
+            "<b>3.</b> Choose <b>Open BookIT</b> to go to My Day.</p>"
+            "<p>On your phone, open the same sign-in page and add it to your home screen.</p>"
+            "<p>Questions? Ask your manager.</p><p>Restland BookIT</p>" % (first, url, signin, signin))
 
 
 def _email(user, url: str, base_url: str) -> bool:
@@ -99,14 +121,10 @@ def _email(user, url: str, base_url: str) -> bool:
     except Exception:  # pragma: no cover
         return False
     first = (user.full_name or "").split(" ")[0] or "there"
-    html = ("<p>Hi %s,</p><p>Your Restland BookIT login is ready. BookIT is where you'll see your "
-            "appointments, follow-ups and File Review 6 Block, all in one place.</p>"
-            "<p><a href=\"%s\">Set your password</a> (the link works once and expires in 3 days). "
-            "Then sign in at <a href=\"%s/login\">%s/login</a> with this email.</p>"
-            "<p>Restland BookIT</p>" % (first, url, base_url.rstrip("/"), base_url.rstrip("/")))
     try:
         r = send_email_via_provider(to_email=user.email, subject="Your Restland BookIT login",
-                                    body_html=html, message_type="transactional")
+                                    body_html=setup_email(first, url, base_url), org=sender(),
+                                    message_type="transactional")
         return bool(r and r.get("success"))
     except Exception:
         return False

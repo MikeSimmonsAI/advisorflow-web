@@ -2064,13 +2064,19 @@ def team_pass(db: Session, prog, client, sid: str, rows: Dict[str, List[List[Any
             cur = staff[tab].get(rid)
             if cur is None or cur.get("assigned") or not _eligible(tab, row, today_serial):
                 continue
-            # An appointment booked from a follow-up stays with whoever had the follow-up.
+            # An appointment booked from a follow-up stays with whoever had the follow-up;
+            # a family booked again (e.g. from BookIT, Nov 27) stays with the advisor
+            # of its earlier appointment.
             owner = None
             rec0 = known.get(rid)
             if tab == APPOINTMENTS and rec0 is not None and rec0.lead_id:
                 owner = next((r.assigned_to for r in known.values()
                               if r.tab in (FOLLOW_UPS, NEW_FAMILIES) and r.lead_id == rec0.lead_id
                               and r.assigned_to), None)
+                owner = owner or next((r.assigned_to for r in sorted(
+                    (x for x in known.values() if x.tab == APPOINTMENTS and x.lead_id == rec0.lead_id
+                     and x.row_id != rid and x.assigned_to),
+                    key=lambda x: x.assigned_at or datetime.min, reverse=True)), None)
             # A family the team entered (New Families) stays with whoever entered it -
             # its follow-ups and its appointments (owner, Nov 23).
             if tab == FOLLOW_UPS and not owner:

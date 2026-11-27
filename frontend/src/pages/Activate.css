@@ -80,3 +80,8 @@
   .act-scope { padding: 5vh 14px 30px; }
   .act-card { padding: 22px 18px 20px; border-radius: 12px; }
 }
+
+/* Restland BookIT staff (brand=restland) */
+.act-restland { margin-bottom: 14px; display: flex; align-items: baseline; gap: 8px; color: #16382d; }
+.act-restland strong { font: 26px Georgia, serif; letter-spacing: -.04em; }
+.act-restland span { font-weight: 700; color: #285741; border-left: 1px solid #c3d3c4; padding-left: 8px; }

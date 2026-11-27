@@ -510,6 +510,32 @@ def quick_view(response: Response, db: Session = Depends(get_db), user: User = D
     return insights.quick_view(db, prog, w)
 
 
+@router.post("/appointments/new")
+def appointment_new(body: Body, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Book a new appointment for a family the caller may work (same booking path
+    as everywhere else; success only once the calendar confirms it)."""
+    prog, w = _ctx(db, user)
+    return _run(db, workflow.new_appointment, db, prog, w, body.data)
+
+
+@router.get("/preview-access")
+def preview_access(response: Response, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Who may open BookIT before it is opened to the team (owner logins only)."""
+    _nostore(response)
+    prog, w = _ctx(db, user)
+    if not w.manager or not core.previewer(prog, user):
+        raise HTTPException(status_code=403, detail="Owner only.")
+    return {"emails": core.preview_emails(prog), "fixed": list(core.OWNER_LOGINS), "live": core.is_live(prog)}
+
+
+@router.put("/preview-access")
+def set_preview_access(body: Body, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    prog, w = _ctx(db, user)
+    if not w.manager or not core.previewer(prog, user):
+        raise HTTPException(status_code=403, detail="Owner only.")
+    return _run(db, core.set_preview_emails, db, prog, w, body.data.get("emails") or [])
+
+
 @router.post("/appointments/{row_id}/reschedule")
 def appointment_reschedule(row_id: str, body: Body, db: Session = Depends(get_db),
                            user: User = Depends(require_tenant_user)):

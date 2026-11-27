@@ -690,3 +690,65 @@ def test_reply_alerts_only_for_follow_ups_on_the_board_and_one_per_burst(setter,
              created_at=datetime.utcnow() + timedelta(minutes=1), response_id="r-3"))
     db.commit()
     assert alerts.sweep(db, prog, force=True, now=datetime.utcnow() + timedelta(minutes=2)) == 1
+
+
+# ── booking a new appointment from BookIT (owner, Nov 27) ───────────────────
+
+def test_book_a_new_appointment_from_bookit_only_your_own_once(setter, sample_advisor):
+    from unittest.mock import patch
+    from app.models.models import BookingLink
+    from tests.test_sci_appointment_setter import SLOTS
+    db, org, prog, lead, conv = _fu_case(setter, sample_advisor)
+    prog.booking_user_id = sample_advisor.id
+    _live(db, prog)
+    ann_m = db.query(ProgramTeamMember).filter_by(organization_id=org.id, name="Ann").one()
+    ann_m.user_id = "u-ann"
+    db.commit()
+    ann = core.who(db, prog, _U("u-ann"), manager=False)
+    slot = SLOTS[0].strftime("%Y-%m-%dT%H:%M")
+    body = {"lead_id": lead.id, "slot": slot, "how": "At Restland", "notify": False}
+    with pytest.raises(core.BookitError):                                      # the past is refused
+        workflow.new_appointment(db, prog, ann, dict(body, slot="2020-01-01T10:00"))
+    with pytest.raises(core.BookitError):                                      # a home visit needs the address
+        workflow.new_appointment(db, prog, ann, dict(body, how="At Their Home"))
+    ro = core.Who(_U("u-ann"), False, "Ann", ann.member_id, view_only=True)
+    with pytest.raises(core.BookitError):                                      # never from the preview
+        workflow.new_appointment(db, prog, ro, dict(body))
+    assert db.query(BookingLink).filter_by(lead_id=lead.id).count() == 0
+    with patch("app.services.programs.alert_ledger.page", return_value=[]):
+        r = workflow.new_appointment(db, prog, ann, dict(body), now=datetime(2026, 11, 23, 15, 0))
+        db.commit()
+        assert r["booked"] and r["booking_id"] and not r["already"]
+        again = workflow.new_appointment(db, prog, ann, dict(body), now=datetime(2026, 11, 23, 15, 0))
+    assert again["already"] and again["booking_id"] == r["booking_id"]       # a retry is the same booking
+    b = db.query(BookingLink).filter_by(lead_id=lead.id).one()
+    assert b.booked_time == SLOTS[0] and b.status in ("booked", "confirmed")
+    from app.models.work_models import LeadNote
+    assert any("Restland BookIT (Ann): booked" in n.body for n in db.query(LeadNote).filter_by(lead_id=lead.id))
+    # someone else's family is refused
+    db.add(ProgramTeamMember(organization_id=org.id, name="Bob", user_id="u-bob", active=True))
+    db.commit()
+    bob = core.who(db, prog, _U("u-bob"), manager=False)
+    with pytest.raises(core.BookitError):
+        workflow.new_appointment(db, prog, bob, dict(body))
+
+
+def test_preview_access_is_owner_only_and_adds_a_login(setter, sample_advisor):
+    db, org, prog, sheet, appts, mine, other = _team(setter, sample_advisor)
+    co = _U("u-co", "Co Owner", "co@example.com")
+    assert not core.previewer(prog, co)
+    boss = core.who(db, prog, _U("owner"), manager=True)
+    core.set_preview_emails(db, prog, boss, ["Co@Example.com", "not-an-email", "platform@evosyspro.live"])
+    db.commit()
+    assert core.previewer(prog, co)
+    assert core.preview_emails(prog).count("platform@evosyspro.live") == 1
+    assert core.who(db, prog, co, manager=True).manager                        # the manager side, before launch
+    assert core.cfg(prog)["preview_emails"] == ["co@example.com"]
+
+
+def test_restland_setup_email_never_names_the_platform():
+    from app.services.bookit import logins
+    html = logins.setup_email("Ann", "https://app.example/activate?token=t&brand=restland", "https://app.example")
+    assert "EvoSys" not in html and "evosys" not in html.lower()
+    assert "https://app.example/restland" in html and "brand=restland" in html
+    assert logins.sender().from_name == "Restland BookIT"

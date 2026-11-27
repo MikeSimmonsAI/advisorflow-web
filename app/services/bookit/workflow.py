@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.models.bookit_models import (EVO6_COLLECTION, PPG_STATUSES, PRIORITIES, PTA_STATUSES, SALES_DISPOSITIONS,
                                       SERVICE_STATUSES, BookitAddCase, BookitDisposition, BookitPaperwork,
                                       BookitReferralContact, BookitServiceRequest)
-from app.services.bookit.core import MANAGEMENT, BookitError, Who, audit, kick, notify, sheet_edit
+from app.services.bookit.core import MANAGEMENT, BookitError, Who, audit, kick, notify, require_family, sheet_edit
 from app.services.programs import restland_sheet as RS
 
 OUTCOMES = ("Showed", "No-Show", "Rescheduled", "Cancelled")
@@ -310,3 +310,64 @@ def save_service_request(db: Session, prog, w: Who, body: Dict[str, Any], rid: O
     audit(db, org, w, "service_request", r.id, "update" if rid else "create", "status", None, r.status)
     db.flush()
     return sr_dict(r)
+
+
+# ── a new appointment booked from inside BookIT (owner, Nov 27) ─────────────
+
+def new_appointment(db: Session, prog, w: Who, body: Dict[str, Any], now: Optional[datetime] = None) -> Dict[str, Any]:
+    """Book a family the caller may work (advisors: their own; managers: any)
+    through the same path as every booking: the time is re-checked against the
+    real calendar, the calendar event is made, and the family gets the usual
+    confirmation (unless the caller turns it off). Reported as booked only when
+    the booking reads back booked at that exact time. A retry for the same
+    family and time returns the same booking - never a second one."""
+    from datetime import timezone
+    from zoneinfo import ZoneInfo
+    from app.models.models import Lead
+    from app.services.programs import appointments as A
+    from app.services.programs import restland_sheet as RS
+    if w.view_only:
+        raise BookitError("This is a read-only preview.", 403)
+    lead_id = body.get("lead_id")
+    require_family(db, prog, w, lead_id)
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    try:
+        slot = datetime.fromisoformat(str(body.get("slot") or "")[:16])
+    except ValueError:
+        raise BookitError("Pick a date and a time.", 422)
+    now = now or datetime.utcnow()
+    local_now = now.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("America/Chicago")).replace(tzinfo=None)
+    if slot <= local_now:
+        raise BookitError("That date and time has already passed.", 422)
+    how = (body.get("how") or "At Restland").strip()
+    if how not in RS.HOW_CHOICES:
+        raise BookitError("Pick how the appointment happens.", 422)
+    key, kind = RS.HOW_CHOICES[how]
+    addr = (body.get("address") or "").strip() or None
+    if key == "home" and not addr:
+        raise BookitError("A visit at their home needs the full home address.", 422)
+    res = A.book(db, prog, lead, slot, kind, family_text=bool(body.get("notify", True)),
+                 meeting_key=key, visit_address=addr if key == "home" else None)
+    if not res.get("ok"):
+        why = {"taken": "That time is already taken. Pick another time.",
+               "already_booked": "This family already has an upcoming appointment (%s). Reschedule that one instead."
+                                 % (res.get("booked_time") or "")[:16].replace("T", " "),
+               "opted_out": "This family asked us to stop contacting them, so it can't be booked here.",
+               "no_calendar": "No booking calendar is set up.",
+               "needs_place": "For a home visit, put the full home address (street, city, state, ZIP)."}
+        raise BookitError(why.get(res.get("status"), "The calendar didn't confirm it: %s" % (res.get("reason") or "try again")), 409)
+    if not res.get("already"):
+        who = w.name or w.user_name
+        RS._note(db, prog.organization_id, lead.id, "Restland BookIT (%s): booked %s, %s"
+                 % (who, slot.strftime("%a %b %-d, %-I:%M %p"), how))
+        audit(db, prog.organization_id, w, "appointment", res.get("booking_id"), "book", "booked_time", None,
+              slot.isoformat())
+        try:
+            A.notify_team_booked(db, prog, lead, slot, kind)
+        except Exception:                                # noqa: BLE001 - the booking stands either way
+            pass
+        from app.services.bookit.core import kick
+        kick(prog)                                       # the board picks it up on its next pass
+    return {"booked": True, "booking_id": res.get("booking_id"), "slot": slot.isoformat(),
+            "simulated": bool(res.get("simulated")), "already": bool(res.get("already")),
+            "family_notified": bool(body.get("notify", True)) and not res.get("simulated")}

@@ -1447,6 +1447,7 @@ export default function App() {
         <Route path="/team-prices/executive-deal-builder" element={<ExecutiveDealBuilder />} />
         <Route path="/team-prices/deal-builder.html" element={<Navigate to="/team-prices/executive-deal-builder" replace />} />
         <Route path="/login" element={isAuthenticated() ? <Navigate to="/" replace /> : <Login />} />
+        <Route path="/restland" element={isAuthenticated() ? <Navigate to="/workspaces" replace /> : <Login />} />
         {/* MOBILE / PWA SHELL. Own auth gate (/m/login), own chrome; every call is an existing, server-enforced endpoint. */}
         <Route path="/m/*" element={<MobileApp />} />
         <Route path="/app/*" element={<TeamApp />} />
