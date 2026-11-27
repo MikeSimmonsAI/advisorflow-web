@@ -45,6 +45,7 @@ export default function Activate() {
   const restland = params.get('brand') === 'restland'
   useEffect(() => {
     if (!restland) return
+    document.documentElement.setAttribute('data-brand-lock', 'restland')
     document.title = 'Set your password | Restland BookIT'
     document.querySelectorAll("link[rel~='icon']").forEach(l => { l.href = '/restland/favicon.svg' })
     try { localStorage.setItem('af_login_brand', 'restland') } catch { /* ignore */ }

@@ -54,6 +54,7 @@
             || (/^\/(login|workspaces|activate|forgot-password|change-password)?\/?$/.test(location.pathname) && localStorage.getItem('af_login_brand') === 'restland')
         } catch (e) {}
         if (rl) {
+          document.documentElement.setAttribute('data-brand-lock', 'restland')
           document.title = 'Restland BookIT'
           var rlink = document.createElement('link'); rlink.rel = 'icon'; rlink.type = 'image/svg+xml'; rlink.href = '/restland/favicon.svg'
           document.head.appendChild(rlink)
