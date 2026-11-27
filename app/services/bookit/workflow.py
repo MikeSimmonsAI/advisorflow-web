@@ -354,7 +354,8 @@ def new_appointment(db: Session, prog, w: Who, body: Dict[str, Any], now: Option
                                  % (res.get("booked_time") or "")[:16].replace("T", " "),
                "opted_out": "This family asked us to stop contacting them, so it can't be booked here.",
                "no_calendar": "No booking calendar is set up.",
-               "needs_place": "For a home visit, put the full home address (street, city, state, ZIP)."}
+               "needs_place": "For a home visit, put the full home address (street, city, state, ZIP).",
+               "same_day": "Same-day appointments are turned off. Pick tomorrow or later."}
         raise BookitError(why.get(res.get("status"), "The calendar didn't confirm it: %s" % (res.get("reason") or "try again")), 409)
     if not res.get("already"):
         who = w.name or w.user_name

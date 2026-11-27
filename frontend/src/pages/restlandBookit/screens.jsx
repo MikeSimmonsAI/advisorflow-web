@@ -471,7 +471,7 @@ export function NewAppointment({ leadId, onClose }) {
               {s.length >= 2 && hits.length === 0 && <p className="faint">No family of yours matches.</p>}</>}
         </div>
         <div className="bk-grid g2">
-          <div className="bk-field gold"><label>Date</label><input type="date" min={today()} value={v.date} onChange={e => setV({ ...v, date: e.target.value })} /></div>
+          <div className="bk-field gold"><label>Date</label><input type="date" min={tomorrow()} value={v.date} onChange={e => setV({ ...v, date: e.target.value })} /></div>
           <div className="bk-field gold"><label>Time (CT)</label><select value={v.time} onChange={e => setV({ ...v, time: e.target.value })}><option value="" />
             {me.choices.times.map(t => <option key={t} value={to24(t)}>{t}</option>)}</select></div>
         </div>
@@ -481,6 +481,11 @@ export function NewAppointment({ leadId, onClose }) {
       </div>
     </Panel>
   )
+}
+// No same-day appointments (owner, Nov 27): the earliest date is tomorrow.
+function tomorrow() {
+  const d = new Date(today() + 'T12:00:00'); d.setDate(d.getDate() + 1)
+  return d.toLocaleDateString('en-CA')
 }
 // "10:00 AM" -> "10:00"
 function to24(t) {
@@ -776,7 +781,7 @@ function FollowUpPanel({ id, onClose }) {
         <div className="bk-field gold"><label>What happened?</label><select value={r} onChange={e => setV({ ...v, fu_result: e.target.value })}>
           <option value="" />{me.choices.what_happened.map(o => <option key={o}>{o}</option>)}</select></div>
         {r === 'Talked - booked appointment' && <div className="bk-grid g2">
-          <div className="bk-field gold"><label>Appointment date</label><input type="date" value={v.appt_date} min={today()} onChange={e => setV({ ...v, appt_date: e.target.value })} /></div>
+          <div className="bk-field gold"><label>Appointment date</label><input type="date" value={v.appt_date} min={tomorrow()} onChange={e => setV({ ...v, appt_date: e.target.value })} /></div>
           <div className="bk-field gold"><label>Time (CT)</label><select value={v.appt_time} onChange={e => setV({ ...v, appt_time: e.target.value })}><option value="" />{me.choices.times.map(t => <option key={t}>{t}</option>)}</select></div>
           <div className="bk-field gold"><label>How</label><select value={v.appt_how} onChange={e => setV({ ...v, appt_how: e.target.value })}>{me.choices.how.map(t => <option key={t}>{t}</option>)}</select></div>
           {v.appt_how === 'At Their Home' && <div className="bk-field gold"><label>Home address</label><input value={v.appt_address} onChange={e => setV({ ...v, appt_address: e.target.value })} /></div>}
