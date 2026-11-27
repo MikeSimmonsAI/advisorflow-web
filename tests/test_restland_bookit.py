@@ -453,3 +453,34 @@ def test_test_login_shows_one_advisors_side_view_only_before_launch(setter, samp
     logins.set_test_login(db, prog, boss, boss_user, None, "Bob")
     assert core.who(db, prog, u, manager=False).name == "Bob"
     assert not core.is_view_only(db, boss_user)
+
+
+def test_a_bookit_login_reaches_bookit_and_nothing_else_of_the_workspace(setter, sample_advisor):
+    """Owner, Nov 26: the test login opened all of Restland Live. A login that
+    exists for BookIT must see BookIT only - server-side, every route."""
+    from app.deps import _bookit_fence
+    from app.models.models import User
+    from app.services import workspace_access as WA
+    from app.services.bookit import logins
+    db, org, prog, sheet, appts, mine, other = _team(setter, sample_advisor)
+    boss_user = db.query(User).filter(User.id == sample_advisor.id).first()
+    boss = core.who(db, prog, _U("owner"), manager=True)
+    logins.set_test_login(db, prog, boss, boss_user, "tester+bk@example.com", "Ann")
+    db.commit()
+    u = db.query(User).filter(User.email == "tester+bk@example.com").one()
+    assert WA.bookit_only_orgs(db, u) == {org.id}
+
+    class _Req:
+        def __init__(self, path, method="GET"):
+            self.method, self.headers = method, {"x-workspace-id": org.id}
+            self.url = type("U", (), {"path": path})()
+    for blocked in ("/program/me", "/program/live/summary", "/leads", "/conversations/inbox", "/program/campaigns/x"):
+        assert _bookit_fence(db, u, _Req(blocked)) == "This login is for Restland BookIT only."
+    assert _bookit_fence(db, u, _Req("/outbox/send", "POST"))
+    for allowed in ("/restland-bookit/me", "/restland-bookit/work", "/auth/my-contexts", "/launch/me"):
+        assert _bookit_fence(db, u, _Req(allowed)) is None
+    ctx = WA.authorized_contexts(db, u)
+    assert not [w for w in ctx["workspace_contexts"] if w.get("organization_id") == org.id]
+    assert ctx["bookit_contexts"] and ctx["default_context"]["type"] == "restland_bookit"
+    # the owner and managers are never fenced
+    assert WA.bookit_only_orgs(db, boss_user) == set()

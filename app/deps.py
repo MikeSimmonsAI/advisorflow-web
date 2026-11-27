@@ -537,7 +537,42 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
             _log.info("spectator write refused user=%s %s %s", user.id, request.method, request.url.path)
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_refusal)
 
+    # ── RESTLAND BOOKIT FENCE (owner, Nov 26) ────────────────────────────────
+    # A login that exists for BookIT (a team or test login linked to a BookIT
+    # team member, not a manager there) reaches BookIT and the sign-in shell -
+    # never the rest of that workspace (families, conversations, outbox,
+    # campaigns...). Refused here, for every route, so no screen can forget.
+    if user.role in ("advisor", "viewer"):
+        _refusal = _bookit_fence(db, user, request)
+        if _refusal:
+            _log.info("bookit-only refused user=%s %s %s", user.id, request.method, request.url.path)
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_refusal)
+
     return user
+
+
+_BOOKIT_ALLOWED = ("/restland-bookit", "/auth", "/health", "/branding")
+_BOOKIT_SHELL_READS = ("/launch/me", "/work/identity", "/settings/my-capabilities", "/me")
+
+
+def _bookit_fence(db: Session, user: User, request: Request) -> Optional[str]:
+    path = request.url.path or "/"
+    if any(path == p or path.startswith(p + "/") for p in _BOOKIT_ALLOWED):
+        return None
+    if request.method in ("GET", "HEAD") and path in _BOOKIT_SHELL_READS:
+        return None                                      # the app shell's own "who am I" reads
+    from app.services import workspace_access as _wa
+    only = _wa.bookit_only_orgs(db, user)
+    if not only:
+        return None
+    from app.models.sales_models import Membership as _Mem, SCOPE_CUSTOMER_ORG as _SCO
+    others = {o for (o,) in db.query(_Mem.scope_id).filter(
+        _Mem.user_id == user.id, _Mem.scope_type == _SCO, _Mem.is_active.is_(True)).all()} - only
+    target = (request.headers.get("x-workspace-id") or request.headers.get("x-org-override")
+              or getattr(user, "organization_id", None))
+    if others and target not in only:
+        return None                                      # working in another workspace they belong to
+    return "This login is for Restland BookIT only."
 
 
 INVESTOR_AUTH_PATHS = ("/auth/refresh", "/auth/logout", "/auth/logout-all", "/auth/change-password",
