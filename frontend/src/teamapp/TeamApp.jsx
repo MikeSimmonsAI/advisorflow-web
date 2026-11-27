@@ -29,6 +29,7 @@ import ProgramsScreen from './ProgramsScreen'
 import { ChatList, Conversation, NewChat, RoomMembers } from './ChatScreens'
 import ActivityScreen from './ActivityScreen'
 import { ProgramDashboard, ProgramMore, ProgramReplies, ProgramThread } from './ProgramWorkspace'
+import { ProgramLead, ProgramLeads } from './LeadsScreens'
 import StagingBanner from '../components/StagingBanner'
 import { AccountScreen, ProfileScreen, TeamAccessScreen } from './AccountScreens'
 import './teamapp.css'
@@ -110,6 +111,10 @@ export function Icon({ name, size = 22 }) {
     case 'chevDown': return <svg {...p}><path d="M6 9l6 6 6-6"/></svg>
     case 'check': return <svg {...p}><path d="M5 12l5 5 9-10"/></svg>
     case 'pin': return <svg {...p}><path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/></svg>
+    case 'phone': return <svg {...p}><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>
+    case 'sms': return <svg {...p}><path d="M4 5h16v11H9l-5 4z"/><path d="M8 10h.01M12 10h.01M16 10h.01"/></svg>
+    case 'plus': return <svg {...p}><path d="M12 5v14M5 12h14"/></svg>
+    case 'note': return <svg {...p}><path d="M5 4h10l4 4v12H5z"/><path d="M15 4v4h4M8 12h8M8 16h6"/></svg>
     case 'lock': return <svg {...p}><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
     default: return null
   }
@@ -315,6 +320,8 @@ export default function TeamApp() {
         <Route path="p/:pid/replies" element={<ProgramReplies />} />
         <Route path="p/:pid/replies/:leadId" element={<ProgramThread />} />
         <Route path="p/:pid/more" element={<ProgramMore />} />
+        <Route path="p/:pid/leads" element={<ProgramLeads />} />
+        <Route path="p/:pid/leads/:leadId" element={<ProgramLead />} />
         <Route path="chat" element={<ChatList />} />
         <Route path="chat/new" element={<NewChat />} />
         <Route path="chat/:roomId" element={<Conversation />} />

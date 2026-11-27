@@ -11,6 +11,8 @@ message, a file or an activity item.
 """
 from __future__ import annotations
 
+import os
+
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
@@ -39,13 +41,30 @@ def _access(db: Session, user: User):
 
 # ── Who am I in the team app ────────────────────────────────────────────────
 
+# ── Phone work screens (leads, follow-ups, notes): owner preview ────────────
+# Standing order: a new feature ships into the main system hidden, so only the
+# owner's logins see it until he approves; then MOBILE_WORK_FOR_ALL=1 opens it
+# to everyone. This flag only shows or hides SCREENS. Every lead, note and
+# follow-up they load is still authorized on the server by the existing lead
+# routes (lead_scope), exactly as on the website.
+
+def phone_work_visible(user: User) -> bool:
+    if os.environ.get("MOBILE_WORK_FOR_ALL", "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    if getattr(user, "role", None) == "god_admin":
+        return True
+    from app.services.bookit.core import OWNER_LOGINS
+    return (getattr(user, "email", "") or "").strip().lower() in OWNER_LOGINS
+
+
 @router.get("/me")
 def me(response: Response, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     _nostore(response)
     a = _access(db, user)
     out = {"user": {"id": user.id, "name": user.full_name, "email": user.email,
                     "initials": chat.initials(user.full_name), "role": user.role},
-           "access": a.as_dict(), "time_zone": activity.user_tz(db, user)}
+           "access": a.as_dict(), "time_zone": activity.user_tz(db, user),
+           "previews": {"phone_work": phone_work_visible(user)}}
     if a.chat:
         chat.ensure_builtin(db, a.platform_id)
         out["chat_unread"] = chat.unread_total(db, a, user)

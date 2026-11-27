@@ -23,7 +23,7 @@ import { api, clearWorkspaceContext, fetchMyContexts, setBrandContext } from '..
 import { programInventory } from '../pages/program/programAccessModel'
 import { openProgramItem } from '../pages/program/programDestinations'
 import { MOBILE_PROGRAMS, setLauncherOrigin } from '../pages/program/launcherOrigin'
-import { ErrorNote, Icon, Loading } from './TeamApp'
+import { ErrorNote, Icon, Loading, useTeam } from './TeamApp'
 import { ago, countLabel, draftKey, findProgram, mobileKind, mobileProgramPath, programRequest,
          programTabs, whenLabel } from './programMobile'
 import { programStyle } from './teamHelpers'
@@ -32,7 +32,7 @@ const OPTS = { noOrgContext: true, skipRedirect: true }
 const LOC_KEY = 'af_mobile_program_location'
 
 /** The program this link names, looked up in this login's own inventory. */
-function useEntry() {
+export function useEntry() {
   const { pid } = useParams()
   const [state, setState] = useState({ phase: 'loading', item: null, error: null })
   const [n, setN] = useState(0)
@@ -52,7 +52,7 @@ function useEntry() {
 }
 
 /** GET in one program's own workspace: {data, error, loading, reload}. */
-function useProgramGet(item, path) {
+export function useProgramGet(item, path) {
   const [state, setState] = useState({ data: null, error: null, loading: !!(item && path) })
   const [n, setN] = useState(0)
   useEffect(() => {
@@ -88,8 +88,10 @@ function openSalesLink(item, navigate, origin, href) {
 }
 
 // ── Frame ───────────────────────────────────────────────────────────────────
-function Frame({ entry, children, tab }) {
+export function Frame({ entry, children, tab }) {
   const navigate = useNavigate()
+  const { me } = useTeam()
+  const work = !!(me && me.previews && me.previews.phone_work)
   const item = entry.item
   const look = item ? programStyle(item) : null
   return (
@@ -107,7 +109,7 @@ function Frame({ entry, children, tab }) {
       </div>
       {item && (
         <nav className="ta-seg ta-prog-tabs" aria-label={item.display + ' sections'}>
-          {programTabs(item).map(t => (
+          {programTabs(item, { work }).map(t => (
             <NavLink key={t.key || 'dash'} end={!t.key} to={mobileProgramPath(item, t.key)}
                      className={() => (tab === (t.key || 'dashboard') ? 'is-on' : '')}
                      aria-current={tab === (t.key || 'dashboard') ? 'page' : undefined}>{t.label}</NavLink>

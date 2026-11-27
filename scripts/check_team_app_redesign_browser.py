@@ -57,7 +57,9 @@ with sync_playwright() as pw:
         ok(f"{tag}: Edit pins lists every authorized program", len(names)==total, (len(names), total))
         ok(f"{tag}: a third pin cannot be ticked", all(b.is_disabled() for b in third))
         if tag=="iphone": pg.screenshot(path=OUT+"03-edit-pins.png")
-        pg.click(".ta-sheet-card .ta-btn--primary"); pg.wait_for_selector(".ta-pin")
+        pg.click(".ta-sheet-card .ta-btn--primary"); pg.wait_for_selector(".ta-sheet-card", state="detached")
+        try: pg.wait_for_function("document.querySelectorAll('.ta-pins .ta-pin').length===2", timeout=10000)
+        except Exception: pass
         ok(f"{tag}: two pins shown", len(pg.query_selector_all(".ta-pins .ta-pin"))==2)
         pinned=[e.get_attribute("data-program-key") for e in pg.query_selector_all(".ta-pins .ta-pin")]
         grid=[e.get_attribute("data-program-key") for e in pg.query_selector_all(".ta-grid [data-program-key]")]
@@ -74,6 +76,8 @@ with sync_playwright() as pw:
         ok(f"{tag}: three-column grid", cols==3, cols)
         # reopen app: pins persist
         pg.reload(); pg.wait_for_selector(".ta-pin")
+        try: pg.wait_for_function("document.querySelectorAll('.ta-pins .ta-pin').length===2 && !document.querySelector('.ta-pin-note')", timeout=10000)
+        except Exception: pass
         ok(f"{tag}: pins survive reopening", [e.get_attribute("data-program-key") for e in pg.query_selector_all(".ta-pins .ta-pin")]==pinned)
         # search finds far-down item and clearing restores
         last=pg.eval_on_selector_all(".ta-grid .ta-tile-name","els=>els[els.length-1].textContent")

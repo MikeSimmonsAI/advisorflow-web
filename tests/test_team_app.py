@@ -415,3 +415,16 @@ def test_phone_pins_do_not_touch_desktop_pins(client, team):
     assert client.get("/launcher/pins", headers=h).json()["keys"] == ["a", "b", "c"]
     client.put("/launcher/pins", json={"keys": ["c"]}, headers=h)
     assert client.get("/team-app/pins", headers=h).json()["keys"] == ["b"]
+
+
+# ── Phone work screens (leads, follow-ups, notes): owner preview ───────────
+
+def test_phone_work_screens_are_owner_preview_until_opened(client, team, monkeypatch):
+    h = team["h"]
+    monkeypatch.delenv("MOBILE_WORK_FOR_ALL", raising=False)
+    assert client.get("/team-app/me", headers=h["owner"]).json()["previews"] == {"phone_work": True}
+    for who in ("partner", "chatmgr", "rep1", "outsider"):
+        assert client.get("/team-app/me", headers=h[who]).json()["previews"] == {"phone_work": False}, who
+    monkeypatch.setenv("MOBILE_WORK_FOR_ALL", "1")
+    for who in ("partner", "rep1", "outsider", "owner"):
+        assert client.get("/team-app/me", headers=h[who]).json()["previews"] == {"phone_work": True}, who
