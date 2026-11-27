@@ -504,7 +504,11 @@ def _context(db, prog, lead, conv, resp, *, follow_up: Optional[str] = None) -> 
 _CLOCK = re.compile(r"\b\d{1,2}(:\d{2})?\s*(a\.?m\.?|p\.?m\.?)(?![a-z])|\b\d{1,2}:\d{2}\b|\bnoon\b", re.I)
 _CLAIM_BOOKED = re.compile(r"\b(you'?re (all )?set for|you are (all )?set for|i'?ve booked|i booked|is booked|"
                            r"has been booked|is confirmed|has been confirmed|i'?ve scheduled|scheduled you|"
-                           r"see you (on|at) )", re.I)
+                           r"see you (on|at) |"
+                           # Owner, Nov 27 (Leon): "I'll see you tomorrow at 2:30 PM" went out with no booking.
+                           r"see you (tomorrow|today|tonight|this|next|then|monday|tuesday|wednesday|thursday|"
+                           r"friday|saturday|sunday)\b|look(ing)? forward to (seeing|meeting) you (on|at|tomorrow|"
+                           r"today|this|next|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b)", re.I)
 _CLAIM_MAILED = re.compile(r"\b(i'?ve|we'?ve|i have|we have|has been|have been|already) (mailed|sent it in the mail|"
                            r"put it in the mail)\b|\bwe mailed\b|\bit'?s in the mail\b", re.I)
 _CLAIM_GUIDE = re.compile(r"\b(here'?s|here is) (the|your) (planning )?guide\b", re.I)
@@ -1464,6 +1468,53 @@ def _fill_times(text: str, slots: List[datetime]) -> str:
 
 # ── the entry point ──────────────────────────────────────────────────────────
 
+_OPENER_CLOCK = re.compile(r"\b(\d{1,2}):(\d{2})\s*([ap])\.?\s?m\b", re.I)
+
+
+def opener_times(text: str, sent_central: datetime) -> List[datetime]:
+    """The times an opening text offered: 'What time tomorrow works best for you,
+    10:00 AM or 2:30 PM?' -> those two times on the day after it was sent.
+    Only "today" / "tomorrow" texts name a day; anything else names none."""
+    t = text or ""
+    if re.search(r"\btomorrow\b", t, re.I):
+        day = sent_central.date() + timedelta(days=1)
+    elif re.search(r"\btoday\b", t, re.I):
+        day = sent_central.date()
+    else:
+        return []
+    out = []
+    for h, m, ap in _OPENER_CLOCK.findall(t):
+        h, m = int(h) % 12, int(m)
+        if ap.lower() == "p":
+            h += 12
+        out.append(datetime(day.year, day.month, day.day, h, m))
+    return sorted(set(out))
+
+
+def seed_opener_times(db: Session, prog, lead, conv, now: datetime) -> List[datetime]:
+    """When nothing is on the table yet, the times our latest text to this family
+    named (within 3 days) become the offered times, if they are still ahead."""
+    from datetime import timezone
+    from zoneinfo import ZoneInfo
+    from app.models.models import Message
+    if A.offered(conv) or conv.booked_time is not None:
+        return []
+    m = (db.query(Message).filter(Message.lead_id == lead.id, Message.sent_at.isnot(None),
+                                  Message.sent_at >= now - timedelta(days=3), Message.sent_at <= now)
+         .order_by(Message.sent_at.desc()).first())
+    if m is None or not m.body:
+        return []
+    sent = m.sent_at.replace(tzinfo=timezone.utc) if m.sent_at.tzinfo is None else m.sent_at
+    sent_c = sent.astimezone(ZoneInfo(A.CENTRAL)).replace(tzinfo=None)
+    now_c = now.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(A.CENTRAL)).replace(tzinfo=None)
+    slots = [x for x in opener_times(m.body, sent_c) if x > now_c
+             and not (A.same_day_off(prog) and x.date() <= now_c.date())]
+    if slots:
+        conv.offered_slots = json.dumps([x.isoformat() for x in slots])
+        conv.offered_at = m.sent_at
+    return slots
+
+
 def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[datetime] = None,
                     force_mode: Optional[str] = None, actor: Optional[str] = None) -> Optional[Dict]:
     """Answer one family reply. Returns what happened, or None when the setter
@@ -1530,6 +1581,15 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
         # The family wrote again: any scheduled follow-up is superseded.
         conv.next_followup_at = None
         conv.followup_reason = None
+
+    # The opening text may have named its own times ("What time tomorrow works
+    # best for you, 10:00 AM or 2:30 PM?"): those are the times on the table
+    # when the family answers it (owner, Nov 27 - Leon said "2:30" and was asked
+    # again instead of being booked).
+    try:
+        seed_opener_times(db, prog, lead, conv, now)
+    except Exception:                                    # noqa: BLE001 - never blocks a reply
+        log.exception("opener times failed for lead %s", lead.id)
 
     # What a "No" declined is decided in code from the last message the family
     # saw (#234); the prompt and the validator both read it.
@@ -1641,6 +1701,16 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
             else:
                 text = "Wonderful, I'd be glad to sit down with you. Would {TIMES} work for you?"
                 merge_memory(conv, {"readiness": "ready"})
+    if action in ("offer_times", "answer") and conv.booked_time is None:
+        _ch = A.offered(conv)
+        _named = [i for i, c in enumerate(_ch) if clock_named(body, c) and choice_evidence(body, c, i)]
+        if len(_named) == 1 and not _CHANGE_EXISTING.search(body or ""):
+            # Their own words name exactly one of the offered times: book it,
+            # never ask them to pick again (owner, Nov 27).
+            action = "book"
+            out["action"] = action
+            out["corrected"] = "the family named one of the offered times"
+            d = dict(d, slot_choice=_named[0] + 1)
     if action == "book":
         slot = None
         choices = A.offered(conv)
@@ -1701,6 +1771,27 @@ def on_family_reply(db: Session, prog, lead, resp, body: str, *, now: Optional[d
                     db.query(ProgramConversationTurn).filter(ProgramConversationTurn.conversation_id == conv.id,
                                                              ProgramConversationTurn.role == "family").all())])
                 _mk = _BPk.call_kind(_said)
+            if A.same_day_off(prog) and slot.date() <= A._today_central().date():
+                # No same-day appointments here (owner, Nov 27): offer real times instead.
+                out["corrected"] = "no same-day appointments"
+                slots, _w = A.available_slots(db, prog, seed=lead.id, kind=kind)
+                if slots:
+                    text = _fill_times(_ensure_times_question(
+                        "We're not able to do a same-day visit, but I'd be glad to see you soon."), slots)
+                    conv.offered_slots = json.dumps([x.isoformat() for x in slots])
+                    conv.offered_at = now
+                    conv.state = "offered"
+                    _line = booking_link_line(db, lead)
+                    if _line:
+                        text = "%s\n%s" % (text, _line)
+                    t = _deliver(db, prog, lead, conv, resp, text, "offer_times", mode, now=now)
+                    conv.ai_turns += 1
+                    conv.last_ai_at = now
+                    db.commit()
+                    return dict(out, action="offer_times", state=conv.state, delivery=t.delivery)
+                _handoff(db, prog, lead, conv, "asked for a same-day visit; no other times to offer", notify=True)
+                db.commit()
+                return dict(out, action="handoff", state=conv.state)
             res = A.book(db, prog, lead, slot, kind, family_text=not by_email, meeting_key=_mk)
             out["booking"] = res
             if res.get("ok"):
