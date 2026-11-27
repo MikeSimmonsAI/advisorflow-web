@@ -840,3 +840,31 @@ def test_wrong_email_text_is_not_a_wrong_phone():
     assert WC.says_wrong_phone("Wrong number")
     assert WC.says_wrong_phone("You have the wrong person, this is not her")
     assert not WC.says_wrong_phone("you have the wrong email for me")
+
+
+def test_a_reply_answers_everything_the_family_sent_before_it(setter, sample_advisor):
+    """Nov 27, Margaret Degeeter: voicemail 2:04, text 2:06, Mike answered from
+    the voicemail at 2:08 - the 2:06 text stayed open and was paged at 2:21."""
+    from app.models.program_models import ProgramResponse
+    from app.services.programs import responses as R
+    db, org = setter["db"], setter["org"]
+    lead = _lead_for(db, org, sample_advisor, "L004", phone="2145550104", first="Margaret")
+    t0 = datetime(2026, 11, 27, 20, 4)
+    vm = ProgramResponse(organization_id=org.id, lead_id=lead.id, channel="voicemail", response_class="hot",
+                         handling_status="new", received_at=t0, recommended_action="x", summary="vm")
+    tx = ProgramResponse(organization_id=org.id, lead_id=lead.id, channel="sms", response_class="hot",
+                         handling_status="new", received_at=t0 + timedelta(minutes=2), recommended_action="x", summary="tx")
+    later = ProgramResponse(organization_id=org.id, lead_id=lead.id, channel="sms", response_class="hot",
+                            handling_status="new", received_at=t0 + timedelta(minutes=30), recommended_action="x",
+                            summary="later")
+    db.add_all([vm, tx, later])
+    db.commit()
+    R.mark(db, vm, "responded", sample_advisor, now=t0 + timedelta(minutes=4))
+    db.refresh(tx)
+    db.refresh(later)
+    assert vm.handling_status == "responded" and tx.handling_status == "responded"
+    assert later.handling_status == "new"                                      # sent after the reply: still open
+    # a text not tied to one message answers what came before it too
+    assert R.answered_by_person(db, lead, sample_advisor, now=t0 + timedelta(minutes=31)) == 1
+    db.refresh(later)
+    assert later.handling_status == "responded"

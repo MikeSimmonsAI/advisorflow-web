@@ -672,6 +672,20 @@ def safe_on_inbound(db: Session, lead: Lead, body: str, channel: str, **kw) -> N
 
 # ── handling and SLA ─────────────────────────────────────────────────────────
 
+def answered_by_person(db: Session, lead, user, now: Optional[datetime] = None) -> int:
+    """A person sent this family a message: their open replies up to now are
+    answered (used where a reply isn't tied to one message). Returns how many."""
+    now = now or datetime.utcnow()
+    newest = (db.query(ProgramResponse)
+              .filter(ProgramResponse.organization_id == lead.organization_id, ProgramResponse.lead_id == lead.id,
+                      ProgramResponse.handling_status.in_(("new", "opened")), ProgramResponse.received_at <= now)
+              .order_by(ProgramResponse.received_at.desc()).first())
+    if newest is None:
+        return 0
+    mark(db, newest, "responded", user, now=now)
+    return 1
+
+
 def mark(db: Session, resp: ProgramResponse, state: str, user: User,
          now: Optional[datetime] = None) -> ProgramResponse:
     """NEW -> OPENED -> RESPONDED -> ACTIVE (-> CLOSED). Earlier stamps are kept."""
@@ -701,8 +715,13 @@ def mark(db: Session, resp: ProgramResponse, state: str, user: User,
                                              ProgramResponse.lead_id == resp.lead_id,
                                              ProgramResponse.id != resp.id,
                                              ProgramResponse.handling_status != "closed")
-        if resp.received_at is not None:
-            q = q.filter(ProgramResponse.received_at <= resp.received_at)
+        # A reply a person SENT answers everything the family had sent up to
+        # that moment - not only messages older than the one it was written
+        # from (owner, Nov 27: Margaret Degeeter's 2:06 PM text stayed red and
+        # was paged "not handled" after Mike answered her 2:04 PM voicemail).
+        cutoff = now if state == "responded" else resp.received_at
+        if cutoff is not None:
+            q = q.filter(ProgramResponse.received_at <= cutoff)
         for older in q.all():
             # Dismissing an auto-reply or a bare "ok" never settles an earlier
             # HOT question: only an answer sent, or closing a HOT reply, does.

@@ -975,9 +975,11 @@ def command_reply(body: ReplyIn, db: Session = Depends(get_db), user: User = Dep
             raise HTTPException(status_code=400, detail="Not sent: %s" % str(exc)[:300])
         out.update(ok=True, message={"id": msg.id, "sid": msg.twilio_sid, "status": msg.twilio_status})
         sent_at = max(datetime.utcnow(), msg.sent_at or datetime.utcnow())
+        from app.services.programs import responses as R
         if resp is not None:
-            from app.services.programs import responses as R
             R.mark(db, resp, "responded", user)
+        else:
+            R.answered_by_person(db, lead, user, now=sent_at)   # a text not tied to one message
     else:
         raise HTTPException(status_code=422, detail="channel must be sms or email")
     out["response_status"] = resp.handling_status if resp is not None else None
