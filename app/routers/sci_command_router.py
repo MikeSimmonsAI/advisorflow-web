@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, require_tenant_or_observer, require_tenant_user
-from app.models.models import Lead, Message, User
+from app.models.models import BookingLink, Lead, Message, User
 from app.models.program_models import (CampaignFamily, LocationProfile, ProgramConversation, ProgramResponse,
                                        ProgramSourceRecord)
 from app.routers.program_router import _program, _require_manager, _sees_program
@@ -131,8 +131,12 @@ def _home_visit_of(conv) -> Optional[dict]:
     return dict(hv if isinstance(hv, dict) else {}, waiting=_home_visit_waiting(conv))
 
 
-def _badge(r, conv) -> str:
-    if conv is not None and conv.state == "booked":
+def _badge(r, conv, booked: bool = False) -> str:
+    # Booked whenever the family has an upcoming appointment - however it was
+    # booked (the AI, the booking page or a person) and whoever now has the
+    # conversation (owner, Nov 27: Graciela Castro was moved to Monday by staff
+    # and her card said PERSON / LOW, not Booked).
+    if booked or (conv is not None and conv.state == "booked"):
         return "Booked"
     if _home_visit_waiting(conv):
         return "Home visit"
@@ -143,6 +147,18 @@ def _badge(r, conv) -> str:
     if r.response_class in ("low", "auto_reply"):
         return "Low"
     return "New" if r.handling_status == "new" else "Active"
+
+
+def _upcoming_booked(db, lead_ids) -> set:
+    """Families with a booked or confirmed appointment that hasn't happened yet."""
+    if not lead_ids:
+        return set()
+    from datetime import timezone
+    from zoneinfo import ZoneInfo
+    now_c = datetime.now(timezone.utc).astimezone(ZoneInfo("America/Chicago")).replace(tzinfo=None)
+    return {lid for (lid,) in db.query(BookingLink.lead_id).filter(
+        BookingLink.lead_id.in_(lead_ids), BookingLink.status.in_(("booked", "confirmed")),
+        BookingLink.booked_time >= now_c)}
 
 
 def _actions(r, conv) -> list:
@@ -304,6 +320,7 @@ def _inbox_items(db, org, rows, locs, M, q, owner_test_ids) -> list:
         if _adv_ids else {}
     needle = (q or "").strip().lower()
     from app.services.programs import responses as R
+    booked_ids = _upcoming_booked(db, list(newest))
     items = []
     for lid, r in newest.items():
         lead = leads.get(lid)
@@ -324,7 +341,7 @@ def _inbox_items(db, org, rows, locs, M, q, owner_test_ids) -> list:
                       "owner": "human" if (conv is not None and conv.state in ("human", "stopped")) else "ai",
                       **who,
                       "location_id": r.location_id, "summary": (r.body_excerpt or r.summary or "")[:160],
-                      "class": r.response_class, "badge": _badge(r, conv), "channel": r.channel,
+                      "class": r.response_class, "badge": _badge(r, conv, lid in booked_ids), "channel": r.channel,
                       "received_at": r.received_at.isoformat() + "Z" if r.received_at else None,
                       "sla_breached": bool(r.response_class == "hot" and r.handling_status == "new"
                                            and not answered
@@ -766,7 +783,7 @@ def command_family(lead_id: str, history_n: int = Query(40, ge=1, le=500, alias=
         "assigned_to": {"id": assigned.id, "name": assigned.full_name or assigned.email} if assigned else None,
         "team": team,
         "status": latest.handling_status if latest else None,
-        "badge": _badge(latest, conv) if latest else None,
+        "badge": _badge(latest, conv, bool(_upcoming_booked(db, [lead.id]))) if latest else None,
         "human_handoff": _human_handoff(latest, conv),
         "handoff_reason": conv.handoff_reason if conv is not None and _human_handoff(latest, conv) else None,
         # The family message that needs the person (the handoff's trigger).
