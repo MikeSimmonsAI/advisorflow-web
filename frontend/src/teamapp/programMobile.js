@@ -212,3 +212,11 @@ export function looksLikeEmail(text) {
   // A sign-off LINE (not a quick "Thanks!") or a greeting line, in a message of several lines.
   return lines.length >= 3 && (lines.some(l => signs.test(l)) || greeting.test(lines[0]))
 }
+
+/** The family's next appointment that is still on (booked or confirmed, not past). */
+export function upcomingBooking(bookings, now = Date.now()) {
+  const live = (bookings || []).filter(b => b && b.when && ['booked', 'confirmed'].includes(b.status)
+    && new Date(b.when).getTime() >= now - 2 * 3600e3)
+  live.sort((a, b) => new Date(a.when) - new Date(b.when))
+  return live[0] || null
+}

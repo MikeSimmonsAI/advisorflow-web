@@ -22,8 +22,9 @@ import { api } from '../api/client'
 import { formatPhone } from '../utils/phone'
 import { ErrorNote, Icon, Loading, useTeam } from './TeamApp'
 import { Frame, useEntry, useProgramGet } from './ProgramWorkspace'
+import AppointmentSheet from './AppointmentSheet'
 import { ago, contactLinks, draftKey, dueLabel, followUpChoices, hasLeads, leadName, mobileKind,
-         mobileProgramPath, newLeadProblem, parseTs, programRequest } from './programMobile'
+         mobileProgramPath, newLeadProblem, parseTs, programRequest, upcomingBooking, whenLabel } from './programMobile'
 
 const PAGE = 60
 
@@ -255,6 +256,7 @@ function LeadBody({ item }) {
       </div>
       <p className="ta-muted ta-small ta-contact-note">Call and Text use your phone. To text from the business number, use “Text from EvoSys” below.</p>
 
+      {mobileKind(item) === 'program' && <ProgramAppointment item={item} lead={lead} />}
       <FollowUps item={item} lead={lead} req={req} onToast={setToast} />
       <Notes item={item} lead={lead} req={req} onToast={setToast} logCall={logCall} onLogged={() => setLogCall(false)} />
       <EvoText item={item} lead={lead} req={req} onToast={setToast} />
@@ -433,6 +435,30 @@ function EvoText({ item, lead, req, onToast }) {
             <button type="submit" className="ta-btn ta-btn--primary ta-btn--sm" disabled={busy || !body.trim()}><Icon name="send" size={18} /> {busy ? 'Sending…' : 'Send'}</button>
           </form>
         : <div className="ta-card ta-muted">Can’t text from EvoSys: {((gate.reasons || [])[0] || {}).label || 'not allowed for this lead.'}</div>}
+    </section>
+  )
+}
+
+/** SCI / Restland: the family's next appointment, with Book / Move / Cancel. */
+function ProgramAppointment({ item, lead }) {
+  const [open, setOpen] = useState(false)
+  const f = useProgramGet(item, '/program/command/family/' + encodeURIComponent(lead.id) + '?history=1')
+  const next = f.data ? upcomingBooking(f.data.bookings) : null
+  return (
+    <section className="ta-section" aria-labelledby="ta-appt-sec">
+      <h2 id="ta-appt-sec" className="ta-h2">Appointment</h2>
+      {f.loading && !f.data ? <Loading /> : (
+        <button type="button" className="ta-card ta-appt-row" onClick={() => setOpen(true)} disabled={!f.data}>
+          <Icon name="calendar" size={24} />
+          <span className="ta-furow-main">
+            <span className="ta-row-name">{next ? whenLabel(next.when, 'America/Chicago') : 'Nothing booked'}</span>
+            <span className="ta-row-sub">{next ? [next.label, next.staff].filter(Boolean).join(' · ') || 'Booked' : 'Tap to book a time'}</span>
+          </span>
+          <span className="ta-linkbtn">{next ? 'Move / cancel' : 'Book'}</span>
+        </button>
+      )}
+      {open && f.data && <AppointmentSheet item={item} leadId={lead.id} name={leadName(lead)} bookings={f.data.bookings}
+                                           onClose={() => setOpen(false)} onDone={() => f.reload()} />}
     </section>
   )
 }
