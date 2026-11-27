@@ -155,6 +155,12 @@ def send_single(req: SendRequest, db: Session = Depends(get_db), current_user: U
     except Exception:
         send_guard.release_after_failure(db, lead.id, req.template, token)
         raise
+    try:
+        # A person texted this family from the app: their open replies are answered.
+        from app.services.programs import responses as _R
+        _R.answered_by_person(db, lead, current_user)
+    except Exception:                                    # noqa: BLE001 - the text went; never fail the send
+        logger.exception("could not mark replies answered for lead %s", lead.id)
     return {"message_id": message.id, "status": message.twilio_status}
 
 
