@@ -487,6 +487,14 @@ def audit_log(response: Response, entity: Optional[str] = None, entity_id: Optio
                       for a in q.order_by(A.at.desc()).limit(300)]}
 
 
+@router.get("/quick-view")
+def quick_view(response: Response, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """My Quick View on the Program Access landing: the caller's own next 7 days."""
+    _nostore(response)
+    prog, w = _ctx(db, user)
+    return insights.quick_view(db, prog, w)
+
+
 # ── logins ──────────────────────────────────────────────────────────────────
 
 def _base(request: Request) -> str:

@@ -181,6 +181,7 @@ const InsImport = insPage('ImportPage')
 const InsSettings = insPage('SettingsPage')
 // Restland BookIT (/program/restland-bookit/*): each advisor's own workspace + the owner's Command Center.
 const RestlandBookit = lazyPage(() => import('./pages/restlandBookit/BookitApp'))
+const RestlandAccess = lazyPage(() => import('./pages/restlandBookit/RestlandAccess'))
 // EvoSys BookIt program (/program/evosys-sales/*): EvoSys's own sales team.
 const EvsShell = lazyPage(() => import('./pages/evosysSales/EvoSysSales'))
 const evsPage = name => lazyPage(() => import('./pages/evosysSales/EvoSysSales').then(m => ({ default: m[name] })))
@@ -1262,6 +1263,9 @@ function WorkspaceSelector() {
     }
     return null
   }
+  // Restland staff (a BookIT-only login, server-decided): Restland's own
+  // Program Access page - no EvoSys branding; "Open BookIT" goes to My Day.
+  if (ctx.restland_staff) return <RestlandAccess ctx={ctx} />
   const workspaces = ctx.workspace_contexts || []
   const products = ctx.product_contexts || []
   const previews = ctx.preview_contexts || []

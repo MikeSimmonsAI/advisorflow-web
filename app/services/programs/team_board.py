@@ -168,6 +168,21 @@ def _pending(db: Session, org_id: str) -> Dict[tuple, Dict[str, Any]]:
     return out
 
 
+VISIT_KINDS = ("onsite", "call", "offsite", "unknown")
+
+
+def visit_kind(meeting_type: Optional[str]) -> str:
+    """The canonical visit type of a booking: onsite / call / offsite / unknown."""
+    mt = (meeting_type or "").strip().lower()
+    if mt in ("office", "restland", "in_person", "onsite"):
+        return "onsite"
+    if mt in ("phone", "video", "remote", "call", "zoom"):
+        return "call"
+    if mt in ("home", "offsite", "other_location"):
+        return "offsite"
+    return "unknown"
+
+
 def work(db: Session, prog, person: Optional[str] = None, today: Optional[date] = None) -> Dict[str, Any]:
     """Appointments and follow-ups, with the team's fields. `person` limits
     it to one person's work (always set for a team member)."""
@@ -203,6 +218,20 @@ def work(db: Session, prog, person: Optional[str] = None, today: Optional[date] 
             "last_update": _ct(rec.staff_changed_at) if rec else None, "saving": waiting,
             "upcoming": RS._eligible(RS.APPOINTMENTS, r, today_serial),
         })
+    # Visit type from the booking itself (owner, Nov 26): Onsite (Restland
+    # office), Call In (phone/video), Offsite (home/other) or Unspecified - a
+    # missing or unknown value is never guessed as an office visit.
+    if appts:
+        from app.models.models import BookingLink as _BL
+        raw = {i: (m, a) for i, m, a in db.query(_BL.id, _BL.meeting_type, _BL.visit_address)
+               .filter(_BL.id.in_([a["id"] for a in appts])).all()}
+        for a in appts:
+            mt, addr = raw.get(a["id"], (None, None))
+            a["visit"] = visit_kind(mt)
+            a["visit_detail"] = {"phone": "Phone call", "video": "Video call", "remote": "Phone or video call",
+                                 "home": "Home visit"}.get(mt or "", "")
+            if mt == "home" and addr and not a.get("home_address"):
+                a["home_address"] = addr
     appts.sort(key=lambda a: ((a["date"] or "9999"), a["time"] or ""))
     known = [rid for rid, rec in recs.items() if rec.tab == RS.FOLLOW_UPS]
     fus = []

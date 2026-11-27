@@ -15,6 +15,7 @@ Metric definitions (docs/restland-bookit/revenue-attribution.md):
 """
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -383,3 +384,30 @@ def command_center(db: Session, prog, w: Who, range_name: Optional[str] = None, 
         "team": team,
         "recent": recent,
     }
+
+
+# ── My Quick View (owner, Nov 26: the Program Access landing) ───────────────
+
+def quick_view(db: Session, prog, w, today: Optional[date] = None) -> Dict[str, Any]:
+    """The signed-in advisor's own booked appointments for the next 7 days
+    (Central), by visit type, and their next one. Only their own records - the
+    same scope as everything else (TB.work(person=their name)); the owner's
+    test login sees the advisor it previews. Never organization totals."""
+    from app.services.programs import team_board as TB
+    today = today or today_ct()
+    end = today + timedelta(days=6)
+    if not w.name:                                       # a manager with no seat on the team
+        return {"has_seat": False, "from": today.isoformat(), "to": end.isoformat()}
+    rows = [a for a in TB.work(db, prog, person=w.name, today=today).get("appointments", [])
+            if a.get("date") and today.isoformat() <= a["date"] <= end.isoformat()
+            and re.match(r"^(Booked|Confirmed)\b", a.get("status") or "") and not a.get("outcome")]
+    counts = {k: 0 for k in TB.VISIT_KINDS}
+    for a in rows:
+        counts[a.get("visit") if a.get("visit") in counts else "unknown"] += 1
+    rows.sort(key=lambda a: (a["date"], a.get("time") or ""))
+    nxt = rows[0] if rows else None
+    return {"has_seat": True, "name": w.name, "from": today.isoformat(), "to": end.isoformat(),
+            "total": len(rows), "onsite": counts["onsite"], "call": counts["call"],
+            "offsite": counts["offsite"], "unspecified": counts["unknown"],
+            "next": {"date": nxt["date"], "time": nxt.get("time"), "visit": nxt.get("visit"),
+                     "id": nxt["id"]} if nxt else None}

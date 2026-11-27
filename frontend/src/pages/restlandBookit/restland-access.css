@@ -1,0 +1,62 @@
+/* Restland staff Program Access - the owner's mockup (Restland-Program-Access-Mockup.html, Nov 26).
+   The memorial park image is an illustration, never presented as the property. Scoped under .rla. */
+.rla { --ink:#16382d; --muted:#52685d; --cream:#f6f5ef; --gold:#f4dfaa; --grounds:url('/restland/grounds.webp'); --grounds-card:url('/restland/grounds-card.webp');
+  display:grid; grid-template-columns:246px minmax(0,1fr); min-height:100dvh; color:var(--ink); font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--cream); }
+.rla *, .rla *::before, .rla *::after { box-sizing:border-box; }
+.rla h1, .rla h2, .rla h3, .rla p { margin:0; }
+.rla a:focus-visible, .rla button:focus-visible { outline:3px solid #b48028; outline-offset:4px; }
+.rla-rail { background:#102e25; color:#eef4eb; display:flex; flex-direction:column; padding:30px 16px 16px; }
+.rla-brand { margin:0 10px 32px; }
+.rla-brand strong { display:block; font:36px Georgia,serif; letter-spacing:-.045em; }
+.rla-brand span { font-size:12px; color:#d4e4d6; }
+.rla-rail nav { display:grid; gap:6px; }
+.rla-rail nav a { padding:11px 14px; text-decoration:none; color:inherit; border-radius:8px; }
+.rla-rail nav a[aria-current] { background:#285741; border-left:3px solid #e4c98e; padding-left:11px; }
+.rla-rail nav a:hover { background:#20473a; }
+.rla-account { margin-top:auto; display:flex; gap:10px; align-items:center; padding:15px 7px 0; border-top:1px solid #416254; }
+.rla-account span { display:block; color:#cfdfd2; font-size:12px; }
+.rla-avatar { border-radius:50%; background:#315a48; color:#fff; padding:10px; font-weight:700; min-width:40px; text-align:center; }
+.rla-account a { color:#eef4eb; margin-left:auto; font-size:12px; }
+.rla-main { padding:30px clamp(18px,3vw,48px) 32px; min-width:0;
+  background:radial-gradient(ellipse at 100% 96%,#cbd9c9 0,transparent 53%),linear-gradient(150deg,#f5f4ed,#e4ece1 74%); }
+.rla-welcome { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:22px; }
+.rla-welcome h1 { font:36px/1.12 Georgia,serif; }
+.rla-welcome p { margin-top:5px; color:var(--muted); }
+.rla-hero { border-radius:18px; color:#fff; box-shadow:0 10px 24px #19372724; position:relative; overflow:hidden;
+  min-height:clamp(295px,42vh,440px); display:flex; flex-direction:column; align-items:flex-start; justify-content:center; padding:44px clamp(24px,5vw,70px);
+  background:linear-gradient(90deg,rgba(11,34,26,.97),rgba(11,34,26,.85) 32%,rgba(11,34,26,.36) 64%,rgba(11,34,26,.04)),var(--grounds) center 54%/cover; }
+.rla-hero h2 { font:clamp(42px,5.2vw,72px)/1.05 Georgia,serif; letter-spacing:-.035em; }
+.rla-hero p { margin:10px 0 20px; color:#e7eee6; max-width:420px; font-size:16px; }
+.rla-button { display:inline-block; padding:11px 17px; border-radius:7px; color:#193727; background:var(--gold); border:0; font:inherit; font-weight:700; cursor:pointer; box-shadow:0 2px 7px #0b211b55; }
+.rla-button:hover { background:#fff0c9; }
+.rla-workspaces { margin-top:23px; }
+.rla-workspaces > h2 { font-size:19px; margin-bottom:10px; }
+.rla-layout { display:grid; grid-template-columns:minmax(240px,1fr) minmax(0,1.9fr); border:1px solid #c3d3c4; border-radius:15px; overflow:hidden; box-shadow:0 6px 18px #19372712; }
+.rla-feature { display:flex; min-height:185px; flex-direction:column; align-items:flex-start; justify-content:end; padding:21px; color:#fff;
+  background:linear-gradient(0deg,#102e25fa 3%,#102e2540 100%),var(--grounds-card) 78% 53%/cover; }
+.rla-feature h3 { font:28px Georgia,serif; }
+.rla-feature p { color:#e2eee4; font-size:13px; margin:4px 0 9px; }
+.rla-feature a { color:#f4dfaa; font-weight:700; }
+.rla-quick { background:#e8efe5; padding:18px 22px; }
+.rla-qtitle, .rla-next { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.rla-qtitle h3 { font-size:20px; }
+.rla-qtitle p, .rla-next span, .rla-muted { color:#52685d; font-size:13px; }
+.rla-small { margin:-4px 0 8px; }
+.rla-stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin:12px 0; }
+.rla-stat { background:#f6f8f2; border:1px solid #cbd9ca; border-radius:8px; padding:9px 10px; }
+.rla-stat:first-child { background:#214b38; color:#fff; border-color:#214b38; }
+.rla-stat strong { display:block; font-size:26px; line-height:1.15; }
+.rla-stat span { font-size:12px; }
+.rla-next a { color:#174c36; font-weight:700; }
+.rla-next strong, .rla-next span { display:block; }
+@media (max-width:900px) { .rla-layout { grid-template-columns:1fr; } .rla-feature { min-height:130px; } }
+@media (max-width:700px) {
+  .rla { grid-template-columns:1fr; }
+  .rla-rail { padding:14px 16px; gap:12px; }
+  .rla-brand { margin:0; } .rla-brand strong { font-size:27px; }
+  .rla-rail nav { display:flex; flex-wrap:wrap; }
+  .rla-account { margin-top:0; border-top:0; padding:0; }
+  .rla-main { padding-top:20px; }
+  .rla-hero { min-height:315px; padding:24px; background-image:linear-gradient(90deg,#0b221aee,#0b221a80),var(--grounds); background-position:62% center; }
+}
+@media (max-width:550px) { .rla-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } }
