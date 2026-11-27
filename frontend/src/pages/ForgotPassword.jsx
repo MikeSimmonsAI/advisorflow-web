@@ -1,7 +1,7 @@
 /* Forgot password: ask for a one-time reset link sent to the account's own
    inbox (POST /auth/forgot-password). Same answer whether or not the account
    exists. Route: /forgot-password */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 
@@ -10,6 +10,12 @@ export default function ForgotPassword() {
   const [email, setEmail] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
+  const restland = params.get('brand') === 'restland'
+  useEffect(() => {
+    if (!restland) return
+    document.title = 'Reset your password | Restland BookIT'
+    document.querySelectorAll("link[rel~='icon']").forEach(l => { l.href = '/restland/favicon.svg' })
+  }, [restland])
   const submit = async e => {
     e.preventDefault()
     setBusy(true)
@@ -23,6 +29,7 @@ export default function ForgotPassword() {
                   font: '15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', color: '#0f1b2a' }}>
       <form onSubmit={submit} style={{ background: '#fff', border: '1px solid #e2e8ef', borderRadius: 16, padding: 24,
                                        width: '100%', maxWidth: 400 }}>
+        {restland && <p style={{ margin: '0 0 12px', color: '#16382d' }}><strong style={{ font: '24px Georgia, serif' }}>Restland</strong> <b style={{ color: '#285741' }}>BookIT</b></p>}
         <h1 style={{ margin: '0 0 6px', fontSize: 22 }}>Reset your password</h1>
         <p style={{ margin: '0 0 16px', color: '#5b6878' }}>Enter your sign-in email. We'll send a one-time link to that inbox.</p>
         {msg ? <p role="status" style={{ background: '#eef8f1', padding: 12, borderRadius: 10 }}>{msg}</p> : <>
@@ -33,7 +40,7 @@ export default function ForgotPassword() {
                                            color: '#fff', fontWeight: 700, fontSize: 15 }}>{busy ? 'Sending…' : 'Send reset link'}</button>
         </>}
         {/* A VOLT applicant arrives with next=/volt/sign-in: that is their sign-in. */}
-        <p style={{ margin: '16px 0 0', textAlign: 'center' }}><a href={(params.get('next') || '').startsWith('/volt/') ? params.get('next') : '/login'}>Back to sign in</a></p>
+        <p style={{ margin: '16px 0 0', textAlign: 'center' }}><a href={restland ? '/restland' : (params.get('next') || '').startsWith('/volt/') ? params.get('next') : '/login'}>Back to sign in</a></p>
       </form>
     </div>
   )

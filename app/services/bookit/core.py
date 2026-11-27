@@ -72,8 +72,30 @@ class Who:
 OWNER_LOGINS = ("platform@evosyspro.live", "simmonsmj242@gmail.com", "michael.simmons@nsmg.com")
 
 
+def preview_emails(prog) -> list:
+    """The owner's logins plus anyone the owner added (e.g. his co-CEO, Nov 27)."""
+    extra = [e.lower() for e in (cfg(prog).get("preview_emails") or []) if e]
+    return list(dict.fromkeys([e.lower() for e in OWNER_LOGINS] + extra))
+
+
+def set_preview_emails(db: Session, prog, w, emails) -> Dict[str, Any]:
+    import re as _re
+    clean = []
+    for e in emails:
+        e = str(e or "").strip().lower()
+        if e and _re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", e) and e not in [o.lower() for o in OWNER_LOGINS]:
+            clean.append(e)
+    c = cfg(prog)
+    before = c.get("preview_emails") or []
+    c["preview_emails"] = list(dict.fromkeys(clean))
+    save_cfg(db, prog, c)
+    audit(db, prog.organization_id, w, "bookit", prog.id, "preview_access", "emails",
+          ",".join(before), ",".join(c["preview_emails"]))
+    return {"emails": preview_emails(prog)}
+
+
 def previewer(prog, user) -> bool:
-    emails = [e.lower() for e in (cfg(prog).get("preview_emails") or OWNER_LOGINS)]
+    emails = preview_emails(prog)
     return (getattr(user, "role", None) == "god_admin"
             or (getattr(user, "email", "") or "").lower() in emails)
 

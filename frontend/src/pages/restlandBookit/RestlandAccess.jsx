@@ -42,6 +42,8 @@ export default function RestlandAccess({ ctx }) {
   const [q, setQ] = useState(null)
   const [err, setErr] = useState(false)
   useRestlandBrand('Program Access | Restland')
+  // This device signs in on Restland's own page from now on (and after sign-out).
+  useEffect(() => { try { localStorage.setItem('af_login_brand', 'restland') } catch { /* ignore */ } }, [])
 
   useEffect(() => {
     if (!card) return
@@ -65,7 +67,7 @@ export default function RestlandAccess({ ctx }) {
         <div className="rla-account">
           <div className="rla-avatar" aria-hidden="true">{initials}</div>
           <div><strong>{name || 'Restland staff'}</strong><span>Advisor</span></div>
-          <a href="/login" onClick={async e => { e.preventDefault(); await logout(); navigate('/login') }}>Sign out</a>
+          <a href="/restland" onClick={async e => { e.preventDefault(); await logout(); navigate('/restland') }}>Sign out</a>
         </div>
       </aside>
       <main className="rla-main">

@@ -41,6 +41,14 @@ export default function Activate() {
   const [params] = useSearchParams()
   const nav = useNavigate()
   const token = params.get('token') || ''
+  // Restland BookIT staff (owner, Nov 27): Restland's name and icon, never the platform's.
+  const restland = params.get('brand') === 'restland'
+  useEffect(() => {
+    if (!restland) return
+    document.title = 'Set your password | Restland BookIT'
+    document.querySelectorAll("link[rel~='icon']").forEach(l => { l.href = '/restland/favicon.svg' })
+    try { localStorage.setItem('af_login_brand', 'restland') } catch { /* ignore */ }
+  }, [restland])
   const nextAfter = (() => { const n = params.get('next') || ''; return n.startsWith('/') && !n.startsWith('//') ? n : '' })()
   const [invite, setInvite] = useState(null)
   const [err, setErr] = useState('')
@@ -72,11 +80,11 @@ export default function Activate() {
   if (done) {
     return (
       <div className="act-scope">
-        <div className="act-card">
+        <div className="act-card">{restland && <div className="act-restland"><strong>Restland</strong> <span>BookIT</span></div>}
           <h1>You're all set</h1>
           <div className="act-note ok">Your password is saved. You can sign in now.</div>
           {/* A VOLT applicant's reset link carries next=/volt/sign-in: that page IS the sign-in. */}
-          <button className="act-btn" onClick={() => nav(nextAfter.startsWith('/volt/') ? nextAfter : (nextAfter ? '/login?next=' + encodeURIComponent(nextAfter) : '/login'))}>Go to sign in</button>
+          <button className="act-btn" onClick={() => restland ? nav('/restland') : nav(nextAfter.startsWith('/volt/') ? nextAfter : (nextAfter ? '/login?next=' + encodeURIComponent(nextAfter) : '/login'))}>Go to sign in</button>
         </div>
       </div>
     )
@@ -85,7 +93,7 @@ export default function Activate() {
   if (err && !invite) {
     return (
       <div className="act-scope">
-        <div className="act-card">
+        <div className="act-card">{restland && <div className="act-restland"><strong>Restland</strong> <span>BookIT</span></div>}
           <h1>This link isn't usable</h1>
           <div className="act-note err">{err}</div>
           <p className="act-quiet">
@@ -100,7 +108,7 @@ export default function Activate() {
   if (!invite) {
     return (
       <div className="act-scope">
-        <div className="act-card">
+        <div className="act-card">{restland && <div className="act-restland"><strong>Restland</strong> <span>BookIT</span></div>}
           <h1>Checking your link…</h1>
           <p className="act-quiet">One moment.</p>
         </div>
@@ -110,10 +118,15 @@ export default function Activate() {
 
   return (
     <div className="act-scope">
-      <div className="act-card">
+      <div className="act-card">{restland && <div className="act-restland"><strong>Restland</strong> <span>BookIT</span></div>}
         <h1>Set your password</h1>
         <p className="lede">
-          {invite.purpose === 'reset' ? (
+          {restland && invite.purpose !== 'reset' ? (
+            <>Welcome, {invite.full_name}. Your <strong>Restland BookIT</strong> login is ready. Choose a
+              password — nobody else will ever see it.</>
+          ) : restland ? (
+            <>Welcome back, {invite.full_name}. Choose a new password for <strong>Restland BookIT</strong>.</>
+          ) : invite.purpose === 'reset' ? (
             <>Welcome back, {invite.full_name}. Choose a new password for your{' '}
               <strong>{invite.workspace || invite.organization_name}</strong> access.</>
           ) : invite.service_portal ? (

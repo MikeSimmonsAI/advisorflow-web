@@ -282,7 +282,9 @@ export function Appointments() {
   const [w] = useData(R + '/work')
   const [st, set] = useStored('bk_appts', { view: 'upcoming', status: '', kind: '', who: '', q: '', page: 0 })
   const [panel, setPanel] = useState(() => openParam())
-  const bar = <Toolbar><div className="bk-seg">{APPT_VIEWS.map(([k, l]) => <button key={k} className={st.view === k ? 'on' : ''} onClick={() => set({ view: k, page: 0 })}>{l}</button>)}</div></Toolbar>
+  const [booking, setBooking] = useState(false)
+  const bar = <Toolbar><div className="bk-seg">{APPT_VIEWS.map(([k, l]) => <button key={k} className={st.view === k ? 'on' : ''} onClick={() => set({ view: k, page: 0 })}>{l}</button>)}</div>
+    {!me.me.view_only && <button className="bk-btn pri" onClick={() => setBooking(true)}>+ Book appointment</button>}</Toolbar>
   if (!w) return <>{bar}<div className="bk-card"><Skeleton rows={8} /></div></>
   const t = today()
   const inView = {
@@ -306,6 +308,7 @@ export function Appointments() {
           : <ApptTable rows={rows.slice(page * APPT_PAGE, page * APPT_PAGE + APPT_PAGE)} showWho={me.me.manager} onOpen={setPanel} />}
         <Pager page={page} size={APPT_PAGE} total={rows.length} set={n => set({ page: n })} /></section>
       {panel && <AppointmentPanel id={panel} onClose={() => setPanel(null)} />}
+      {booking && <NewAppointment onClose={() => setBooking(false)} />}
     </div>
   )
 }
@@ -315,6 +318,7 @@ export function Calendar() {
   const [w] = useData(R + '/work')
   const [st, set] = useStored('bk_calendar', { week: 0, kind: '', who: '', q: '', cancelled: false })
   const [panel, setPanel] = useState(() => openParam())
+  const [booking, setBooking] = useState(false)
   const days = weekDays(st.week)
   const t = today()
   const bar = (
@@ -322,6 +326,7 @@ export function Calendar() {
       <div className="bk-seg"><button onClick={() => set({ week: st.week - 1 })}>‹ Previous</button>
         <button className={st.week === 0 ? 'on' : ''} onClick={() => set({ week: 0 })}>This week</button>
         <button onClick={() => set({ week: st.week + 1 })}>Next ›</button></div>
+      {!me.me.view_only && <button className="bk-btn pri" onClick={() => setBooking(true)}>+ Book appointment</button>}
     </Toolbar>)
   if (!w) return <>{bar}<div className="bk-card"><Skeleton rows={8} /></div></>
   const rows = w.appointments.filter(a => days.includes(a.date) && (st.cancelled || !String(a.outcome || a.status).startsWith('Cancel')) && apptMatch(st)(a))
@@ -347,6 +352,7 @@ export function Calendar() {
           </section>)
       })}</div>
       {panel && <AppointmentPanel id={panel} onClose={() => setPanel(null)} />}
+      {booking && <NewAppointment onClose={() => setBooking(false)} />}
     </div>
   )
 }
@@ -401,6 +407,78 @@ export function AppointmentPanel({ id, onClose, startClose }) {
 // Reschedule / cancel - the same server path as the command center (open-time
 // check, calendar move, the family's confirmation). Success is shown only after
 // the server confirms it.
+// Book a new appointment (owner, Nov 27): a family the caller may work, a time
+// that is open on the real calendar, how it happens. "Booked" is shown only
+// after the server confirms the calendar booked it; a repeat of the same
+// family and time returns the same booking, never a second one.
+export function NewAppointment({ leadId, onClose }) {
+  const { me, say, refresh } = useBk()
+  const [w] = useData(R + '/work')
+  const [q, setQ] = useState('')
+  const [v, setV] = useState({ lead_id: leadId || '', date: '', time: '', how: 'At Restland', address: '', notify: true })
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState(null)
+  const fams = useMemo(() => {
+    const m = new Map()
+    for (const x of [...(w?.follow_ups || []), ...(w?.appointments || [])]) if (x.lead_id && !m.has(x.lead_id)) m.set(x.lead_id, x)
+    return [...m.values()].sort((x, y) => String(x.family).localeCompare(String(y.family)))
+  }, [w])
+  const picked = fams.find(f => f.lead_id === v.lead_id)
+  const s = q.trim().toLowerCase()
+  const hits = s.length < 2 ? [] : fams.filter(f => [f.family, f.phone, f.email].some(x => (x || '').toLowerCase().includes(s))).slice(0, 8)
+  if (me.me.view_only) return <Panel title="Book an appointment" onClose={onClose}><Empty>Read-only preview: booking is turned off here.</Empty></Panel>
+  const book = async () => {
+    if (!v.lead_id) { say('Pick the family.', true); return }
+    if (!v.date || !v.time) { say('Pick the date and the time.', true); return }
+    if (v.how === 'At Their Home' && !v.address.trim()) { say('A visit at their home needs the full home address.', true); return }
+    setBusy(true)
+    const r = await send(() => api.post(R + '/appointments/new', { data: { lead_id: v.lead_id, slot: v.date + 'T' + v.time, how: v.how, address: v.address, notify: v.notify } }), say)
+    setBusy(false)
+    if (r && r.booked) { setDone(r); refresh() }
+  }
+  if (done) {
+    const when = fmtDate(done.slot.slice(0, 10)) + ' at ' + fmtTime(done.slot.slice(11, 16)) + ' CT'
+    return (
+      <Panel title="Booked" sub={picked ? picked.family : ''} onClose={onClose} foot={<button className="bk-btn pri" onClick={onClose}>Done</button>}>
+        <div className="bk-card"><p className="bk-line"><strong>{done.already ? 'Already booked for ' + when + '.' : 'Booked for ' + when + '.'}</strong></p>
+          <p className="muted">{done.simulated ? 'Test family: checked against the calendar, nothing was sent.'
+            : done.already ? 'Nothing new was sent.' : done.family_notified ? 'The calendar confirmed it and the family gets the usual confirmation.' : 'The calendar confirmed it. No confirmation was sent to the family.'}</p>
+          <p className="faint">It shows on Appointments and Calendar now; the advisor is set on the board's next pass (about 2 minutes).</p></div>
+      </Panel>)
+  }
+  return (
+    <Panel title="Book an appointment" sub="Central time · checked against the real calendar" onClose={onClose}
+      foot={<><button className="bk-btn" onClick={onClose}>Cancel</button>
+        <button className="bk-btn pri" onClick={book} disabled={busy}>{busy ? 'Booking…' : 'Book appointment'}</button></>}>
+      <div className="bk-card">
+        <div className="bk-field gold"><label>Family</label>
+          {picked ? <div className="bk-line flat"><strong>{picked.family}</strong>{!leadId && <button className="bk-btn sm" onClick={() => setV({ ...v, lead_id: '' })}>Change</button>}</div>
+            : <><input placeholder="Search by name, phone or email" value={q} onChange={e => setQ(e.target.value)} autoFocus />
+              {hits.length > 0 && <div className="bk-list">{hits.map(f => <button key={f.lead_id} className="bk-row" onClick={() => { setV({ ...v, lead_id: f.lead_id }); setQ('') }}>
+                <div><div className="t">{f.family}</div><div className="d">{f.phone || f.email || ''}{me.me.manager && f.assigned ? ' · ' + f.assigned : ''}</div></div></button>)}</div>}
+              {s.length >= 2 && hits.length === 0 && <p className="faint">No family of yours matches.</p>}</>}
+        </div>
+        <div className="bk-grid g2">
+          <div className="bk-field gold"><label>Date</label><input type="date" min={today()} value={v.date} onChange={e => setV({ ...v, date: e.target.value })} /></div>
+          <div className="bk-field gold"><label>Time (CT)</label><select value={v.time} onChange={e => setV({ ...v, time: e.target.value })}><option value="" />
+            {me.choices.times.map(t => <option key={t} value={to24(t)}>{t}</option>)}</select></div>
+        </div>
+        <div className="bk-field gold"><label>How</label><select value={v.how} onChange={e => setV({ ...v, how: e.target.value })}>{me.choices.how.map(t => <option key={t}>{t}</option>)}</select></div>
+        {v.how === 'At Their Home' && <div className="bk-field gold"><label>Home address</label><input value={v.address} placeholder="Street, city, state, ZIP" onChange={e => setV({ ...v, address: e.target.value })} /></div>}
+        <label className="bk-check"><input type="checkbox" checked={v.notify} onChange={e => setV({ ...v, notify: e.target.checked })} /> Send the family the usual confirmation</label>
+      </div>
+    </Panel>
+  )
+}
+// "10:00 AM" -> "10:00"
+function to24(t) {
+  const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(String(t).trim())
+  if (!m) return t
+  let h = Number(m[1]) % 12
+  if (m[3].toUpperCase() === 'PM') h += 12
+  return String(h).padStart(2, '0') + ':' + m[2]
+}
+
 function MoveAppointment({ id, a, onDone, onCancel }) {
   const { say } = useBk()
   const [slot, setSlot] = useState((a.date || today()) + 'T' + (a.time || '10:00'))
@@ -968,11 +1046,14 @@ function FamilyPanel({ id, onClose }) {
   const { me, say } = useBk()
   const [d, , setD] = useData(R + '/families/' + encodeURIComponent(id), [id])
   const [tab, setTab] = useState('overview')
+  const [booking, setBooking] = useState(false)
   if (!d) return <Panel title="Family" onClose={onClose}><Skeleton rows={6} /></Panel>
   const f = d.family
   const pw = async (k, val) => { if (await send(() => api.patch(R + '/families/' + id + '/paperwork', { data: { [k]: val } }), say, 'Saved.')) api.get(R + '/families/' + id).then(setD) }
   return (
-    <Panel title={`${f.first_name || ''} ${f.last_name || ''}`} sub={[f.phone, f.email].filter(Boolean).join(' · ')} onClose={onClose}>
+    <Panel title={`${f.first_name || ''} ${f.last_name || ''}`} sub={[f.phone, f.email].filter(Boolean).join(' · ')} onClose={onClose}
+      foot={!me.me.view_only && <button className="bk-btn pri" onClick={() => setBooking(true)}>Book appointment</button>}>
+      {booking && <NewAppointment leadId={id} onClose={() => setBooking(false)} />}
       <div className="bk-seg" style={{ marginBottom: 12 }}>{['overview', 'appointments', 'follow-ups', 'paperwork', 'network', 'sales', 'activity'].map(t =>
         <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{label(t)}</button>)}</div>
       {tab === 'overview' && <div className="bk-card"><dl className="bk-kv"><dt>Address</dt><dd>{[f.street, f.city, f.state, f.zip].filter(Boolean).join(', ') || '—'}</dd>
@@ -1307,7 +1388,24 @@ export function Settings() {
     <div className="bk-card"><h2>Campaign templates</h2>
       <p>File Review 6 Block: <b>{d.campaigns?.evo6?.approved ? 'approved' : 'not approved yet'}</b> · At-Need 6 Block: <b>{d.campaigns?.add?.approved ? 'approved' : 'not approved yet'}</b></p>
       <p className="faint">No contact is enrolled until the matching template is approved. Nothing has been sent from BookIT.</p></div>
-    <TestLogin /><CoachSettings /></div>)
+    <PreviewAccess /><TestLogin /><CoachSettings /></div>)
+}
+
+// Who may open BookIT before it is opened to the team (owner, Nov 27: his
+// co-CEO gets the owner/manager side). Only the owner's logins see this.
+function PreviewAccess() {
+  const { say } = useBk()
+  const [d, , setD] = useData(R + '/preview-access')
+  const [add, setAdd] = useState('')
+  if (!d) return null
+  const extra = d.emails.filter(e => !d.fixed.map(x => x.toLowerCase()).includes(e))
+  const save = async list => { const r = await send(() => api.put(R + '/preview-access', { data: { emails: list } }), say, 'Saved.'); if (r) { setD({ ...d, emails: r.emails }); setAdd('') } }
+  return (<div className="bk-card"><h2>Who can open BookIT now</h2>
+    <p className="faint">{d.live ? 'BookIT is open to the team.' : 'Before BookIT is opened to the team, only these logins get in (with the management side, if they manage Restland).'}</p>
+    <ul>{d.fixed.map(e => <li key={e}>{e} <span className="faint">· owner</span></li>)}
+      {extra.map(e => <li key={e}>{e} <button className="bk-btn sm" onClick={() => save(extra.filter(x => x !== e))}>Remove</button></li>)}</ul>
+    <div className="bk-actions"><input placeholder="Add a login email" value={add} onChange={e => setAdd(e.target.value)} />
+      <button className="bk-btn" disabled={!add.trim()} onClick={() => save([...extra, add.trim()])}>Add</button></div></div>)
 }
 
 function TestLogin() {
