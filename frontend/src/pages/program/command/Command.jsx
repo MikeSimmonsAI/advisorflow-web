@@ -190,6 +190,16 @@ export default function Command() {
       if (wide && tab === 'inbox') { setInboxSel(item.lead_id); setLastFamily(item.lead_id) } else openFamily(item.lead_id)
       return
     }
+    if (a === 'wrong_number') {
+      // Owner, Nov 27: the number is wrong, not the family - texts stop, emails continue.
+      try {
+        const r = await api.post('/program/command/wrong-number', { lead_id: item.lead_id })
+        setToast(r.emails === 'continue' ? `Texts to ${item.name}'s number stopped. Their emails continue.`
+          : `Texts to ${item.name}'s number stopped. There's no usable email on file.`)
+        load()
+      } catch (e) { setToast(e.message || 'Could not update.') }
+      return
+    }
     const state = a === 'close' || a === 'dismiss' ? 'closed' : 'opened'
     try {
       await api.post(`/program/responses/${item.response_id}/mark`, { state })
@@ -536,6 +546,7 @@ function SectionHead({ title, onAll }) {
 const ACT = {
   reply: ['reply', 'Reply', true], call: ['call', 'Call'], schedule: ['cal', 'Schedule'], note: ['note', 'Note'],
   close: ['check', 'Close'], snooze: ['clock', 'Mark opened'], review: ['note', 'Review', true], dismiss: ['x', 'Dismiss'],
+  wrong_number: ['x', 'Wrong number - email only'],
 }
 
 function Inbox({ items, act, open, empty, selected }) {
@@ -828,6 +839,15 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
       load()
     } catch (e) { toast(e.message || 'Could not update the task.') }
   }
+  const wrongNumber = async undo => {
+    setBusy(true)
+    try {
+      const r = await api.post('/program/command/wrong-number', { lead_id: id, undo: !!undo })
+      toast(undo ? `Texting ${f.name} is allowed again.` : r.emails === 'continue'
+        ? `Texts to ${f.name}'s number stopped. Their emails continue.` : `Texts stopped. No usable email on file.`)
+      load()
+    } catch (e) { toast(e.message || 'Could not update.') } finally { setBusy(false) }
+  }
   const markDnc = async () => {
     setBusy(true)
     try {
@@ -882,6 +902,11 @@ function Family({ id, view: view0, startReply, onBack, toast, toastText, embedde
         <button className="primary" onClick={() => focusComposer(replyMode())}><Icon n="reply" s={22} />Reply</button>
         <button onClick={() => schedRef.current?.scrollIntoView({ behavior: 'smooth' })}><Icon n="cal" s={22} />Schedule Visit</button>
         <button onClick={() => focusComposer('note')}><Icon n="note" s={22} />Add Note</button>
+        {!f.is_demo && f.phone && !f.handling?.opted_out && (f.phone_wrong
+          ? <button className="cmd-dnc-quick on" disabled={busy} title="Texts to this number are stopped; emails continue. Tap to allow texts again."
+                    onClick={() => wrongNumber(true)}>WRONG NUMBER · EMAIL ONLY (undo)</button>
+          : <button className="cmd-dnc-quick" disabled={busy} title="Stop texting this number and keep emailing them"
+                    onClick={() => wrongNumber(false)}>WRONG NUMBER</button>)}
         {!f.is_demo && (f.handling?.opted_out
           ? <span className="cmd-dnc-quick on" role="status">ON DO NOT CONTACT</span>
           : <button className="cmd-dnc-quick" aria-expanded={dncAsk !== null}

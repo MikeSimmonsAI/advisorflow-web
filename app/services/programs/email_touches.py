@@ -769,6 +769,12 @@ def plan(db: Session, prog: OutreachProgram, now: Optional[datetime] = None,
             # #507: an automatic reply is not the family answering.
             from app.services.programs import rotation as _rot
             _replied = bool(_rot.genuine_repliers(db, org_id, [lead_id]))
+        if _replied:
+            # A text saying the number is wrong is not the family answering
+            # either: their emails carry on (owner, Nov 27).
+            from app.services.programs import wrong_contact as _wc
+            if _wc.is_wrong_number_only(db, lead):
+                _replied = False
         out.append({"lead": lead, "record": master, "family": fam, "touch": touch,
                     "existing": mine.get(touch), "replied": _replied,
                     "skip": _skip_reason(db, lead, _replied, prog) if with_skip else None})

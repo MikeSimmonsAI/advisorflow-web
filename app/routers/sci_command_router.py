@@ -165,7 +165,7 @@ def _actions(r, conv) -> list:
     if r.response_class == "auto_reply":
         return ["review", "dismiss"]
     if r.response_class in ("bad_data", "wrong_person"):
-        return ["reply", "note", "close"]
+        return ["wrong_number", "reply", "note", "close"]
     if r.response_class == "low":
         return ["reply", "snooze", "call"]
     return ["reply", "call", "schedule"]
@@ -784,6 +784,8 @@ def command_family(lead_id: str, history_n: int = Query(40, ge=1, le=500, alias=
         "team": team,
         "status": latest.handling_status if latest else None,
         "badge": _badge(latest, conv, bool(_upcoming_booked(db, [lead.id]))) if latest else None,
+        # Owner, Nov 27: texts to this number stopped (wrong number), emails continue.
+        "phone_wrong": (lead.contact_channel or "") == "email_only" and (lead.phone_line_type or "") == "invalid",
         "human_handoff": _human_handoff(latest, conv),
         "handoff_reason": conv.handoff_reason if conv is not None and _human_handoff(latest, conv) else None,
         # The family message that needs the person (the handoff's trigger).
@@ -1233,6 +1235,39 @@ def command_do_not_contact(body: DncIn, db: Session = Depends(get_db), user: Use
     if lead is None:
         raise HTTPException(status_code=404, detail="Family not found.")
     return dnc.mark_do_not_contact(db, lead, user, body.reason)
+
+
+class WrongNumberIn(BaseModel):
+    lead_id: str
+    undo: bool = False
+
+
+@router.post("/wrong-number")
+def command_wrong_number(body: WrongNumberIn, db: Session = Depends(get_db),
+                         user: User = Depends(require_tenant_user)):
+    """The phone number is wrong, the family isn't (owner, Nov 27): texts to
+    that number stop, their emails continue. undo=True allows texting again.
+    Sends nothing."""
+    from app.services.programs import wrong_contact
+    prog = _program(db, user, managers_only=False)
+    lead = db.query(Lead).filter(Lead.id == body.lead_id, Lead.organization_id == prog.organization_id).first()
+    if lead is None:
+        raise HTTPException(status_code=404, detail="Family not found.")
+    out = wrong_contact.mark_wrong_number(db, prog, lead, by=user.full_name or user.email, undo=body.undo)
+    if not body.undo:
+        from app.models.program_models import ProgramResponse
+        for r in db.query(ProgramResponse).filter(ProgramResponse.organization_id == prog.organization_id,
+                                                  ProgramResponse.lead_id == lead.id,
+                                                  ProgramResponse.response_class.in_(("bad_data", "wrong_person")),
+                                                  ProgramResponse.handling_status != "closed").all():
+            r.handling_status = "closed"
+        from app.services.programs import ai_setter
+        conv = ai_setter.conversation_for(db, lead)
+        if conv is not None and conv.state == "human" and (conv.handoff_reason or "").startswith("wrong person"):
+            conv.state = "waiting"
+            conv.next_followup_at = None
+    db.commit()
+    return out
 
 
 @router.post("/dnc/clear")
