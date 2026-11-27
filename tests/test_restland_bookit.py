@@ -553,3 +553,116 @@ def test_management_can_hold_someone_out_of_the_rotation(setter, sample_advisor)
     row = db.query(R).filter_by(organization_id=org.id, row_id=b3.id).one()
     assert row.assigned_to == "Bob"                               # Ann is held out; her own work stays hers
     assert db.query(R).filter_by(organization_id=org.id, row_id=mine.id).one().assigned_to == "Ann"
+
+
+# ── Revision SS1-SS6 (owner, Nov 26) ─────────────────────────────────────────
+
+def _fu_case(setter, sample_advisor, text="call me please"):
+    """A real family message -> an open follow-up assigned to Ann."""
+    from tests.test_restland_handoff_2026_11_22 import _fu
+    from tests.test_sci_appointment_setter import _Fake, _d, _run
+    db, org = setter["db"], setter["org"]
+    prog = _prog(setter)
+    lead = _lead_for(db, org, sample_advisor, "L003", phone="2145550103", first="Ivy")
+    _, conv = _run(db, lead, text, _Fake([_d("callback", "Sure, I'll call you.", callback_window="today")]))
+    sheet = _board([("Ann", "TRUE")])
+    fus = [_fu("FU-" + conv.id)]
+    _run_team(db, prog, sheet, [], fus, NOW)
+    return db, org, prog, lead, conv
+
+
+def test_follow_up_shows_its_real_last_activity_and_new_reply(setter, sample_advisor):
+    from app.services.programs import team_board as TB
+    db, org, prog, lead, conv = _fu_case(setter, sample_advisor)
+    f = [x for x in TB.work(db, prog)["follow_ups"] if x["id"] == "FU-" + conv.id][0]
+    assert f["activity"]["kind"] == "Customer replied" and f["activity"]["at"]
+    assert f["new_reply"] is True and f["replied_at"] is None
+    first = f["activity"]["at"]
+    # loading again never makes it look newer
+    again = [x for x in TB.work(db, prog)["follow_ups"] if x["id"] == "FU-" + conv.id][0]
+    assert again["activity"]["at"] == first
+    # a person replies by text: the reply is logged with its time and channel; the family's message stays
+    from app.models.models import Message
+    from app.services import send_source as SS
+    db.add(Message(lead_id=lead.id, sender_id=sample_advisor.id, body="Calling you at 3.",
+                   send_source=SS.MANUAL, sent_at=datetime.utcnow() + timedelta(minutes=5), delivery_status="delivered"))
+    db.commit()
+    f = [x for x in TB.work(db, prog)["follow_ups"] if x["id"] == "FU-" + conv.id][0]
+    assert f["new_reply"] is False and f["replied_by"] == "text" and f["replied_at"]
+    assert f["activity"]["kind"] == "Advisor replied by text" and f["family_at"]
+
+
+def test_a_family_message_alerts_the_assigned_advisor_once_and_reading_does_not_close_it(setter, sample_advisor):
+    from app.services.bookit import alerts
+    db, org, prog, lead, conv = _fu_case(setter, sample_advisor)
+    _live(db, prog)
+    assert alerts.sweep(db, prog, force=True) == 1
+    assert alerts.sweep(db, prog, force=True) == 0                     # retries never duplicate
+    n = db.query(BookitNotification).filter_by(organization_id=org.id, kind="family_reply").one()
+    assert n.recipient == "Ann" and n.ref_type == "follow_up" and n.ref_id == "FU-" + conv.id
+    db.query(ProgramTeamMember).filter_by(organization_id=org.id, name="Ann").one().user_id = "u-ann"
+    db.commit()
+    ann = core.who(db, prog, _U("u-ann"), manager=False)
+    assert [x["id"] for x in core.notifications(db, org.id, ann, unread_only=True)] == [n.id]
+    core.mark_read(db, org.id, ann, [n.id])
+    db.commit()
+    db.refresh(conv)
+    assert conv.state == "callback_requested"                          # reading the alert is not completing it
+    # our own outgoing message never alerts
+    from app.models.models import Message
+    db.add(Message(lead_id=lead.id, sender_id=sample_advisor.id, body="Thanks!",
+                   sent_at=datetime.utcnow(), delivery_status="delivered"))
+    db.commit()
+    assert alerts.sweep(db, prog, force=True) == 0
+
+
+def test_6_block_view_and_start_never_create_from_a_read_only_view(setter, sample_advisor):
+    db, org, prog, sheet, appts, mine, other = _team(setter, sample_advisor)
+    _live(db, prog)
+    mine.status = "completed"                                         # the file review happened (Showed)
+    db.commit()
+    ann = core.who(db, prog, _U("u-ann"), manager=False)
+    r = network.reviews(db, prog, ann)
+    row = [x for x in r["reviews"] if x["appointment_id"] == mine.id][0]
+    assert row["network"] is None and row["can_start"] is True and r["totals"]["networks"] == 0
+    assert db.query(BookitReferralBatch).count() == 0                  # listing creates nothing
+    # the read-only preview sees it, may not start it
+    ro = core.Who(_U("u-ann"), False, "Ann", ann.member_id, view_only=True)
+    assert [x for x in network.reviews(db, prog, ro)["reviews"] if x["appointment_id"] == mine.id][0]["can_start"] is False
+    assert db.query(BookitReferralBatch).count() == 0
+    # a manager starting it files it under the advisor who did the review; Ann opens it
+    boss = core.who(db, prog, _U("owner"), manager=True)
+    b = network.create_batch(db, prog, boss, {"idempotency_key": "m-1", "origin_lead_id": mine.lead_id,
+                                              "source_appointment_id": mine.id})
+    db.commit()
+    assert b["submitting_advisor"] == "Ann"
+    assert network._batch(db, prog, ann, b["id"]).id == b["id"]
+    # retries and a second Start reuse the same network
+    again = network.create_batch(db, prog, ann, {"idempotency_key": "a-2", "origin_lead_id": mine.lead_id,
+                                                 "source_appointment_id": mine.id})
+    assert again["id"] == b["id"] and db.query(BookitReferralBatch).count() == 1
+    row = [x for x in network.reviews(db, prog, ann)["reviews"] if x["appointment_id"] == mine.id][0]
+    assert row["network"]["id"] == b["id"] and row["can_start"] is False
+    # Bob can't start a network on Ann's review
+    bob = core.who(db, prog, _U("u-bob"), manager=False)
+    with pytest.raises(core.BookitError):
+        network.create_batch(db, prog, bob, {"idempotency_key": "b-1", "origin_lead_id": mine.lead_id,
+                                             "source_appointment_id": other.id if False else mine.id})
+
+
+def test_a_network_started_from_the_owner_account_belongs_to_the_reviews_advisor(setter, sample_advisor):
+    """Nov 26: one network was started from the owner's account before the fix
+    and filed under the owner's name - the review's advisor must still see it."""
+    db, org, prog, sheet, appts, mine, other = _team(setter, sample_advisor)
+    _live(db, prog)
+    mine.status = "completed"
+    db.add(BookitReferralBatch(organization_id=org.id, idempotency_key="old-1", kind="evo6", origin_lead_id=mine.lead_id,
+                               source_appointment_id=mine.id, submitting_advisor="EvoSys Platform User"))
+    db.commit()
+    ann = core.who(db, prog, _U("u-ann"), manager=False)
+    bob = core.who(db, prog, _U("u-bob"), manager=False)
+    row = [x for x in network.reviews(db, prog, ann)["reviews"] if x["appointment_id"] == mine.id][0]
+    assert row["network"] and network._batch(db, prog, ann, row["network"]["id"])
+    assert len(network.batches(db, prog, ann, "evo6")) == 1
+    with pytest.raises(core.BookitError):
+        network._batch(db, prog, bob, row["network"]["id"])

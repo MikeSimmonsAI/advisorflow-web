@@ -153,7 +153,7 @@ export function Network({ batch, onPick, onAdd }) {
         return (
           <g key={'n' + i} className={'node ' + color} tabIndex="0" role="button"
              aria-label={c ? `${c.first_name || ''} ${c.last_name || ''}, ${c.relationship || ''}, ${state}` : 'Add a contact'}
-             onClick={() => (c ? onPick(c) : onAdd())} onKeyDown={e => { if (e.key === 'Enter') (c ? onPick(c) : onAdd()) }}>
+             onClick={() => (c ? onPick(c) : onAdd && onAdd())} onKeyDown={e => { if (e.key === 'Enter') (c ? onPick(c) : onAdd && onAdd()) }}>
             <circle cx={x} cy={y} r="30" />
             <text x={x} y={y - 2}>{c ? ((c.first_name || '') + ' ' + (c.last_name || '').slice(0, 1)).trim().slice(0, 12) : '+'}</text>
             <text className="sub" x={x} y={y + 12}>{c ? (c.relationship || '').slice(0, 12) : ''}</text>

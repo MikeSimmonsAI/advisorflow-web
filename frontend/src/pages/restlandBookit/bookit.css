@@ -303,3 +303,32 @@
   .bk-compact td[data-l]::before { content: attr(data-l); flex: 0 0 92px; color: var(--muted, #6b7a72); font-size: 12px; font-weight: 600; }
   .bk-compact td.act { padding-top: 6px; }
 }
+
+/* ── Revision SS1–SS6 (owner, Nov 26) ─────────────────────────────────────── */
+.bk-compact .sub { color: var(--ink3); font-size: 12.5px; margin-top: 2px; overflow-wrap: anywhere; }
+.bk-compact tr.unread td:first-child { box-shadow: inset 3px 0 0 #B4572E; }
+.bk-newdot { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 99px; background: #B4572E; color: #fff; font-size: 11px; font-weight: 700; vertical-align: 1px; }
+/* urgency gauge: three bars + the word, so color is never the only signal */
+.bk-urg { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px; white-space: nowrap; }
+.bk-urg small { font-weight: 500; color: var(--ink3); font-size: 12px; }
+.bk-urg .bars { display: inline-flex; gap: 2px; align-items: flex-end; }
+.bk-urg .bars i { width: 5px; border-radius: 2px; background: #DDE4DD; }
+.bk-urg .bars i:nth-child(1) { height: 7px; } .bk-urg .bars i:nth-child(2) { height: 10px; } .bk-urg .bars i:nth-child(3) { height: 13px; }
+.bk-urg.hot { color: #A63A22; } .bk-urg.hot .bars i { background: #C8472B; }
+.bk-urg.warm { color: #8A5A00; } .bk-urg.warm .bars i:nth-child(-n+2) { background: #D99A1E; }
+.bk-urg.cool { color: #2F5F86; } .bk-urg.cool .bars i:nth-child(1) { background: #4D86B5; }
+/* sticky filters + column headings on the follow-up queue */
+.bk-sticky { position: sticky; top: 70px; z-index: 6; background: var(--bg, #F4F6F1); padding: 6px 0 8px; margin-bottom: 6px; }
+.bk-seg.wrap { flex-wrap: wrap; }
+.bk-seg .n { margin-left: 6px; font-size: 11.5px; opacity: .75; }
+@media (min-width: 761px) {
+  .bk-scroll:has(> .bk-futable) { overflow: visible; }
+  .bk-futable thead th { position: sticky; top: 118px; z-index: 5; }
+}
+.bk-pager .bk-btn[disabled] { opacity: .45; cursor: default; }
+.bk-note { background: #FFF7E3; border: 1px solid #EBD9A6; border-radius: 10px; padding: 8px 12px; margin: 0 0 12px; font-size: 13.5px; }
+.bk-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13.5px; }
+@media (max-width: 760px) {
+  .bk-compact .sec { display: none !important; }
+  .bk-sticky { top: 0; }
+}

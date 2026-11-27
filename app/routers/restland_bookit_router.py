@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.deps import get_db, require_tenant_user
 from app.models.models import User
 from app.routers.program_router import _program, _sees_program
-from app.services.bookit import core, insights, network, sales, workflow
+from app.services.bookit import alerts, core, insights, network, sales, workflow
 from app.services.programs import restland_sheet as RS
 from app.services.programs import team_board as TB
 
@@ -300,6 +300,17 @@ def create_network(body: Body, db: Session = Depends(get_db), user: User = Depen
     return _run(db, network.create_batch, db, prog, w, body.data)
 
 
+@router.get("/networks/reviews")
+def network_reviews(response: Response, db: Session = Depends(get_db), user: User = Depends(require_tenant_user)):
+    """Completed file reviews in scope, each with its network if one exists."""
+    _nostore(response)
+    prog, w = _ctx(db, user)
+    try:
+        return network.reviews(db, prog, w)
+    except core.BookitError as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
+
+
 @router.get("/networks/{batch_id}")
 def get_network(batch_id: str, response: Response, db: Session = Depends(get_db),
                 user: User = Depends(require_tenant_user)):
@@ -390,6 +401,7 @@ def list_notifications(response: Response, unread: bool = False, db: Session = D
                        user: User = Depends(require_tenant_user)):
     _nostore(response)
     prog, w = _ctx(db, user)
+    alerts.safe_sweep(db, prog)             # a family's new incoming message -> the assigned advisor's bell
     return {"notifications": core.notifications(db, prog.organization_id, w, unread)}
 
 
