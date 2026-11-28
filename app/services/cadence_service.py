@@ -337,6 +337,9 @@ def org_sending_enabled(db: Session, organization_id: Optional[str]) -> bool:
     means off. The `cadences` entitlement is still checked per lead as well."""
     if not organization_id:
         return False
+    from app.services import outbound_brake
+    if outbound_brake.campaigns_paused():
+        return False                                     # campaigns resting until CAMPAIGN_PAUSE_UNTIL
     from app.models.program_models import WorkspaceSwitch
     row = (db.query(WorkspaceSwitch)
            .filter(WorkspaceSwitch.organization_id == organization_id).first())
