@@ -100,6 +100,36 @@ def campaigns_paused(now=None) -> bool:
     return now < until
 
 
+RESTORE_ENV = "CAMPAIGN_PAUSE_RESTORE_ORGS"
+
+
+def restore_switches_for_resume(db) -> list:
+    """While a CAMPAIGN_PAUSE_UNTIL pause is running, put the listed
+    workspaces' own switches back the way they were before the day off
+    (texts on, AI replies automatic), so the campaigns simply resume when the
+    pause time passes - nobody has to sign in Monday morning. Does nothing
+    once the pause is over, so a forgotten variable can't fight a later
+    switch-off."""
+    ids = [x.strip() for x in (os.environ.get(RESTORE_ENV) or "").split(",") if x.strip()]
+    if not ids or not campaigns_paused():
+        return []
+    from app.models.program_models import OutreachProgram, WorkspaceSwitch
+    done = []
+    for org in ids:
+        row = db.query(WorkspaceSwitch).filter(WorkspaceSwitch.organization_id == org).first()
+        if row is None:
+            row = WorkspaceSwitch(organization_id=org)
+            db.add(row)
+        row.texts_on = True
+        row.updated_by = "campaign-pause-resume"
+        for prog in db.query(OutreachProgram).filter(OutreachProgram.organization_id == org).all():
+            prog.ai_setter_mode = "auto"
+        done.append(org)
+    db.commit()
+    log.warning("outbound_brake: switches set to resume at %s for %s", campaign_pause_until(), done)
+    return done
+
+
 def engaged() -> bool:
     return (os.environ.get(ENV) or "").strip().lower() in _TRUE
 

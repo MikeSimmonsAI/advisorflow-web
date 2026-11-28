@@ -2611,6 +2611,19 @@ async def on_startup():
     # 1. Create any brand-new tables
     Base.metadata.create_all(bind=engine)
 
+    # 1a. A campaign day off (CAMPAIGN_PAUSE_UNTIL): set the listed workspaces'
+    #     switches to resume on their own when the pause ends.
+    try:
+        from app.deps import SessionLocal as _SL
+        _db = _SL()
+        try:
+            _brake.restore_switches_for_resume(_db)
+        finally:
+            _db.close()
+    except Exception as _exc:                            # noqa: BLE001
+        import logging as _lg
+        _lg.getLogger(__name__).error("campaign pause restore failed: %s", _exc)
+
     # 2. Safe column/enum migrations (idempotent — no-ops if already applied)
     #
     # ══ THIS IS NOW THE BACKSTOP, NOT THE MIGRATION STRATEGY ══════════════
