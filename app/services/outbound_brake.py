@@ -65,6 +65,41 @@ def twilio_timeout() -> float:
         return 20.0
 
 
+PAUSE_ENV = "CAMPAIGN_PAUSE_UNTIL"
+
+
+def campaign_pause_until():
+    """CAMPAIGN_PAUSE_UNTIL (ISO time with offset, e.g. 2026-11-30T08:00:00-06:00):
+    until then, automated CAMPAIGNS rest - cadence texts, campaign emails and
+    AI auto-replies (held as drafts) - while appointment reminders, staff
+    alerts and hand-typed messages keep going. It ends on its own at that
+    time; nobody has to switch anything back on (owner, Nov 28: a day off)."""
+    from datetime import datetime, timezone
+    raw = (os.environ.get(PAUSE_ENV) or "").strip()
+    if not raw:
+        return None
+    try:
+        t = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        log.warning("outbound_brake: %s=%r is not a date-time - ignored", PAUSE_ENV, raw)
+        return None
+    if t.tzinfo is None:
+        from zoneinfo import ZoneInfo
+        t = t.replace(tzinfo=ZoneInfo("America/Chicago"))
+    return t.astimezone(timezone.utc)
+
+
+def campaigns_paused(now=None) -> bool:
+    from datetime import datetime, timezone
+    until = campaign_pause_until()
+    if until is None:
+        return False
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return now < until
+
+
 def engaged() -> bool:
     return (os.environ.get(ENV) or "").strip().lower() in _TRUE
 

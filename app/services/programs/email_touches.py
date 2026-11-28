@@ -84,6 +84,9 @@ def pass_due(now: Optional[datetime] = None, *, key: str = "run",
 
 
 def sending_enabled() -> bool:
+    from app.services import outbound_brake
+    if outbound_brake.campaigns_paused():
+        return False                                     # campaigns resting until CAMPAIGN_PAUSE_UNTIL
     raw = os.environ.get(SENDING_ENV)
     return bool(raw) and raw.strip().lower() in ("1", "true", "yes", "on")
 

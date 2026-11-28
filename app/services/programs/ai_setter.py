@@ -76,6 +76,10 @@ def mode_of(prog) -> str:
     if killed():
         return OFF
     m = (getattr(prog, "ai_setter_mode", None) or OFF).strip().lower()
+    if m == AUTO:
+        from app.services import outbound_brake
+        if outbound_brake.campaigns_paused():
+            return DRAFT                                 # campaigns resting: replies wait as drafts for a person
     return m if m in (OFF, DRAFT, AUTO) else OFF
 
 
